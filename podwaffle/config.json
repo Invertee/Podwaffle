@@ -17,16 +17,11 @@
   "homeassistant_api": false,
   "hassio_api": false,
   "hassio_role": "default",
-  "webui": "[PROTO:ingress]/",
   "panel_icon": "mdi:podcast",
   "panel_title": "Podwaffle",
-  "ports": {
-    "3000/tcp": null
-  },
-  "ports_description": {
-    "3000/tcp": "Podwaffle Web UI"
-  },
-  "map": ["config:rw"],
+  "map": [
+    "config:rw"
+  ],
   "options": {},
   "schema": {}
 }
