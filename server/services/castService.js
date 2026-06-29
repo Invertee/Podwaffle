@@ -14,12 +14,17 @@ const devices = new Map();
 const state = {
   activeDeviceId: null,
   mediaUrl: null,
+  episodeGuid: null,
+  title: null,
+  podcastTitle: null,
+  imageUrl: null,
   position: 0,
   duration: 0,
   volume: 1.0,
   status: 'idle', // idle | playing | paused | connecting | error
   client: null,
-  player: null
+  player: null,
+  statusPoller: null
 };
 
 // ---------------------------------------------------------------------------
@@ -132,10 +137,22 @@ function getDevices() {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+function _clearStatusPoller() {
+  if (state.statusPoller) {
+    clearInterval(state.statusPoller);
+    state.statusPoller = null;
+  }
+}
+
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
+  _clearStatusPoller();
   state.activeDeviceId = null;
   state.mediaUrl = null;
+  state.episodeGuid = null;
+  state.title = null;
+  state.podcastTitle = null;
+  state.imageUrl = null;
   state.position = 0;
   state.duration = 0;
   state.volume = 1.0;
@@ -145,6 +162,7 @@ function _resetState() {
 }
 
 function _disconnectClient() {
+  _clearStatusPoller();
   if (state.client) {
     console.log('[castService] _disconnectClient() → closing existing client');
     try {
@@ -166,9 +184,10 @@ function _disconnectClient() {
  * @param {string}   mediaUrl        - URL of the audio/video to cast
  * @param {number}   startPosition   - start position in seconds
  * @param {Function} onStatusUpdate  - called with {position, duration, status}
+ * @param {Object}   metadata        - optional {episodeGuid, title, podcastTitle, imageUrl, duration}
  */
-async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
-  console.log(`[castService] castTo(${deviceId}) → mediaUrl=${mediaUrl}, startPos=${startPosition}`);
+async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate, metadata = {}) {
+  console.log(`[castService] castTo(${deviceId}) → mediaUrl=${mediaUrl}, startPos=${startPosition}, episodeGuid=${metadata.episodeGuid}`);
 
   const device = devices.get(deviceId);
   if (!device) {
@@ -182,8 +201,13 @@ async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
 
   state.activeDeviceId = deviceId;
   state.mediaUrl = mediaUrl;
+  state.episodeGuid = metadata.episodeGuid || null;
+  state.title = metadata.title || null;
+  state.podcastTitle = metadata.podcastTitle || null;
+  state.imageUrl = metadata.imageUrl || null;
   state.position = startPosition;
   state.status = 'connecting';
+  _clearStatusPoller();
 
   // Update device status
   device.status = 'connecting';
@@ -209,11 +233,22 @@ async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
 
     client.on('error', (err) => {
       console.error(`[castService] castTo() → client error on ${device.name}:`, err.message);
+      _clearStatusPoller();
       state.status = 'error';
       device.status = 'error';
       devices.set(deviceId, device);
       if (typeof onStatusUpdate === 'function') {
-        onStatusUpdate({ position: state.position, duration: state.duration, status: 'error' });
+        onStatusUpdate({
+          position: state.position,
+          duration: state.duration,
+          status: 'error',
+          mediaUrl: state.mediaUrl,
+          episodeGuid: state.episodeGuid,
+          title: state.title,
+          podcastTitle: state.podcastTitle,
+          imageUrl: state.imageUrl,
+          volume: state.volume
+        });
       }
     });
 
@@ -235,8 +270,7 @@ async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
         state.player = player;
         console.log(`[castService] castTo() → media receiver launched on ${device.name}`);
 
-        // Listen for player status updates
-        player.on('status', (playerStatus) => {
+        const applyPlayerStatus = (playerStatus) => {
           if (!playerStatus) return;
 
           const newPosition = playerStatus.currentTime || 0;
@@ -261,23 +295,64 @@ async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
           console.log(`[castService] player status → state=${playerState}, pos=${newPosition.toFixed(1)}s, dur=${newDuration.toFixed(1)}s`);
 
           if (typeof onStatusUpdate === 'function') {
-            onStatusUpdate({ position: newPosition, duration: newDuration, status: mappedStatus });
+            onStatusUpdate({
+              position: newPosition,
+              duration: newDuration,
+              status: mappedStatus,
+              mediaUrl: state.mediaUrl,
+              episodeGuid: state.episodeGuid,
+              title: state.title,
+              podcastTitle: state.podcastTitle,
+              imageUrl: state.imageUrl,
+              volume: state.volume
+            });
           }
+        };
+
+        // Listen for player status updates
+        player.on('status', (playerStatus) => {
+          applyPlayerStatus(playerStatus);
         });
 
+        const pollStatus = () => {
+          if (!state.player || state.player !== player) return;
+          player.getStatus((statusErr, latestStatus) => {
+            if (statusErr) {
+              console.warn('[castService] status poll failed:', statusErr.message);
+              return;
+            }
+            applyPlayerStatus(latestStatus);
+          });
+        };
+
+        _clearStatusPoller();
+        pollStatus();
+        state.statusPoller = setInterval(pollStatus, 1000);
+
         // Load the media
+        const metadataImages = [];
+        if (metadata.imageUrl) {
+          metadataImages.push({ url: metadata.imageUrl });
+        }
+
+        const explicitDuration = Number(metadata.duration || 0);
+        const safeDuration = Number.isFinite(explicitDuration) && explicitDuration > 0 ? explicitDuration : undefined;
         const mediaInfo = {
           contentId: mediaUrl,
           contentType: 'audio/mpeg',
           streamType: 'BUFFERED',
+          duration: safeDuration,
           metadata: {
-            type: 0,
             metadataType: 0,
-            title: 'Podwaffle'
+            title: metadata.title || 'Podwaffle',
+            subtitle: metadata.podcastTitle || 'Podwaffle',
+            images: metadataImages
           }
         };
 
-        const loadOptions = {};
+        const loadOptions = {
+          autoplay: true
+        };
         if (startPosition > 0) {
           loadOptions.currentTime = startPosition;
         }
@@ -332,13 +407,24 @@ async function pause() {
 async function resume() {
   console.log('[castService] resume()');
   if (!state.player) {
-    throw new Error('No active cast session to resume');
+    return { status: state.status === 'idle' ? 'idle' : 'paused' };
+  }
+  if (!state.mediaUrl) {
+    console.log('[castService] resume() → no media loaded, returning idle');
+    return { status: 'idle' };
   }
   return new Promise((resolve, reject) => {
     state.player.play((err) => {
       if (err) {
-        console.error('[castService] resume() → error:', err.message);
-        reject(new Error(`Resume failed: ${err.message}`));
+        const msg = String(err && err.message ? err.message : err);
+        if (msg.toLowerCase().includes('mediasessionid')) {
+          console.warn('[castService] resume() → no active media session, returning idle');
+          state.status = 'idle';
+          resolve({ status: 'idle' });
+          return;
+        }
+        console.error('[castService] resume() → error:', msg);
+        reject(new Error(`Resume failed: ${msg}`));
         return;
       }
       state.status = 'playing';
@@ -432,6 +518,10 @@ function getState() {
   return {
     activeDeviceId: state.activeDeviceId,
     mediaUrl: state.mediaUrl,
+    episodeGuid: state.episodeGuid,
+    title: state.title,
+    podcastTitle: state.podcastTitle,
+    imageUrl: state.imageUrl,
     position: state.position,
     duration: state.duration,
     volume: state.volume,

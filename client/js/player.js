@@ -21,6 +21,7 @@ const player = {
   skippedSeconds: 0,
   _stateHandlers: [],
   _activeCastDeviceId: null,
+  _castStartInFlight: false,
 
   // ─── Initialization ──────────────────────────────────────
   init() {
@@ -63,6 +64,47 @@ const player = {
       console.error('[player] loadEpisode: missing audioUrl', episode);
       return;
     }
+
+    if (this.mode === 'cast' && this._activeCastDeviceId) {
+      console.log('[player] Loading episode on cast device:', episode.title, 'at', startPosition);
+      this.currentEpisode = episode;
+      this.position = startPosition;
+      this.duration = episode.duration || this.duration || 0;
+      this.lastSyncPosition = startPosition;
+      this.lastSyncTime = Date.now();
+      this.skippedSeconds = 0;
+      this.currentEpisode._markedPlayed = false;
+      this.currentEpisode._markingPlayed = false;
+      this._castStartInFlight = true;
+      this.audio.pause();
+      this.audio.removeAttribute('src');
+      this.audio.load();
+      this._notifyStateChange();
+      this._setupProgressSync();
+
+      api.castPlay(
+        this._activeCastDeviceId,
+        episode.audioUrl,
+        startPosition,
+        episode.guid,
+        localStorage.getItem('podwaffle_guid'),
+        episode.title,
+        episode.podcastTitle,
+        episode.podcastImageUrl || episode.imageUrl,
+        episode.duration || 0
+      ).then(() => {
+        this.isPlaying = true;
+        this._notifyStateChange();
+      }).catch((err) => {
+        console.error('[player] castPlay from loadEpisode error:', err);
+        this.isPlaying = false;
+        this._notifyStateChange();
+      }).finally(() => {
+        this._castStartInFlight = false;
+      });
+      return;
+    }
+
     console.log('[player] Loading episode:', episode.title, 'at', startPosition);
 
     this.currentEpisode = episode;
@@ -90,6 +132,14 @@ const player = {
 
   play() {
     if (this.mode === 'cast') {
+      if (this._castStartInFlight) {
+        return;
+      }
+      if (!this.currentEpisode || !this.currentEpisode.audioUrl) {
+        console.warn('[player] play ignored in cast mode: no episode loaded yet');
+        return;
+      }
+      this.audio.pause();
       api.castResume().catch(err => console.error('[player] castResume error:', err));
       this.isPlaying = true;
       this._notifyStateChange();
@@ -199,10 +249,13 @@ const player = {
     this.position = this.audio.currentTime || 0;
     this.duration = this.audio.duration || this.duration;
 
-    // Check 98% threshold to mark as played
+    // Check 95% threshold or within 3 seconds of end to mark as played
     const playedRatio = this.duration > 0 ? this.position / this.duration : 0;
-    if (this.duration > 0 && (playedRatio >= 0.98 || this.position >= this.duration - 0.5)) {
+    const nearEnd = this.duration > 0 && (this.position >= this.duration - 3);
+    
+    if (this.duration > 0 && (playedRatio >= 0.95 || nearEnd)) {
       if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
+        console.log(`[player] Episode 95%+ complete or within 3s of end: ${this.currentEpisode.title} (${Math.round(playedRatio * 100)}%, ${this.position.toFixed(1)}s / ${this.duration.toFixed(1)}s)`);
         this.currentEpisode._markedPlayed = true;
         this._markPlayed(this.currentEpisode, { force: true });
       }
@@ -250,6 +303,12 @@ const player = {
     const episode = this.currentEpisode;
     const pos = Math.max(0, Math.floor(this.position || this.audio.currentTime || 0));
     const dur = Math.max(0, Math.floor(this.duration || this.audio.duration || 0));
+
+    // Don't sync if episode has already been marked as played (avoid race condition)
+    if (episode._markedPlayed) {
+      console.log('[player] Skipping sync for already-played episode:', episode.title);
+      return;
+    }
 
     try {
       await api.updateProgress(guid, episode.guid, {
@@ -391,21 +450,38 @@ const player = {
 
   // ─── Cast switching ──────────────────────────────────────
   async switchToCast(deviceId) {
-    if (!this.currentEpisode) {
-      console.warn('[player] switchToCast: no current episode');
-      return;
-    }
     console.log('[player] Switching to cast device:', deviceId);
     const wasPlaying = this.isPlaying;
     const pos = this.position;
 
     // Pause local playback
     this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
     this.mode = 'cast';
     this._activeCastDeviceId = deviceId;
 
+    if (!this.currentEpisode) {
+      this.isPlaying = false;
+      this.position = 0;
+      this.duration = 0;
+      this._notifyStateChange();
+      console.log('[player] Cast mode active with no episode loaded yet');
+      return;
+    }
+
     try {
-      await api.castPlay(deviceId, this.currentEpisode.audioUrl, pos, this.currentEpisode.guid, localStorage.getItem('podwaffle_guid'));
+      await api.castPlay(
+        deviceId,
+        this.currentEpisode.audioUrl,
+        pos,
+        this.currentEpisode.guid,
+        localStorage.getItem('podwaffle_guid'),
+        this.currentEpisode.title,
+        this.currentEpisode.podcastTitle,
+        this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
+        this.currentEpisode.duration || this.duration || 0
+      );
       this.isPlaying = true;
       this._notifyStateChange();
       console.log('[player] Cast started on device:', deviceId);
@@ -430,8 +506,28 @@ const player = {
 
     this.mode = 'local';
     this._activeCastDeviceId = null;
-    if (pos > 0) {
-      this.audio.currentTime = pos;
+    if (this.currentEpisode && this.currentEpisode.audioUrl) {
+      const resumePos = Math.max(0, Math.floor(pos || 0));
+      this.audio.pause();
+      this.audio.src = this.currentEpisode.audioUrl;
+      this.audio.load();
+      this.audio.volume = this.volume;
+
+      const applyResumePosition = () => {
+        if (resumePos > 0) {
+          try {
+            this.audio.currentTime = resumePos;
+          } catch (err) {
+            console.warn('[player] Failed to restore local resume position:', err);
+          }
+        }
+      };
+
+      if (this.audio.readyState >= 1) {
+        applyResumePosition();
+      } else {
+        this.audio.addEventListener('loadedmetadata', applyResumePosition, { once: true });
+      }
     }
     this.play();
   },

@@ -181,10 +181,10 @@ const api = {
     return this._fetch('/api/cast/devices');
   },
 
-  async castPlay(deviceId, mediaUrl, startPosition, episodeGuid, userGuid) {
+  async castPlay(deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration) {
     return this._fetch('/api/cast/play', {
       method: 'POST',
-      body: JSON.stringify({ deviceId, mediaUrl, startPosition, episodeGuid, userGuid }),
+      body: JSON.stringify({ deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration }),
     });
   },
 

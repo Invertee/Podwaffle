@@ -88,17 +88,23 @@ async function initApp() {
         const castState = await window.api.getCastState();
         if (castState && castState.activeDeviceId && castState.mediaUrl) {
           if (window.player) {
+            window.player.audio.pause();
+            window.player.audio.removeAttribute('src');
+            window.player.audio.load();
             window.player.mode = 'cast';
             window.player._activeCastDeviceId = castState.activeDeviceId;
             window.player.position = castState.position || 0;
             window.player.duration = castState.duration || 0;
             window.player.isPlaying = castState.status === 'playing';
-            window.player.currentEpisode = window.player.currentEpisode || {
-              title: 'Casting session',
-              podcastTitle: 'Casting',
+            
+            // Restore episode metadata from cast state if available
+            window.player.currentEpisode = {
+              ...(window.player.currentEpisode || {}),
+              title: castState.title || 'Casting session',
+              podcastTitle: castState.podcastTitle || 'Casting',
+              guid: castState.episodeGuid || null,
               audioUrl: castState.mediaUrl,
-              podcastImageUrl: null,
-              guid: null,
+              podcastImageUrl: castState.imageUrl || null,
               feedId: null
             };
             window.player._notifyStateChange();

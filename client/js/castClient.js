@@ -10,11 +10,16 @@ const castClient = {
   _reconnectTimer: null,
   _reconnectDelay: 5000,
   _intentionalClose: false,
+  _statePollTimer: null,
   _castState: {
     status: 'idle',
     position: 0,
     duration: 0,
     activeDeviceId: null,
+    episodeGuid: null,
+    title: null,
+    podcastTitle: null,
+    imageUrl: null,
   },
 
   connect() {
@@ -38,6 +43,7 @@ const castClient = {
     this.ws.addEventListener('open', () => {
       console.log('[castClient] WebSocket connected.');
       clearTimeout(this._reconnectTimer);
+      this._startStatePolling();
       this._dispatch('connected', {});
     });
 
@@ -53,6 +59,7 @@ const castClient = {
     this.ws.addEventListener('close', (event) => {
       console.warn(`[castClient] WebSocket closed (code=${event.code}). Intentional=${this._intentionalClose}`);
       this.ws = null;
+      this._stopStatePolling();
       this._dispatch('disconnected', { code: event.code });
       if (!this._intentionalClose) {
         this._scheduleReconnect();
@@ -68,6 +75,7 @@ const castClient = {
   disconnect() {
     this._intentionalClose = true;
     clearTimeout(this._reconnectTimer);
+    this._stopStatePolling();
     if (this.ws) {
       this.ws.close(1000, 'Client disconnected');
       this.ws = null;
@@ -81,6 +89,41 @@ const castClient = {
     this._reconnectTimer = setTimeout(() => {
       this.connect();
     }, this._reconnectDelay);
+  },
+
+  _startStatePolling() {
+    this._stopStatePolling();
+    this._statePollTimer = setInterval(async () => {
+      try {
+        if (!window.api) return;
+        const castState = await window.api.getCastState();
+        if (!castState || !castState.activeDeviceId) return;
+        this._handleMessage({
+          type: 'cast:state',
+          data: {
+            deviceId: castState.activeDeviceId,
+            mediaUrl: castState.mediaUrl,
+            episodeGuid: castState.episodeGuid,
+            title: castState.title,
+            podcastTitle: castState.podcastTitle,
+            imageUrl: castState.imageUrl,
+            position: castState.position,
+            duration: castState.duration,
+            status: castState.status,
+            volume: castState.volume
+          }
+        });
+      } catch (err) {
+        console.warn('[castClient] cast state poll failed:', err.message || err);
+      }
+    }, 3000);
+  },
+
+  _stopStatePolling() {
+    if (this._statePollTimer) {
+      clearInterval(this._statePollTimer);
+      this._statePollTimer = null;
+    }
   },
 
   on(event, handler) {
@@ -115,12 +158,30 @@ const castClient = {
             position: data.data.position != null ? data.data.position : this._castState.position,
             duration: data.data.duration != null ? data.data.duration : this._castState.duration,
             activeDeviceId: data.data.deviceId || this._castState.activeDeviceId,
+            episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
+            title: data.data.title != null ? data.data.title : this._castState.title,
+            podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
+            imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
           };
           // Notify player if it's in cast mode
-          if (window.player && window.player.mode === 'cast') {
+          if (window.player && (window.player.mode === 'cast' || this._castState.activeDeviceId)) {
+            window.player.mode = 'cast';
+            window.player._activeCastDeviceId = this._castState.activeDeviceId || window.player._activeCastDeviceId;
             window.player.position = this._castState.position;
             window.player.duration = this._castState.duration;
             window.player.isPlaying = this._castState.status === 'playing';
+            
+            // Update episode metadata if available
+            if (this._castState.episodeGuid && this._castState.title) {
+              window.player.currentEpisode = {
+                ...window.player.currentEpisode,
+                guid: this._castState.episodeGuid,
+                title: this._castState.title,
+                podcastTitle: this._castState.podcastTitle,
+                podcastImageUrl: this._castState.imageUrl,
+              };
+            }
+            
             window.player._notifyStateChange();
           }
         }

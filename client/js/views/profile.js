@@ -24,8 +24,9 @@ async function renderProfile(container) {
           <label class="profile-label">Your GUID</label>
           <div class="profile-guid-row">
             <input id="profile-guid" class="input" value="${user.guid}" readonly>
-            <button id="btn-copy-guid" class="btn btn-outline">Copy</button>
           </div>
+          <br>
+          <button id="btn-copy-guid" class="button btn btn-outline">Copy</button>
           <p class="text-secondary mb-4">Your profile is identified by the GUID below. Enter this GUID on another device to sync your podcasts and progress.</p>
         </div>
       </div>

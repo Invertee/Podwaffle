@@ -457,8 +457,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
 
   // POST /cast/play
   router.post('/cast/play', async (req, res) => {
-    const { deviceId, mediaUrl, startPosition = 0, episodeGuid, userGuid } = req.body || {};
-    console.log('[api] POST /cast/play', { deviceId, mediaUrl, startPosition, episodeGuid, userGuid });
+    const { deviceId, mediaUrl, startPosition = 0, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration = 0 } = req.body || {};
+    console.log('[api] POST /cast/play', { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle });
 
     if (!deviceId) return sendError(res, 400, 'deviceId is required');
     if (!mediaUrl) return sendError(res, 400, 'mediaUrl is required');
@@ -468,11 +468,45 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
       const onStatusUpdate = async (statusObj) => {
         console.log('[api] cast onStatusUpdate:', statusObj);
 
+        const safePosition = Math.max(0, Math.floor(statusObj.position || 0));
+        const safeDuration = Math.max(0, Math.floor(statusObj.duration || 0));
+
         // Broadcast to all WebSocket clients
         broadcastWs({
           type: 'cast:state',
-          data: { deviceId, ...statusObj }
+          data: {
+            deviceId,
+            mediaUrl,
+            episodeGuid,
+            title,
+            podcastTitle,
+            imageUrl,
+            position: safePosition,
+            duration: safeDuration,
+            status: statusObj.status,
+            volume: statusObj.volume
+          }
         });
+
+        // Persist in-progress state while casting
+        if (userGuid && episodeGuid && statusObj.status !== 'idle') {
+          try {
+            const profile = await userService.getUser(userGuid);
+            if (profile) {
+              const existing = profile.progress[episodeGuid];
+              const feedId = existing ? existing.feedId : '';
+              await userService.updateProgress(userGuid, episodeGuid, {
+                position: safePosition,
+                duration: safeDuration,
+                played: false,
+                feedId,
+                updatedAt: new Date().toISOString()
+              });
+            }
+          } catch (progressErr) {
+            console.error('[api] cast onStatusUpdate → failed to persist in-progress:', progressErr.message);
+          }
+        }
 
         // If playback finished (IDLE after playing), mark as played for the user
         if (statusObj.status === 'idle' && userGuid && episodeGuid) {
@@ -483,8 +517,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
               const existing = profile.progress[episodeGuid];
               const feedId = existing ? existing.feedId : '';
               await userService.updateProgress(userGuid, episodeGuid, {
-                position: statusObj.duration || 0,
-                duration: statusObj.duration || 0,
+                position: safeDuration,
+                duration: safeDuration,
                 played: true,
                 feedId,
                 updatedAt: new Date().toISOString()
@@ -496,7 +530,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
         }
       };
 
-      const result = await castService.castTo(deviceId, mediaUrl, startPosition, onStatusUpdate);
+      const result = await castService.castTo(deviceId, mediaUrl, startPosition, onStatusUpdate, { episodeGuid, title, podcastTitle, imageUrl, duration });
       res.json(result);
     } catch (err) {
       sendError(res, 500, 'Cast play failed', err.message);

@@ -1,2 +1,5 @@
-data/
-Prompts/
+data/*
+Prompts/*
+server/node_modules/*
+data/podcasts/*
+

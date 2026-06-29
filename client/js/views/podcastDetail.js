@@ -110,7 +110,7 @@ async function renderPodcastDetail(container, feedId) {
           showCheckbox: true,
           onPlay: (episode) => {
             if (window.player) {
-              window.player.loadEpisode(episode);
+              window.player.loadEpisode(episode, prog.position || 0);
               window.player.play();
             }
           },

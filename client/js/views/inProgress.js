@@ -69,7 +69,7 @@ async function renderInProgress(container) {
         showCheckbox: false,
         onPlay: (episode) => {
           if (window.player) {
-            window.player.loadEpisode(episode);
+            window.player.loadEpisode(episode, item.position || 0);
             window.player.play();
           }
         },
