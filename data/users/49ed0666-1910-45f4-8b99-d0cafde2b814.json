@@ -1,0 +1,23 @@
+{
+  "guid": "49ed0666-1910-45f4-8b99-d0cafde2b814",
+  "createdAt": "2026-06-29T10:58:42.649Z",
+  "updatedAt": "2026-06-29T11:00:02.306Z",
+  "settings": {
+    "skipBack": 15,
+    "skipForward": 45,
+    "podcastIndexApiKey": "",
+    "podcastIndexApiSecret": ""
+  },
+  "subscriptions": [
+    "https://feeds.megaphone.fm/finvshistory"
+  ],
+  "seenEpisodes": {
+    "7e4b5cafcd82371301d647186d521850": []
+  },
+  "progress": {},
+  "history": [],
+  "stats": {
+    "totalListenedSeconds": 0,
+    "totalSkippedSeconds": 0
+  }
+}

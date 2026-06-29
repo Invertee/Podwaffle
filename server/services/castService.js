@@ -1,0 +1,436 @@
+'use strict';
+
+const { Bonjour } = require('bonjour-service');
+
+// ---------------------------------------------------------------------------
+// Device registry (in-memory)
+// ---------------------------------------------------------------------------
+/** @type {Map<string, {id: string, name: string, host: string, port: number, status: string}>} */
+const devices = new Map();
+
+// ---------------------------------------------------------------------------
+// Cast session state
+// ---------------------------------------------------------------------------
+const state = {
+  activeDeviceId: null,
+  mediaUrl: null,
+  position: 0,
+  duration: 0,
+  volume: 1.0,
+  status: 'idle', // idle | playing | paused | connecting | error
+  client: null,
+  player: null
+};
+
+// ---------------------------------------------------------------------------
+// mDNS Discovery
+// ---------------------------------------------------------------------------
+
+let bonjourInstance = null;
+let browser = null;
+
+/**
+ * Start discovering Google Cast devices on the local network via mDNS.
+ *
+ * @param {Function} onDeviceFound - called with device info object when a device appears
+ * @param {Function} onDeviceLost  - called with device id when a device disappears
+ */
+function startDiscovery(onDeviceFound, onDeviceLost) {
+  console.log('[castService] startDiscovery() → starting mDNS browse for _googlecast._tcp');
+
+  try {
+    bonjourInstance = new Bonjour();
+
+    browser = bonjourInstance.find({ type: 'googlecast' }, (service) => {
+      console.log('[castService] startDiscovery() → raw service found:', {
+        name: service.name,
+        host: service.host,
+        port: service.port,
+        addresses: service.addresses
+      });
+
+      // Build a stable device ID from the service name (md5 of name)
+      const crypto = require('crypto');
+      const deviceId = crypto.createHash('md5').update(service.name || service.host).digest('hex');
+      const host = (service.addresses && service.addresses[0]) || service.host;
+
+      const deviceInfo = {
+        id: deviceId,
+        name: service.name || 'Unknown Cast Device',
+        host,
+        port: service.port || 8009,
+        status: 'idle'
+      };
+
+      devices.set(deviceId, deviceInfo);
+      console.log(`[castService] startDiscovery() → device added: "${deviceInfo.name}" @ ${deviceInfo.host}:${deviceInfo.port} (id=${deviceId})`);
+
+      if (typeof onDeviceFound === 'function') {
+        onDeviceFound(deviceInfo);
+      }
+    });
+
+    browser.on('down', (service) => {
+      console.log('[castService] startDiscovery() → service went down:', service.name);
+      // Find device by name and remove
+      for (const [id, dev] of devices.entries()) {
+        if (dev.name === service.name) {
+          devices.delete(id);
+          console.log(`[castService] startDiscovery() → device removed: "${dev.name}" (id=${id})`);
+          if (typeof onDeviceLost === 'function') {
+            onDeviceLost(id);
+          }
+          // If this was our active device, reset state
+          if (state.activeDeviceId === id) {
+            console.log('[castService] startDiscovery() → active device lost, resetting state');
+            _resetState();
+          }
+          break;
+        }
+      }
+    });
+
+    console.log('[castService] startDiscovery() → mDNS browser started');
+  } catch (err) {
+    console.error('[castService] startDiscovery() → failed to start Bonjour browser:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Device list
+// ---------------------------------------------------------------------------
+
+/**
+ * Return all known cast devices as an array.
+ */
+function getDevices() {
+  const list = Array.from(devices.values());
+  console.log(`[castService] getDevices() → ${list.length} devices known`);
+  return list;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function _resetState() {
+  console.log('[castService] _resetState() → clearing cast session state');
+  state.activeDeviceId = null;
+  state.mediaUrl = null;
+  state.position = 0;
+  state.duration = 0;
+  state.volume = 1.0;
+  state.status = 'idle';
+  state.client = null;
+  state.player = null;
+}
+
+function _disconnectClient() {
+  if (state.client) {
+    console.log('[castService] _disconnectClient() → closing existing client');
+    try {
+      state.client.close();
+    } catch (err) {
+      console.error('[castService] _disconnectClient() → error closing client:', err.message);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cast control
+// ---------------------------------------------------------------------------
+
+/**
+ * Connect to a cast device and start playing media.
+ *
+ * @param {string}   deviceId        - id from device registry
+ * @param {string}   mediaUrl        - URL of the audio/video to cast
+ * @param {number}   startPosition   - start position in seconds
+ * @param {Function} onStatusUpdate  - called with {position, duration, status}
+ */
+async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate) {
+  console.log(`[castService] castTo(${deviceId}) → mediaUrl=${mediaUrl}, startPos=${startPosition}`);
+
+  const device = devices.get(deviceId);
+  if (!device) {
+    const msg = `Device ${deviceId} not found in registry`;
+    console.error('[castService] castTo() →', msg);
+    throw new Error(msg);
+  }
+
+  // Disconnect any existing session
+  _disconnectClient();
+
+  state.activeDeviceId = deviceId;
+  state.mediaUrl = mediaUrl;
+  state.position = startPosition;
+  state.status = 'connecting';
+
+  // Update device status
+  device.status = 'connecting';
+  devices.set(deviceId, device);
+
+  let Client, DefaultMediaReceiver;
+  try {
+    const castv2 = require('castv2-client');
+    Client = castv2.Client;
+    DefaultMediaReceiver = castv2.DefaultMediaReceiver;
+    console.log('[castService] castTo() → castv2-client loaded OK');
+  } catch (err) {
+    const msg = `castv2-client is not available: ${err.message}`;
+    console.error('[castService] castTo() →', msg);
+    state.status = 'error';
+    device.status = 'error';
+    throw new Error(msg);
+  }
+
+  return new Promise((resolve, reject) => {
+    const client = new Client();
+    state.client = client;
+
+    client.on('error', (err) => {
+      console.error(`[castService] castTo() → client error on ${device.name}:`, err.message);
+      state.status = 'error';
+      device.status = 'error';
+      devices.set(deviceId, device);
+      if (typeof onStatusUpdate === 'function') {
+        onStatusUpdate({ position: state.position, duration: state.duration, status: 'error' });
+      }
+    });
+
+    console.log(`[castService] castTo() → connecting to ${device.host}:${device.port}`);
+    client.connect({ host: device.host, port: device.port }, () => {
+      console.log(`[castService] castTo() → connected to ${device.name}, launching media receiver`);
+
+      client.launch(DefaultMediaReceiver, (err, player) => {
+        if (err) {
+          const msg = `Failed to launch DefaultMediaReceiver on ${device.name}: ${err.message}`;
+          console.error('[castService] castTo() →', msg);
+          state.status = 'error';
+          device.status = 'error';
+          devices.set(deviceId, device);
+          reject(new Error(msg));
+          return;
+        }
+
+        state.player = player;
+        console.log(`[castService] castTo() → media receiver launched on ${device.name}`);
+
+        // Listen for player status updates
+        player.on('status', (playerStatus) => {
+          if (!playerStatus) return;
+
+          const newPosition = playerStatus.currentTime || 0;
+          const newDuration = (playerStatus.media && playerStatus.media.duration) || state.duration || 0;
+          const playerState = playerStatus.playerState || 'IDLE';
+
+          let mappedStatus;
+          switch (playerState) {
+            case 'PLAYING':  mappedStatus = 'playing';  break;
+            case 'PAUSED':   mappedStatus = 'paused';   break;
+            case 'BUFFERING':mappedStatus = 'playing';  break;
+            case 'IDLE':     mappedStatus = 'idle';     break;
+            default:         mappedStatus = 'idle';
+          }
+
+          state.position = newPosition;
+          state.duration = newDuration;
+          state.status = mappedStatus;
+          device.status = mappedStatus;
+          devices.set(deviceId, device);
+
+          console.log(`[castService] player status → state=${playerState}, pos=${newPosition.toFixed(1)}s, dur=${newDuration.toFixed(1)}s`);
+
+          if (typeof onStatusUpdate === 'function') {
+            onStatusUpdate({ position: newPosition, duration: newDuration, status: mappedStatus });
+          }
+        });
+
+        // Load the media
+        const mediaInfo = {
+          contentId: mediaUrl,
+          contentType: 'audio/mpeg',
+          streamType: 'BUFFERED',
+          metadata: {
+            type: 0,
+            metadataType: 0,
+            title: 'Podwaffle'
+          }
+        };
+
+        const loadOptions = {};
+        if (startPosition > 0) {
+          loadOptions.currentTime = startPosition;
+        }
+
+        player.load(mediaInfo, loadOptions, (loadErr, status) => {
+          if (loadErr) {
+            const msg = `Failed to load media on ${device.name}: ${loadErr.message}`;
+            console.error('[castService] castTo() →', msg);
+            state.status = 'error';
+            device.status = 'error';
+            devices.set(deviceId, device);
+            reject(new Error(msg));
+            return;
+          }
+
+          state.status = 'playing';
+          device.status = 'playing';
+          devices.set(deviceId, device);
+          console.log(`[castService] castTo() → media loaded and playing on ${device.name}`);
+          resolve({ status: 'playing', deviceId, mediaUrl });
+        });
+      });
+    });
+  });
+}
+
+/**
+ * Pause the current cast session.
+ */
+async function pause() {
+  console.log('[castService] pause()');
+  if (!state.player) {
+    throw new Error('No active cast session to pause');
+  }
+  return new Promise((resolve, reject) => {
+    state.player.pause((err) => {
+      if (err) {
+        console.error('[castService] pause() → error:', err.message);
+        reject(new Error(`Pause failed: ${err.message}`));
+        return;
+      }
+      state.status = 'paused';
+      console.log('[castService] pause() → OK');
+      resolve({ status: 'paused' });
+    });
+  });
+}
+
+/**
+ * Resume the current cast session.
+ */
+async function resume() {
+  console.log('[castService] resume()');
+  if (!state.player) {
+    throw new Error('No active cast session to resume');
+  }
+  return new Promise((resolve, reject) => {
+    state.player.play((err) => {
+      if (err) {
+        console.error('[castService] resume() → error:', err.message);
+        reject(new Error(`Resume failed: ${err.message}`));
+        return;
+      }
+      state.status = 'playing';
+      console.log('[castService] resume() → OK');
+      resolve({ status: 'playing' });
+    });
+  });
+}
+
+/**
+ * Stop and fully disconnect the current cast session.
+ */
+async function stop() {
+  console.log('[castService] stop()');
+  if (!state.player && !state.client) {
+    console.log('[castService] stop() → nothing to stop');
+    return { status: 'idle' };
+  }
+
+  return new Promise((resolve) => {
+    if (state.player) {
+      state.player.stop((err) => {
+        if (err) {
+          console.error('[castService] stop() → player stop error:', err.message);
+        } else {
+          console.log('[castService] stop() → player stopped');
+        }
+        _disconnectClient();
+        _resetState();
+        resolve({ status: 'idle' });
+      });
+    } else {
+      _disconnectClient();
+      _resetState();
+      resolve({ status: 'idle' });
+    }
+  });
+}
+
+/**
+ * Seek to a position in seconds.
+ */
+async function seek(position) {
+  console.log(`[castService] seek(${position})`);
+  if (!state.player) {
+    throw new Error('No active cast session to seek');
+  }
+  return new Promise((resolve, reject) => {
+    state.player.seek(position, (err) => {
+      if (err) {
+        console.error('[castService] seek() → error:', err.message);
+        reject(new Error(`Seek failed: ${err.message}`));
+        return;
+      }
+      state.position = position;
+      console.log(`[castService] seek() → seeked to ${position}s`);
+      resolve({ position });
+    });
+  });
+}
+
+/**
+ * Set volume on the active cast session (0–1).
+ */
+async function setVolume(level) {
+  console.log(`[castService] setVolume(${level})`);
+  if (!state.client) {
+    throw new Error('No active cast client to set volume on');
+  }
+
+  const clampedLevel = Math.max(0, Math.min(1, level));
+
+  return new Promise((resolve, reject) => {
+    state.client.setVolume({ level: clampedLevel }, (err) => {
+      if (err) {
+        console.error('[castService] setVolume() → error:', err.message);
+        reject(new Error(`Set volume failed: ${err.message}`));
+        return;
+      }
+      state.volume = clampedLevel;
+      console.log(`[castService] setVolume() → set to ${clampedLevel}`);
+      resolve({ volume: clampedLevel });
+    });
+  });
+}
+
+/**
+ * Return the current cast state snapshot.
+ */
+function getState() {
+  return {
+    activeDeviceId: state.activeDeviceId,
+    mediaUrl: state.mediaUrl,
+    position: state.position,
+    duration: state.duration,
+    volume: state.volume,
+    status: state.status
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Exports
+// ---------------------------------------------------------------------------
+module.exports = {
+  startDiscovery,
+  getDevices,
+  castTo,
+  pause,
+  resume,
+  stop,
+  seek,
+  setVolume,
+  getState
+};

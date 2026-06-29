@@ -1,0 +1,38 @@
+We're building a podcast listening app similar to pocketcasts. it'll be based on nodejs which will host the front end single page application and the backend app for keeping track of podcast listening progress, getting stats and running podcast searches and periodically downloading podcast episode metadata. It will be multi user where user profiles are stored on the server in json files. Each user will be associated with a guid. User profiles will be able to be shared between devices by sharing a guid code between devices. user profiles will track subscribed podcasts, podcast listening progress and listening stats. 
+
+The UI will replicate the app Pocketcasts as closly as possible - I've included a number of screenshots of this app for reference - there will be a left hand pane which will have the following options:
+* Podcasts - this will show the podcasts that you have subscribed to. these will be displayed in small square tiles in the main app screen. This screen should not display podcast episodes itself. That will be handled via a seperate webscreen. Podcasts that have new episodes should be marked with a small dot on the tile itself
+* In Progress - this will show a list view of all of the podcast episodes that you have started playing but not reached the end of yet.
+* Discover - This screen will allow you to search for podcasts you are not subscribed to - this will use the apple podcast api to search for podcasts and display them as tiles within the app. You will be able to subscribe to them here which will dynamically add them to the main Podcasts screen. 
+* History - This will provide a list of all of the podcasts the user has listened to in chronological order - this tab should only be viewable on the desktop version of the app, because it's not as important to mobile users
+* Profile - This will serve as a settings and stats page. You will for example be able to edit the amount of settings that you can skip forwards and backwards on a podcast from here, see your user profile sharing guid and also see your listening stats from this window. Future setting additions will also be seen here.
+
+Selecting a podcast from the main Podcast screen will take you to another screen which has the podcast episode poster at the top, the podcast description (limited to 4 lines normally, with the option to expand the border if clicked) under the podcast information will be each episode - by default 100 episodes will be listed and a 'Load more' button will allow you to see older episodes. When a podcast has finished playing it should be marked as played within the app and should display as a lighter colour with a tick. This status should be set on a podcast if it has been played up to 98% of the total media. There should be a 'Mark Played' button which sets the episode to the played state. There should be a tickbox on each episode so multiple episodes can be marked as played at the same time. Additional to the mark played button, there will be two buttons, one to 'Play next' which adds the podcast to the queue just after the current playing item and a 'Play Last' button which adds the podcast to the bottom of the play order.
+
+There will be always visible bar (progress panel) at the bottom of the screen - this will have the media controls centered in the bar, this will be a play/pause button and a forwards and back skip button. There will be a button that will show the now playing queue, in which you will be able to see the podcasts the player has queued up, each queue item will be able to be reordered or removed from the queue. On this bar there will also be a 'Cast' button which will be used to cast to external media players. When the end of the queue is reached the current playing podcast should be marked as played, removed from the queue and the player should return to a its default non playing state. 
+
+Subscribed podcasts will be stored in a json directory in the backend, a periodic task will run through the list of subscribed podcasts and download the latest episode metadata so that new episodes can appear, this should happen every 35 minutes. This should allow the app to determine if new releases are available. The frontend should also periodcally sync with the backend to check if new episodes are available and mark them as new on the podcast tile
+
+When playing a podcast it will sync the playing progress back to the backend every 15 seconds - this will be stored in the user profile json. 
+
+Two playing modes will be availble 
+* The first mode is local playback - this will play directly from the web interface 
+* The second mode will enable you to cast to Google Cast compatible speakers - As this app will run on the same network as the speakers I want the backend app to be the audio sender in this setup. the backend will maintain a list of available Google cast speakers and when directed by the front end will cast the playing podcast media to those speakers. The front end component of this will display a list of speakers from the cast button on the progress pane, you will be able to select a speaker from this list, or choose 'Local' to stop casting. When playing via the cast method this should also update the progress to the user profile to ensure progress is kept in sync. This should also update listening stats for the user. The frontend websockets to keep track of the current state of the sender app so that its progress can be displayed to the user. 
+
+It should not be possible to use both of these methods at once, the app should switch between local and cast modes when selected
+
+There should be a volume bar on the progress panel which controls the volume for the player (either local or via cast) 
+
+Listening stats will be recorded for each user profile, displaying how many minutes you've listened to in total as well as how many minutes have been skipped overall (same as pocketcast functionality.) this should be stored in the user profile. user profiles should be saved as json files on the podcast server. Timestamps should be added to the JSON files so that we can properly version control the user profile JSONs and correctly handle podcast play progress if there are multiple clients in use at once. 
+
+The player should use native web technologies to ensure that it intergrates with web browsers and OS's media controls. On Android this should ensure that the media controls display the podcast cover and name as well as the skip forwards and back buttons and ensure it can be used when the display is locked. 
+
+the frontend should cache podcast media files when they are played or queued and release them when they are finished or if they haven't been used in 14 days. This should use the cache api via a service worker.
+
+The interface should be responsive on mobile devices, instead of the left hand pane on the mobile version of the app it should display these options on a navbar at the bottom of the screen with the same options. The functionality across the app should be similar. 
+
+The backend application will output logs extensively to console and the front and backend should have robust error handling 
+
+The backend application should be build out via vanilla NodeJS express and the front end should also be vanilla JS where possible. Please use the Bulma CSS framework for the application as this should give us good interface defaults 
+
+We're calling the app Podwaffle and again I'd like to mirror the Pocketcast interface as closely as possible 
