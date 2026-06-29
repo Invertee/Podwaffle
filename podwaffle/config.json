@@ -1,10 +1,6 @@
 {
   "name": "Podwaffle",
-<<<<<<< HEAD
   "version": "1.2.1",
-=======
-  "version": "1.1.1",
->>>>>>> 02cd4087800ffefe88ab65942bc438d3b0bd8083
   "slug": "podwaffle",
   "description": "Self-hosted podcast app with casting support",
   "url": "https://github.com/Invertee/Podwaffle",
