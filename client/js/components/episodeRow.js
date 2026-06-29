@@ -59,9 +59,6 @@ function createEpisodeRow(episode, progress, options = {}) {
 
   row.innerHTML = `
     ${checkboxHtml}
-    <div class="episode-thumb-container">
-      <img src="${episode.imageUrl}" alt="${episode.title}" class="episode-thumb" onerror="this.src='/icons/icon-192.png'">
-    </div>
     <div class="episode-info">
       <div class="episode-title">${episode.title}</div>
       <div class="episode-meta">

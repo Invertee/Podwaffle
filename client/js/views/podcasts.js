@@ -1,8 +1,8 @@
 async function renderPodcasts(container) {
   container.innerHTML = `
     <div class="view-header">
-      <h1 class="view-title">Podcasts</h1>
     </div>
+    <br>
     <div id="podcasts-grid" class="podcast-grid">
       <div class="loading-state">
         <div class="spinner spin"></div>

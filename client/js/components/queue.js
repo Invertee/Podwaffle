@@ -13,6 +13,8 @@ const queue = {
       <div id="queue-list" class="queue-list"></div>
     `;
     
+    this.container.style.display = 'none';
+    this.container.classList.remove('visible');
     document.getElementById('queue-close').addEventListener('click', () => this.hide());
     
     if (window.player) {
@@ -21,15 +23,26 @@ const queue = {
   },
   
   show() {
-    if (this.container) this.container.classList.add('visible');
+    if (this.container) {
+      this.container.classList.add('visible');
+      this.container.style.display = 'flex';
+    }
   },
   
   hide() {
-    if (this.container) this.container.classList.remove('visible');
+    if (this.container) {
+      this.container.classList.remove('visible');
+      this.container.style.display = 'none';
+    }
   },
   
   toggle() {
-    if (this.container) this.container.classList.toggle('visible');
+    if (!this.container) return;
+    if (this.container.classList.contains('visible')) {
+      this.hide();
+    } else {
+      this.show();
+    }
   },
   
   updateList(items) {
@@ -54,7 +67,8 @@ const queue = {
           <div class="queue-drag-handle">
             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line></svg>
           </div>
-          <img src="${item.imageUrl}" class="queue-item-thumb" onerror="this.src='/icons/icon-192.png'">
+          <!-- Artwork disabled for now -->
+          <div class="queue-item-thumb-placeholder" aria-hidden="true"></div>
           <div class="queue-item-info">
             <div class="queue-item-title">${item.title}</div>
             <div class="queue-item-podcast">${item.podcastTitle}</div>

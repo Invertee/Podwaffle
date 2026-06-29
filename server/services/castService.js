@@ -29,6 +29,25 @@ const state = {
 let bonjourInstance = null;
 let browser = null;
 
+function getFriendlyDeviceName(service) {
+  const txt = service && service.txt ? service.txt : null;
+  const candidates = [
+    txt && (txt.fn || txt.FriendlyName || txt.friendlyName || txt.name || txt.Name),
+    service && (service.friendlyName || service.name),
+    service && service.host
+  ].filter(Boolean);
+
+  const raw = candidates.find((value) => typeof value === 'string' && value.trim());
+  if (!raw) return 'Unknown Cast Device';
+
+  const clean = String(raw).trim();
+  return clean
+    .replace(/^Google-Cast-Group-/i, '')
+    .replace(/^Google-Cast-/i, '')
+    .replace(/^Chromecast/i, '')
+    .trim() || 'Cast Device';
+}
+
 /**
  * Start discovering Google Cast devices on the local network via mDNS.
  *
@@ -56,7 +75,7 @@ function startDiscovery(onDeviceFound, onDeviceLost) {
 
       const deviceInfo = {
         id: deviceId,
-        name: service.name || 'Unknown Cast Device',
+        name: getFriendlyDeviceName(service),
         host,
         port: service.port || 8009,
         status: 'idle'

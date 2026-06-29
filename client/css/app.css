@@ -79,7 +79,7 @@ body {
 /* ----------------------------------------------------------
    3. BULMA DARK MODE OVERRIDES
    ---------------------------------------------------------- */
-.has-dark-theme {
+/* .has-dark-theme {
   --bulma-background: var(--bg-primary);
   --bulma-text: var(--text-primary);
 }
@@ -149,7 +149,7 @@ body {
 
 .has-dark-theme .card-header-title {
   color: var(--text-primary);
-}
+} */
 
 /* ----------------------------------------------------------
    4. LAYOUT
@@ -174,6 +174,7 @@ body {
   z-index: 100;
   overflow-y: auto;
   overflow-x: hidden;
+  padding-right:5px
 }
 
 .main-content {
@@ -182,6 +183,8 @@ body {
   background-color: var(--bg-primary);
   padding-bottom: calc(var(--player-height) + 16px);
   overflow-y: auto;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .player-bar {
@@ -189,14 +192,14 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: var(--player-height);
+  min-height: var(--player-height);
   background-color: var(--bg-tertiary);
   border-top: 1px solid var(--border-color);
   z-index: 200;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 10px 16px;
   box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
 }
 
@@ -609,8 +612,20 @@ body {
 
 .player-track-info {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
 }
 
+.pb-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pb-title,
 .player-episode-title {
   font-size: 13px;
   font-weight: 600;
@@ -618,16 +633,17 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
+  max-width: 100%;
 }
 
+.pb-podcast,
 .player-podcast-name {
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
+  max-width: 100%;
   margin-top: 2px;
 }
 
@@ -638,12 +654,21 @@ body {
   align-items: center;
   gap: 6px;
   max-width: 480px;
+  min-width: 0;
 }
 
 .player-transport {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.player-scrubber-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .player-time-row {
@@ -653,6 +678,7 @@ body {
   width: 100%;
 }
 
+.pb-time,
 .player-time {
   font-size: 11px;
   color: var(--text-muted);
@@ -718,32 +744,12 @@ body {
   transform: scale(0.96);
 }
 
-.btn-play-pause svg {
-  width: 20px;
-  height: 20px;
-}
-
-.skip-label {
-  font-size: 9px;
-  font-weight: 700;
-  position: absolute;
-  bottom: 3px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: inherit;
-  line-height: 1;
-}
-
-.btn-skip {
-  position: relative;
-  padding-bottom: 4px;
-}
-
 .player-right {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .volume-wrapper {
@@ -752,7 +758,7 @@ body {
   gap: 6px;
 }
 
-.player-badge {
+.queue-badge {
   position: absolute;
   top: -2px;
   right: -2px;
@@ -1847,6 +1853,7 @@ input[type=range]::-moz-range-thumb {
   .main-content {
     grid-column: 1;
     padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + 16px);
+
   }
 
   .bottom-nav {

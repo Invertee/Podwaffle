@@ -71,7 +71,6 @@ const api = {
   },
 
   async _fetch(url, options = {}) {
-    console.log(`[API] ${options.method || 'GET'} ${url}`);
     const res = await fetch(url, {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options,
@@ -182,10 +181,10 @@ const api = {
     return this._fetch('/api/cast/devices');
   },
 
-  async castPlay(deviceId, mediaUrl, startPosition) {
+  async castPlay(deviceId, mediaUrl, startPosition, episodeGuid, userGuid) {
     return this._fetch('/api/cast/play', {
       method: 'POST',
-      body: JSON.stringify({ deviceId, mediaUrl, startPosition }),
+      body: JSON.stringify({ deviceId, mediaUrl, startPosition, episodeGuid, userGuid }),
     });
   },
 

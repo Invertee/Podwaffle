@@ -4,7 +4,6 @@ async function renderPodcastDetail(container, feedId) {
       <button class="btn-icon back-btn" onclick="window.history.back()">
         <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
       </button>
-      <h1 class="view-title">Podcast</h1>
     </div>
     <div id="pd-content">
       <div class="loading-state">
@@ -38,7 +37,8 @@ async function renderPodcastDetail(container, feedId) {
         <div class="podcast-detail-info">
           <h2>${podcast.title}</h2>
           <div class="pd-author">${podcast.author || ''}</div>
-          <button id="pd-sub-btn" class="btn ${isSubscribed ? 'btn-outline' : 'btn-primary'} pd-sub-btn">
+          <br>
+          <button id="pd-sub-btn" class="btn button ${isSubscribed ? 'btn-outline is-danger' : 'btn-primary is-info'} pd-sub-btn">
             ${isSubscribed ? 'Unsubscribe' : 'Subscribe'}
           </button>
         </div>
@@ -75,12 +75,12 @@ async function renderPodcastDetail(container, feedId) {
           await window.api.unsubscribe(guid, feedId);
           isSubscribed = false;
           btn.textContent = 'Subscribe';
-          btn.className = 'btn btn-primary pd-sub-btn';
+          btn.className = 'button btn btn-primary is-info pd-sub-btn';
         } else {
           await window.api.subscribe(guid, podcast.feedUrl);
           isSubscribed = true;
           btn.textContent = 'Unsubscribe';
-          btn.className = 'btn btn-outline pd-sub-btn';
+          btn.className = 'button btn btn-outline is-danger pd-sub-btn';
         }
       } catch (err) {
         console.error(err);
@@ -101,8 +101,9 @@ async function renderPodcastDetail(container, feedId) {
           prog = { played: false, position: 0 };
         }
         
-        // Add podcast title and feedId to ep object for player
+        // Add podcast metadata to ep object for player and artwork
         ep.podcastTitle = podcast.title;
+        ep.podcastImageUrl = podcast.imageUrl;
         ep.feedId = feedId;
         
         const row = window.createEpisodeRow(ep, prog, {

@@ -24,6 +24,7 @@ const player = {
 
   // ─── Initialization ──────────────────────────────────────
   init() {
+    this.audio.preload = 'auto';
     this.audio.addEventListener('timeupdate', () => this._onTimeUpdate());
     this.audio.addEventListener('ended', () => this._onEnded());
     this.audio.addEventListener('pause', () => {
@@ -71,8 +72,11 @@ const player = {
     this.lastSyncPosition = startPosition;
     this.lastSyncTime = Date.now();
     this.skippedSeconds = 0;
+    this.currentEpisode._markedPlayed = false;
+    this.currentEpisode._markingPlayed = false;
 
     this.audio.src = episode.audioUrl;
+    this.audio.load();
     this.audio.volume = this.volume;
     if (startPosition > 0) {
       this.audio.currentTime = startPosition;
@@ -192,14 +196,15 @@ const player = {
 
   // ─── Internal Event Handlers ──────────────────────────────
   _onTimeUpdate() {
-    this.position = this.audio.currentTime;
+    this.position = this.audio.currentTime || 0;
     this.duration = this.audio.duration || this.duration;
 
     // Check 98% threshold to mark as played
-    if (this.duration > 0 && this.position / this.duration >= 0.98) {
-      if (this.currentEpisode && !this.currentEpisode._markedPlayed) {
+    const playedRatio = this.duration > 0 ? this.position / this.duration : 0;
+    if (this.duration > 0 && (playedRatio >= 0.98 || this.position >= this.duration - 0.5)) {
+      if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
         this.currentEpisode._markedPlayed = true;
-        this._markPlayed(this.currentEpisode);
+        this._markPlayed(this.currentEpisode, { force: true });
       }
     }
 
@@ -208,11 +213,15 @@ const player = {
 
   _onEnded() {
     console.log('[player] Episode ended:', this.currentEpisode?.title);
-    if (this.currentEpisode && !this.currentEpisode._markedPlayed) {
+    this.duration = this.audio.duration || this.duration || 0;
+    this.position = this.duration > 0 ? this.duration : (this.audio.currentTime || this.position || 0);
+
+    if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
       this.currentEpisode._markedPlayed = true;
-      this._markPlayed(this.currentEpisode);
+      this._markPlayed(this.currentEpisode, { force: true, position: this.position, duration: this.duration });
     }
     this.isPlaying = false;
+    this._notifyStateChange();
 
     // Advance queue
     if (this.queue.length > 0) {
@@ -239,12 +248,13 @@ const player = {
     if (!guid) return;
 
     const episode = this.currentEpisode;
-    const pos = this.position;
+    const pos = Math.max(0, Math.floor(this.position || this.audio.currentTime || 0));
+    const dur = Math.max(0, Math.floor(this.duration || this.audio.duration || 0));
 
     try {
       await api.updateProgress(guid, episode.guid, {
-        position: Math.floor(pos),
-        duration: Math.floor(this.duration),
+        position: pos,
+        duration: dur,
         played: false,
         feedId: episode.feedId,
       });
@@ -256,19 +266,22 @@ const player = {
       }
       this.lastSyncPosition = pos;
       this.skippedSeconds = 0;
-      console.log(`[player] Progress synced: ${formatTime(pos)} / ${formatTime(this.duration)}`);
+      console.log(`[player] Progress synced: ${formatTime(pos)} / ${formatTime(dur)}`);
     } catch (err) {
       console.error('[player] _syncProgress error:', err);
     }
   },
 
-  async _markPlayed(episode) {
+  async _markPlayed(episode, options = {}) {
     const guid = localStorage.getItem('podwaffle_guid');
-    if (!guid || !episode) return;
+    if (!guid || !episode || episode._markingPlayed) return;
+    episode._markingPlayed = true;
     try {
+      const finalPosition = Math.max(0, Math.floor(options.position ?? this.position ?? this.audio.currentTime ?? this.duration ?? 0));
+      const finalDuration = Math.max(0, Math.floor(options.duration ?? this.duration ?? this.audio.duration ?? 0));
       await api.updateProgress(guid, episode.guid, {
-        position: Math.floor(this.duration),
-        duration: Math.floor(this.duration),
+        position: finalPosition,
+        duration: finalDuration,
         played: true,
         feedId: episode.feedId,
       });
@@ -280,18 +293,20 @@ const player = {
         podcastTitle: episode.podcastTitle,
         imageUrl: episode.imageUrl,
         listenedAt: new Date().toISOString(),
-        duration: Math.floor(this.duration),
+        duration: finalDuration,
       });
 
       // Final stats update
-      const listenedDelta = Math.max(0, this.position - this.lastSyncPosition);
+      const listenedDelta = Math.max(0, finalPosition - this.lastSyncPosition);
       if (listenedDelta > 0) {
         await api.updateStats(guid, Math.floor(listenedDelta), 0);
       }
-      this.lastSyncPosition = this.position;
+      this.lastSyncPosition = finalPosition;
       console.log('[player] Episode marked as played:', episode.title);
     } catch (err) {
       console.error('[player] _markPlayed error:', err);
+    } finally {
+      episode._markingPlayed = false;
     }
   },
 
@@ -304,9 +319,7 @@ const player = {
       title: episode.title || 'Unknown',
       artist: episode.podcastTitle || 'Podwaffle',
       album: 'Podwaffle',
-      artwork: episode.imageUrl
-        ? [{ src: episode.imageUrl, sizes: '512x512', type: 'image/jpeg' }]
-        : [],
+      artwork: [],
     });
 
     navigator.mediaSession.setActionHandler('play', () => player.play());
@@ -392,7 +405,7 @@ const player = {
     this._activeCastDeviceId = deviceId;
 
     try {
-      await api.castPlay(deviceId, this.currentEpisode.audioUrl, pos);
+      await api.castPlay(deviceId, this.currentEpisode.audioUrl, pos, this.currentEpisode.guid, localStorage.getItem('podwaffle_guid'));
       this.isPlaying = true;
       this._notifyStateChange();
       console.log('[player] Cast started on device:', deviceId);
@@ -417,14 +430,12 @@ const player = {
 
     this.mode = 'local';
     this._activeCastDeviceId = null;
-    if (this.currentEpisode) {
+    if (pos > 0) {
       this.audio.currentTime = pos;
-      this.audio.play().catch(err => console.error('[player] local play error:', err));
     }
-    this._notifyStateChange();
+    this.play();
   },
 };
 
-// Initialize player
-player.init();
 window.player = player;
+player.init();

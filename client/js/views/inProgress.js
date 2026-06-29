@@ -1,7 +1,6 @@
 async function renderInProgress(container) {
   container.innerHTML = `
     <div class="view-header">
-      <h1 class="view-title">In Progress</h1>
     </div>
     <div id="ip-content">
       <div class="loading-state">

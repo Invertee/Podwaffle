@@ -70,8 +70,8 @@ async function initApp() {
     const user = await window.api.getUser(window.appState.guid);
     window.appState.user = user;
     if (user.settings && window.player) {
-      window.player.skipBackSeconds = user.settings.skipBack || 15;
-      window.player.skipForwardSeconds = user.settings.skipForward || 45;
+      window.player.skipBackSecs = user.settings.skipBack || 15;
+      window.player.skipForwardSecs = user.settings.skipForward || 45;
     }
 
     // 3. Render static UI components
@@ -81,9 +81,32 @@ async function initApp() {
     window.queue.render('queue-panel');
     window.castModal.render('cast-modal');
 
-    // 4. Connect WebSocket
+    // 4. Connect WebSocket and rejoin cast session if active
     if (window.castClient) {
       window.castClient.connect();
+      try {
+        const castState = await window.api.getCastState();
+        if (castState && castState.activeDeviceId && castState.mediaUrl) {
+          if (window.player) {
+            window.player.mode = 'cast';
+            window.player._activeCastDeviceId = castState.activeDeviceId;
+            window.player.position = castState.position || 0;
+            window.player.duration = castState.duration || 0;
+            window.player.isPlaying = castState.status === 'playing';
+            window.player.currentEpisode = window.player.currentEpisode || {
+              title: 'Casting session',
+              podcastTitle: 'Casting',
+              audioUrl: castState.mediaUrl,
+              podcastImageUrl: null,
+              guid: null,
+              feedId: null
+            };
+            window.player._notifyStateChange();
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to rejoin cast session:', err);
+      }
     }
 
     // 5. Initial routing

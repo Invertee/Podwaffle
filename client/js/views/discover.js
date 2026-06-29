@@ -3,12 +3,11 @@ let searchTimeout = null;
 async function renderDiscover(container) {
   container.innerHTML = `
     <div class="view-header">
-      <h1 class="view-title">Discover</h1>
     </div>
+    <br>
     <div class="discover-search">
       <div class="search-input-wrapper">
-        <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input type="text" id="discover-search-input" placeholder="Search for podcasts...">
+        <input type="text" class="input" id="discover-search-input" placeholder="Search for podcasts...">
       </div>
     </div>
     <div id="discover-results" class="podcast-grid search-results-grid">
@@ -75,9 +74,7 @@ async function performSearch(query, guid, resultsEl) {
         <div class="podcast-tile search-result-tile">
           <img src="${res.imageUrl || '/icons/icon-192.png'}" onerror="this.src='/icons/icon-192.png'">
           <div class="tile-overlay always-visible-overlay">
-            <span class="tile-title">${res.title}</span>
-            <span class="tile-author">${res.author || ''}</span>
-            <button class="btn btn-small btn-block mt-2 btn-discover-sub" 
+            <button class="button btn btn-small btn-block mt-2  btn-discover-sub" 
                     data-url="${res.feedUrl}" 
                     data-subbed="${isSubbed}">
               ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}

@@ -29,6 +29,7 @@ const CLIENT_DIR = path.join(__dirname, '..', 'client');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const USERS_DIR = path.join(DATA_DIR, 'users');
 const PODCASTS_DIR = path.join(DATA_DIR, 'podcasts');
+const LOG_HTTP_REQUESTS = false;
 
 // ---------------------------------------------------------------------------
 // Startup banner
@@ -84,7 +85,9 @@ app.use(express.json({ limit: '1mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`[http] ${req.method} ${req.url}`);
+  if (LOG_HTTP_REQUESTS) {
+    console.log(`[http] ${req.method} ${req.url}`);
+  }
   next();
 });
 

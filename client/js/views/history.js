@@ -1,8 +1,8 @@
 async function renderHistory(container) {
   container.innerHTML = `
     <div class="view-header">
-      <h1 class="view-title">History</h1>
     </div>
+    <br>
     <div id="history-content">
       <div class="loading-state">
         <div class="spinner spin"></div>
@@ -15,7 +15,8 @@ async function renderHistory(container) {
   const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
   
   try {
-    const history = await window.api.getHistory(guid, 100, 0); // Get last 100 items
+    const historyPayload = await window.api.getHistory(guid, 100, 0); // Get last 100 items
+    const history = Array.isArray(historyPayload) ? historyPayload : (historyPayload.history || []);
     
     if (!history || history.length === 0) {
       contentEl.innerHTML = `
@@ -62,7 +63,6 @@ async function renderHistory(container) {
       
       html += `
         <div class="history-item">
-          <img src="${entry.imageUrl}" class="history-item-thumb" onerror="this.src='/icons/icon-192.png'">
           <div class="history-item-info">
             <div class="history-item-title">${entry.title}</div>
             <div class="history-item-podcast">${entry.podcastTitle}</div>

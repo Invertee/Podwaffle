@@ -7,7 +7,7 @@ const playerBar = {
 
     this.container.innerHTML = `
       <div class="player-now-playing" id="pb-now-playing">
-        <img id="pb-art" src="/icons/icon-192.png" alt="Artwork">
+        <img id="pb-art" class="player-art" src="/icons/icon-192.png" alt="Podcast artwork">
         <div class="pb-info">
           <div id="pb-title" class="pb-title">Nothing playing</div>
           <div id="pb-podcast" class="pb-podcast">Select a podcast to start</div>
@@ -79,6 +79,7 @@ const playerBar = {
       const pos = parseFloat(e.target.value);
       const total = window.player ? window.player.duration : 0;
       this._updateTimeDisplays(pos, total);
+      this._setScrubberPct(pos, total);
     });
     scrubber.addEventListener('change', (e) => {
       // On mouse up, perform the seek
@@ -119,6 +120,14 @@ const playerBar = {
     const remaining = Math.max(0, duration - position);
     document.getElementById('pb-time-total').textContent = '-' + this._formatTime(remaining);
   },
+
+  _setScrubberPct(position, duration) {
+    const scrubber = document.getElementById('pb-scrubber');
+    if (!scrubber) return;
+    const total = duration > 0 ? duration : 100;
+    const pct = Math.max(0, Math.min(100, (position / total) * 100));
+    scrubber.style.setProperty('--progress-pct', `${pct}%`);
+  },
   
   update(state) {
     if (!this.container) return;
@@ -134,7 +143,7 @@ const playerBar = {
     if (state.currentEpisode) {
       document.getElementById('pb-title').textContent = state.currentEpisode.title || 'Unknown Episode';
       document.getElementById('pb-podcast').textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
-      document.getElementById('pb-art').src = state.currentEpisode.imageUrl || '/icons/icon-192.png';
+      document.getElementById('pb-art').src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || '/icons/icon-192.png';
     } else {
       document.getElementById('pb-title').textContent = 'Nothing playing';
       document.getElementById('pb-podcast').textContent = 'Select a podcast to start';
@@ -156,11 +165,12 @@ const playerBar = {
       scrubber.max = state.duration || 100;
       scrubber.value = state.position || 0;
       this._updateTimeDisplays(state.position, state.duration);
+      this._setScrubberPct(state.position, state.duration);
     }
     
     // Update skip texts
-    document.querySelector('#pb-skip-back .skip-text').textContent = state.skipBack;
-    document.querySelector('#pb-skip-forward .skip-text').textContent = state.skipForward;
+    document.querySelector('#pb-skip-back .skip-text').textContent = state.skipBackSecs;
+    document.querySelector('#pb-skip-forward .skip-text').textContent = state.skipForwardSecs;
     
     // Update volume
     const volSlider = document.getElementById('pb-volume');

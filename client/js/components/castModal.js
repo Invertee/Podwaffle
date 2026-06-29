@@ -6,25 +6,28 @@ const castModal = {
     if (!this.container) return;
     
     this.container.innerHTML = `
-      <div class="cast-modal-overlay"></div>
-      <div class="cast-modal">
-        <div class="cast-modal-header">
-          <div id="cast-modal-info" class="cast-modal-info">
-            <!-- Populated dynamically -->
+      <div class="cast-modal-overlay">
+        <div class="cast-modal">
+          <div class="cast-modal-header">
+            <div id="cast-modal-info" class="cast-modal-info">
+              <!-- Populated dynamically -->
+            </div>
+            <button id="cast-modal-close" class="btn-icon"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
-          <button id="cast-modal-close" class="btn-icon"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
-        </div>
-        <h3 class="cast-modal-title">Cast to a device</h3>
-        <div id="cast-device-list" class="cast-device-list">
-          <div class="cast-loading">
-            <div class="spinner spin"></div>
-            Searching for devices...
+          <h3 class="cast-modal-title">Cast to a device</h3>
+          <div id="cast-device-list" class="cast-device-list">
+            <div class="cast-loading">
+              <div class="spinner spin"></div>
+              Searching for devices...
+            </div>
           </div>
         </div>
       </div>
     `;
     
-    this.container.querySelector('.cast-modal-overlay').addEventListener('click', () => this.hide());
+    this.container.querySelector('.cast-modal-overlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) this.hide();
+    });
     document.getElementById('cast-modal-close').addEventListener('click', () => this.hide());
   },
   
@@ -37,7 +40,7 @@ const castModal = {
     if (window.player && window.player.currentEpisode) {
       const ep = window.player.currentEpisode;
       infoEl.innerHTML = `
-        <img src="${ep.imageUrl}" onerror="this.src='/icons/icon-192.png'">
+        <!-- Artwork disabled for now -->
         <div>
           <div class="cmi-podcast">${ep.podcastTitle}</div>
           <div class="cmi-title">${ep.title}</div>
@@ -83,7 +86,7 @@ const castModal = {
     let html = '';
     
     const isCastMode = window.player && window.player.mode === 'cast';
-    const activeDeviceId = window.player ? window.player.activeCastDeviceId : null;
+    const activeDeviceId = window.player ? (window.player._activeCastDeviceId || window.player.activeCastDeviceId) : null;
     
     // Always show Local Playback option first
     html += `
@@ -98,13 +101,14 @@ const castModal = {
     
     if (devices && devices.length > 0) {
       devices.forEach(d => {
+        const displayName = d.friendlyName || d.name || 'Cast device';
         const isActive = isCastMode && activeDeviceId === d.id;
         html += `
           <div class="cast-device-item ${isActive ? 'active' : ''}" data-id="${d.id}">
             <div class="cast-device-icon">
               <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
             </div>
-            <div class="cast-device-name">${d.name}</div>
+            <div class="cast-device-name">${displayName}</div>
             ${isActive ? '<div class="cast-active-dot"></div>' : ''}
           </div>
         `;
