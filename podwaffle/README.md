@@ -20,4 +20,5 @@ This folder contains a Home Assistant add-on package for Podwaffle.
 - The add-on uses `ingress: true` and defaults to internal port `3000`.
 - The add-on build clones the GitHub repository at build time, so your repo must be public or otherwise accessible to the Home Assistant build environment.
 - Persistent app data is stored via the Home Assistant add-on `/data` volume and mounted into Podwaffle's expected data directory at runtime.
+- The app source is copied into the add-on config share at `/config/app` on first boot so you can browse it easily under `addon_configs`.
 - If you publish under a different GitHub URL, update `url` in `config.json` and `repository.yaml`.

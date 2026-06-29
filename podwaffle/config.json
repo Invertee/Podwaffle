@@ -17,7 +17,7 @@
   "panel_icon": "mdi:podcast",
   "panel_title": "Podwaffle",
   "map": [
-    "config:rw"
+    "addon_config:rw"
   ],
   "options": {},
   "schema": {}
