@@ -4,7 +4,10 @@
   "slug": "podwaffle",
   "description": "Self-hosted podcast app with casting support",
   "url": "https://github.com/Invertee/Podwaffle",
-  "arch": ["amd64", "aarch64", "armv7", "armhf", "i386"],
+  "arch": [
+    "amd64",
+    "aarch64"
+  ],
   "startup": "application",
   "boot": "auto",
   "init": false,
