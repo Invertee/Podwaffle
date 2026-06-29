@@ -48,6 +48,7 @@ html, body {
   height: 100%;
   margin: 0;
   padding: 0;
+  overscroll-behavior-y: contain;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -275,7 +276,7 @@ body {
   align-items: center;
   gap: 16px;
   overflow-y: auto;
-  padding-bottom: 3pc;
+  padding-bottom: 5pc;
 }
 
 .player-mobile-art {
@@ -307,7 +308,7 @@ body {
 }
 
 .player-mobile-progress {
-  width: 100%;
+  width: 85%;
   display: grid;
   grid-template-columns: 44px 1fr 44px;
   align-items: center;
@@ -319,12 +320,12 @@ body {
 }
 
 .player-mobile-transport {
-  width: 100%;
+  width: 60%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 4px;
+  margin-top: 20px;
 }
 
 .player-mobile-tools {
@@ -579,6 +580,52 @@ body {
   background: linear-gradient(135deg, var(--bg-elevated), var(--bg-secondary));
   color: var(--text-muted);
   font-size: 32px;
+}
+
+.podcast-tile.dragging {
+  opacity: 0.3;
+  transform: scale(0.92);
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.touch-drag-ghost {
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.7) !important;
+}
+
+/* ----------------------------------------------------------
+   Pull-to-refresh indicator
+   ---------------------------------------------------------- */
+.pull-refresh-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.pull-refresh-icon {
+  display: flex;
+  align-items: center;
+  color: var(--accent-red);
+}
+
+.pull-refresh-icon.spinning svg {
+  animation: spin 0.7s linear infinite;
 }
 
 /* ----------------------------------------------------------
@@ -876,10 +923,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
-  background-color: var(--accent-red);
   border: none;
   color: #fff;
   cursor: pointer;
@@ -935,7 +981,7 @@ body {
 input[type=range] {
   -webkit-appearance: none;
   appearance: none;
-  height: 3px;
+  height: 7px;
   background: var(--border-color);
   border-radius: 2px;
   outline: none;
@@ -950,12 +996,12 @@ input[type=range]:hover {
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--accent-blue);
+  background: var(--accent-red);
   cursor: pointer;
-  box-shadow: 0 0 4px rgba(59,130,246,0.5);
+  box-shadow: 0 0 4px rgba(255, 137, 3, 0.5);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
