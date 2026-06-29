@@ -3,15 +3,18 @@ FROM ${BUILD_FROM}
 
 WORKDIR /opt/podwaffle
 
-RUN apk add --no-cache nodejs npm bash
+RUN apk add --no-cache nodejs npm bash git
 
-COPY server/package*.json /opt/podwaffle/server/
-RUN cd /opt/podwaffle/server && npm ci --omit=dev
+ARG REPO_URL=https://github.com/Invertee/Podwaffle.git
+ARG REPO_REF=main
 
-COPY server /opt/podwaffle/server
-COPY client /opt/podwaffle/client
-COPY data /opt/podwaffle/data
-COPY ha-addon/podwaffle/run.sh /run.sh
+# The HA add-on build context only includes this folder, so fetch the app source
+# at build time from the GitHub repository.
+RUN git clone --depth 1 --branch ${REPO_REF} ${REPO_URL} /opt/podwaffle/src
+
+RUN cd /opt/podwaffle/src/server && npm ci --omit=dev
+
+COPY run.sh /run.sh
 
 RUN chmod a+x /run.sh
 

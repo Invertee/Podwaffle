@@ -14,9 +14,6 @@
   "ingress": true,
   "ingress_port": 3000,
   "host_network": true,
-  "homeassistant_api": false,
-  "hassio_api": false,
-  "hassio_role": "default",
   "panel_icon": "mdi:podcast",
   "panel_title": "Podwaffle",
   "map": [
