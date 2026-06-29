@@ -59,7 +59,8 @@ const player = {
   },
 
   // ─── Load & Play ─────────────────────────────────────────
-  loadEpisode(episode, startPosition = 0) {
+  loadEpisode(episode, startPosition = 0, options = {}) {
+    const autoplay = options.autoplay !== false;
     if (!episode || !episode.audioUrl) {
       console.error('[player] loadEpisode: missing audioUrl', episode);
       return;
@@ -127,7 +128,9 @@ const player = {
     this._updateMediaSession();
     this._notifyStateChange();
     this._setupProgressSync();
-    this.play();
+    if (autoplay) {
+      this.play();
+    }
   },
 
   play() {

@@ -21,11 +21,57 @@ window.navigate = function(hash) {
   window.location.hash = hash;
 };
 
+function resetRouteScroll(mainContent) {
+  window.scrollTo(0, 0);
+  if (mainContent) {
+    mainContent.scrollTop = 0;
+  }
+  requestAnimationFrame(() => {
+    window.scrollTo(0, 0);
+    if (mainContent) {
+      mainContent.scrollTop = 0;
+    }
+  });
+}
+
+async function restoreLastInProgressEpisode(guid) {
+  if (!window.player || !window.api || !guid) return;
+  if (window.player.mode === 'cast' && window.player._activeCastDeviceId) return;
+  if (window.player.currentEpisode) return;
+
+  try {
+    const progress = await window.api.getProgress(guid);
+    const candidates = Object.entries(progress || {})
+      .map(([episodeGuid, data]) => ({ episodeGuid, ...(data || {}) }))
+      .filter((item) => !item.played && (item.position || 0) > 0 && item.feedId)
+      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+    for (const item of candidates) {
+      try {
+        const podcast = await window.api.getPodcast(item.feedId, 500, 0);
+        const episode = (podcast.episodes || []).find((ep) => ep.guid === item.episodeGuid);
+        if (!episode) continue;
+
+        episode.podcastTitle = podcast.title;
+        episode.podcastImageUrl = podcast.imageUrl;
+        episode.feedId = item.feedId;
+        window.player.loadEpisode(episode, item.position || 0, { autoplay: false });
+        return;
+      } catch (feedErr) {
+        console.warn('[app] Failed to restore candidate episode:', item.episodeGuid, feedErr);
+      }
+    }
+  } catch (err) {
+    console.warn('[app] Failed to restore last in-progress episode:', err);
+  }
+}
+
 async function handleRoute() {
   const hash = window.location.hash || '#/podcasts';
   window.appState.currentRoute = hash;
   
   const mainContent = document.getElementById('main-content');
+  resetRouteScroll(mainContent);
   
   // Update Nav
   let routeName = hash.replace('#/', '');
@@ -52,6 +98,8 @@ async function handleRoute() {
   } catch(err) {
     console.error('Route error:', err);
     mainContent.innerHTML = `<div class="error-state">An error occurred loading this page.</div>`;
+  } finally {
+    resetRouteScroll(mainContent);
   }
 }
 
@@ -82,11 +130,13 @@ async function initApp() {
     window.castModal.render('cast-modal');
 
     // 4. Connect WebSocket and rejoin cast session if active
+    let hasActiveCastSession = false;
     if (window.castClient) {
       window.castClient.connect();
       try {
         const castState = await window.api.getCastState();
         if (castState && castState.activeDeviceId && castState.mediaUrl) {
+          hasActiveCastSession = true;
           if (window.player) {
             window.player.audio.pause();
             window.player.audio.removeAttribute('src');
@@ -115,9 +165,13 @@ async function initApp() {
       }
     }
 
+    if (!hasActiveCastSession) {
+      await restoreLastInProgressEpisode(window.appState.guid);
+    }
+
     // 5. Initial routing
     window.addEventListener('hashchange', handleRoute);
-    handleRoute();
+    await handleRoute();
 
     // 6. Register Service Worker
     if ('serviceWorker' in navigator) {

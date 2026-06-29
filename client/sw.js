@@ -1,5 +1,5 @@
-const CACHE_NAME = 'podwaffle-media-v1';
-const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const AUDIO_CACHE_NAME = 'podwaffle-audio-v2';
+const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 
 // On install: skip waiting
 self.addEventListener('install', event => { 
@@ -9,18 +9,11 @@ self.addEventListener('install', event => {
 // On activate: claim clients, evict stale entries
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async cache => {
-      const keys = await cache.keys();
-      const now = Date.now();
-      for (const request of keys) {
-        const response = await cache.match(request);
-        const dateHeader = response?.headers.get('sw-cached-at');
-        if (dateHeader) {
-          const cachedAt = parseInt(dateHeader);
-          if (now - cachedAt > MAX_AGE_MS) {
-            await cache.delete(request);
-            console.log('[SW] Evicted stale cache entry:', request.url);
-          }
+    caches.keys().then(async (keys) => {
+      const valid = new Set([AUDIO_CACHE_NAME, IMAGE_CACHE_NAME]);
+      for (const key of keys) {
+        if (!valid.has(key)) {
+          await caches.delete(key);
         }
       }
     })
@@ -28,53 +21,72 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// On fetch: intercept audio requests
+function isAudioRequest(request, url) {
+  if (request.method !== 'GET') return false;
+  const extensionMatch = /\.(mp3|m4a|ogg|wav|aac|opus|flac)$/i.test(url.pathname);
+  const rangeRequest = request.headers.get('range') !== null;
+  const hintedAudio = url.searchParams.has('_audio');
+  return extensionMatch || rangeRequest || hintedAudio;
+}
+
+function isArtworkRequest(request, url) {
+  if (request.method !== 'GET') return false;
+  if (request.destination === 'image') return true;
+  return /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(url.pathname);
+}
+
+// On fetch: intercept audio + image requests
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  
-  // Only cache GET requests
-  if (event.request.method !== 'GET') return;
-  
-  // Only cache audio file requests (mp3, m4a, ogg, etc.)
-  // Often podcast URLs don't have clear extensions, so we also check for typical audio headers or parameters if possible.
-  // We'll use a broad check for known audio extensions.
-  const isAudio = /\.(mp3|m4a|ogg|wav|aac|opus)/i.test(url.pathname);
-  
-  // For requests from our own player, we might append ?_audio=1 or rely on range headers
-  const isPlayerAudioRequest = event.request.headers.get('range') !== null || url.searchParams.has('_audio');
-  
-  if (!isAudio && !isPlayerAudioRequest) {
-    return; // Let browser handle normally
+
+  if (isArtworkRequest(event.request, url)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(IMAGE_CACHE_NAME);
+      const cached = await cache.match(event.request);
+
+      const networkFetch = fetch(event.request)
+        .then((response) => {
+          if (response && (response.ok || response.type === 'opaque')) {
+            cache.put(event.request, response.clone());
+          }
+          return response;
+        })
+        .catch(() => null);
+
+      if (cached) {
+        networkFetch.catch(() => null);
+        return cached;
+      }
+
+      const fresh = await networkFetch;
+      if (fresh) return fresh;
+      return new Response('', { status: 504, statusText: 'Image unavailable' });
+    })());
+    return;
   }
-  
+
+  if (!isAudioRequest(event.request, url)) {
+    return;
+  }
+
   event.respondWith(
-    caches.open(CACHE_NAME).then(async cache => {
+    caches.open(AUDIO_CACHE_NAME).then(async cache => {
       const cached = await cache.match(event.request);
       if (cached) {
         console.log('[SW] Serving from cache:', url.href);
         return cached;
       }
-      
+
       // Fetch and cache
       try {
         const response = await fetch(event.request);
-        
-        // Only cache successful complete responses (not 206 Partial Content, caching partials gets complicated)
-        // If we want to cache properly, we should cache the full 200 OK.
-        // The browser's native audio element handles range requests automatically if the file is served from cache.
+
+        // Cache successful complete responses only (range 206 responses are intentionally excluded)
         if (response.status === 200) {
-          // Clone and add timestamp header
-          const headers = new Headers(response.headers);
-          headers.set('sw-cached-at', Date.now().toString());
-          const cachedResponse = new Response(await response.clone().blob(), {
-            status: response.status,
-            statusText: response.statusText,
-            headers
-          });
-          cache.put(event.request, cachedResponse);
+          cache.put(event.request, response.clone());
           console.log('[SW] Cached audio:', url.href);
         }
-        
+
         return response;
       } catch (err) {
         console.error('[SW] Fetch failed:', err);

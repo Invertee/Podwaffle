@@ -17,8 +17,62 @@ async function renderProfile(container) {
   try {
     const user = await window.api.getUser(guid);
     const settings = user.settings || {};
+    const stats = user.stats || {};
+    const progress = user.progress || {};
+    const history = Array.isArray(user.history) ? user.history : [];
+    const subscriptions = Array.isArray(user.subscriptions) ? user.subscriptions : [];
+
+    const listenedSeconds = Math.max(0, Number(stats.totalListenedSeconds || 0));
+    const skippedSeconds = Math.max(0, Number(stats.totalSkippedSeconds || 0));
+    const completedEpisodes = Object.values(progress).filter((entry) => entry && entry.played).length;
+
+    const listenedHours = listenedSeconds / 3600;
+    const listenedDays = listenedSeconds / 86400;
+    const skippedHours = skippedSeconds / 3600;
+    const skippedDays = skippedSeconds / 86400;
+
+    const fmt1 = (n) => (Number.isFinite(n) ? n.toFixed(1) : '0.0');
+    const fmt2 = (n) => (Number.isFinite(n) ? n.toFixed(2) : '0.00');
 
     contentEl.innerHTML = `
+      <div class="profile-section">
+        <h2 class="profile-section-title">Listening Stats</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value">${fmt1(listenedHours)}</div>
+            <div class="stat-label">Hours Listened</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${fmt2(listenedDays)}</div>
+            <div class="stat-label">Days Listened</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${fmt1(skippedHours)}</div>
+            <div class="stat-label">Hours Skipped</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${fmt2(skippedDays)}</div>
+            <div class="stat-label">Days Skipped</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${completedEpisodes}</div>
+            <div class="stat-label">Episodes Completed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${history.length}</div>
+            <div class="stat-label">History Entries</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${subscriptions.length}</div>
+            <div class="stat-label">Subscribed Podcasts</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${Object.keys(progress).length}</div>
+            <div class="stat-label">Episodes Tracked</div>
+          </div>
+        </div>
+      </div>
+
       <div class="profile-section">
         <div class="profile-card">
           <label class="profile-label">Your GUID</label>

@@ -95,13 +95,6 @@ function createEpisodeRow(episode, progress, options = {}) {
   if (playLastBtn) playLastBtn.addEventListener('click', (e) => { e.stopPropagation(); onPlayLast(episode); });
   if (markPlayedBtn) markPlayedBtn.addEventListener('click', (e) => { e.stopPropagation(); onMarkPlayed(episode); });
 
-  // Make the whole row clickable to play (unless clicking a button or checkbox)
-  row.addEventListener('click', (e) => {
-    if (!e.target.closest('.episode-actions') && !e.target.closest('.checkbox')) {
-      onPlay(episode);
-    }
-  });
-
   return row;
 }
 
