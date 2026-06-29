@@ -159,6 +159,37 @@ async function removeSubscription(guid, feedIdOrUrl) {
 }
 
 /**
+ * Reorder subscriptions. orderedFeedIds is an array of feedId (MD5 hash)
+ * values in the desired order.
+ */
+async function reorderSubscriptions(guid, orderedFeedIds) {
+  console.log(`[userService] reorderSubscriptions(${guid}) → ${orderedFeedIds.length} entries`);
+  const crypto = require('crypto');
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  // Build feedId → feedUrl map from current subscriptions
+  const urlByFeedId = {};
+  for (const url of profile.subscriptions) {
+    const feedId = crypto.createHash('md5').update(url).digest('hex');
+    urlByFeedId[feedId] = url;
+  }
+
+  // Rebuild array in new order; append any not mentioned
+  const reordered = orderedFeedIds
+    .filter(id => urlByFeedId[id])
+    .map(id => urlByFeedId[id]);
+  for (const url of profile.subscriptions) {
+    if (!reordered.includes(url)) reordered.push(url);
+  }
+
+  profile.subscriptions = reordered;
+  await saveUser(profile);
+  console.log(`[userService] reorderSubscriptions(${guid}) → done`);
+  return profile.subscriptions;
+}
+
+/**
  * Return the list of subscribed feed URLs for a user.
  */
 async function getSubscriptions(guid) {
@@ -363,6 +394,7 @@ module.exports = {
   updateSettings,
   addSubscription,
   removeSubscription,
+  reorderSubscriptions,
   getSubscriptions,
   updateProgress,
   getProgress,

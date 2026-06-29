@@ -116,7 +116,7 @@ const castClient = {
       } catch (err) {
         console.warn('[castClient] cast state poll failed:', err.message || err);
       }
-    }, 3000);
+    }, 1000);
   },
 
   _stopStatePolling() {
@@ -191,6 +191,14 @@ const castClient = {
       case 'feeds:updated':
         // Notify any registered feed-update listeners
         this._dispatch('feeds:updated', data.data);
+        break;
+
+      case 'user:progress':
+        this._dispatch('user:progress', data.data);
+        break;
+
+      case 'user:subscriptions':
+        this._dispatch('user:subscriptions', data.data);
         break;
 
       default:

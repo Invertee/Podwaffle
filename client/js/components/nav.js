@@ -57,6 +57,16 @@ const nav = {
     }
     
     container.innerHTML = html;
+
+    if (!isSidebar) {
+      container.querySelectorAll('.bottom-nav-item').forEach((item) => {
+        item.addEventListener('click', () => {
+          if (window.playerBar && window.playerBar.isFullscreenOpen) {
+            window.playerBar.closeFullscreenControls();
+          }
+        });
+      });
+    }
   },
 
   setActive(routeName) {

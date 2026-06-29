@@ -18,17 +18,15 @@ const playerBar = {
       <div class="player-expanded-controls">
         <div class="player-controls">
           <div class="player-transport">
-            <button id="pb-skip-back" class="btn-icon" title="Skip Back">
-              <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 11l19-9v18z"></path><path d="M3 11v8"></path></svg>
-              <span class="skip-text">15</span>
+            <button id="pb-skip-back" class="button is-warning is-active is-rounded" title="Skip Back">
+              <img src="/icons/skip-backwards.svg" alt="Skip Back" width="24" height="24">
             </button>
-            <button id="pb-play-pause" class="btn-icon btn-play-pause" title="Play/Pause">
-              <svg id="pb-play-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
-              <svg id="pb-pause-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="10"></circle><line x1="10" y1="15" x2="10" y2="9"></line><line x1="14" y1="15" x2="14" y2="9"></line></svg>
+            <button id="pb-play-pause" class="button is-danger is-active is-rounded" title="Play/Pause">
+              <img id="pb-play-icon" src="/icons/play.svg" alt="Play" width="32" height="32">
+              <img id="pb-pause-icon" src="/icons/pause.svg" alt="Pause" width="32" height="32" style="display:none;">
             </button>
-            <button id="pb-skip-forward" class="btn-icon" title="Skip Forward">
-              <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 11L2 2v18z"></path><path d="M21 11v8"></path></svg>
-              <span class="skip-text">45</span>
+            <button id="pb-skip-forward" class="button is-warning is-active is-rounded" title="Skip Forward">
+              <img src="/icons/skip-forward.svg" alt="Skip Forward" width="24" height="24">
             </button>
           </div>
           
@@ -80,17 +78,15 @@ const playerBar = {
               <span id="pb-mobile-time-total" class="pb-time">-0:00</span>
             </div>
             <div class="player-mobile-transport">
-              <button id="pb-mobile-skip-back" class="btn-icon btn-play-pause" title="Skip Back">
-                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 11l19-9v18z"></path><path d="M3 11v8"></path></svg>
-                <span class="skip-text">15</span>
+              <button id="pb-mobile-skip-back" class="btn-play-pause button is-danger" title="Skip Back">
+                <img src="/icons/skip-backwards.svg" alt="Skip Back" width="35" height="35">
               </button>
-              <button id="pb-mobile-play-pause" class="btn-icon btn-play-pause" title="Play/Pause">
-                <svg id="pb-mobile-play-icon" viewBox="0 0 24 24" width="34" height="34" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
-                <svg id="pb-mobile-pause-icon" viewBox="0 0 24 24" width="34" height="34" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="10"></circle><line x1="10" y1="15" x2="10" y2="9"></line><line x1="14" y1="15" x2="14" y2="9"></line></svg>
+              <button id="pb-mobile-play-pause" class="btn-play-pause button is-danger" title="Play/Pause">
+                <img id="pb-mobile-play-icon" src="/icons/play.svg" alt="Play" width="40" height="40">
+                <img id="pb-mobile-pause-icon" src="/icons/pause.svg" alt="Pause" width="40" height="40" style="display:none;">
               </button>
-              <button id="pb-mobile-skip-forward" class="btn-icon btn-play-pause" title="Skip Forward">
-                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 11L2 2v18z"></path><path d="M21 11v8"></path></svg>
-                <span class="skip-text">45</span>
+              <button id="pb-mobile-skip-forward" class="btn-play-pause button is-danger" title="Skip Forward">
+                <img src="/icons/skip-forward.svg" alt="Skip Forward" width="35" height="35">
               </button>
             </div>
             <div class="player-mobile-tools">
@@ -320,6 +316,15 @@ const playerBar = {
   
   update(state) {
     if (!this.container) return;
+    const titleEl = document.getElementById('pb-title');
+    const podcastEl = document.getElementById('pb-podcast');
+    const artEl = document.getElementById('pb-art');
+    const playIcon = document.getElementById('pb-play-icon');
+    const pauseIcon = document.getElementById('pb-pause-icon');
+    const scrubber = document.getElementById('pb-scrubber');
+    const volSlider = document.getElementById('pb-volume');
+    const castBtn = document.getElementById('pb-cast');
+    const badge = document.getElementById('pb-queue-badge');
     
     // Slide up animation if we have an episode
     if (state.currentEpisode && !this.container.classList.contains('active')) {
@@ -330,9 +335,9 @@ const playerBar = {
     
     // Update episode info
     if (state.currentEpisode) {
-      document.getElementById('pb-title').textContent = state.currentEpisode.title || 'Unknown Episode';
-      document.getElementById('pb-podcast').textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
-      document.getElementById('pb-art').src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || '/icons/icon-192.png';
+      if (titleEl) titleEl.textContent = state.currentEpisode.title || 'Unknown Episode';
+      if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
+      if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || '/icons/icon-192.png';
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
@@ -340,9 +345,9 @@ const playerBar = {
       if (mobileTitle) mobileTitle.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (mobilePodcast) mobilePodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
     } else {
-      document.getElementById('pb-title').textContent = 'Nothing playing';
-      document.getElementById('pb-podcast').textContent = 'Select a podcast to start';
-      document.getElementById('pb-art').src = '/icons/icon-192.png';
+      if (titleEl) titleEl.textContent = 'Nothing playing';
+      if (podcastEl) podcastEl.textContent = 'Select a podcast to start';
+      if (artEl) artEl.src = '/icons/icon-192.png';
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
@@ -353,15 +358,15 @@ const playerBar = {
     
     // Update play/pause icon
     if (state.isPlaying) {
-      document.getElementById('pb-play-icon').style.display = 'none';
-      document.getElementById('pb-pause-icon').style.display = 'block';
+      if (playIcon) playIcon.style.display = 'none';
+      if (pauseIcon) pauseIcon.style.display = 'block';
       const mobilePlay = document.getElementById('pb-mobile-play-icon');
       const mobilePause = document.getElementById('pb-mobile-pause-icon');
       if (mobilePlay) mobilePlay.style.display = 'none';
       if (mobilePause) mobilePause.style.display = 'block';
     } else {
-      document.getElementById('pb-play-icon').style.display = 'block';
-      document.getElementById('pb-pause-icon').style.display = 'none';
+      if (playIcon) playIcon.style.display = 'block';
+      if (pauseIcon) pauseIcon.style.display = 'none';
       const mobilePlay = document.getElementById('pb-mobile-play-icon');
       const mobilePause = document.getElementById('pb-mobile-pause-icon');
       if (mobilePlay) mobilePlay.style.display = 'block';
@@ -369,8 +374,7 @@ const playerBar = {
     }
     
     // Update scrubber if not currently being dragged
-    const scrubber = document.getElementById('pb-scrubber');
-    if (document.activeElement !== scrubber) {
+    if (scrubber && document.activeElement !== scrubber) {
       scrubber.max = state.duration || 100;
       scrubber.value = state.position || 0;
       this._updateTimeDisplays(state.position, state.duration);
@@ -384,14 +388,9 @@ const playerBar = {
         this._setScrubberPct(state.position, state.duration, mobileScrubber);
       }
     }
-    
-    // Update skip texts
-    document.querySelector('#pb-skip-back .skip-text').textContent = state.skipBackSecs;
-    document.querySelector('#pb-skip-forward .skip-text').textContent = state.skipForwardSecs;
-    
+
     // Update volume
-    const volSlider = document.getElementById('pb-volume');
-    if (document.activeElement !== volSlider) {
+    if (volSlider && document.activeElement !== volSlider) {
       volSlider.value = Math.round(state.volume * 100);
     }
 
@@ -401,20 +400,20 @@ const playerBar = {
     }
     
     // Update cast icon color if casting
-    const castBtn = document.getElementById('pb-cast');
-    if (state.mode === 'cast') {
+    if (castBtn && state.mode === 'cast') {
       castBtn.style.color = 'var(--accent-blue)';
-    } else {
+    } else if (castBtn) {
       castBtn.style.color = '';
     }
     
     // Update queue badge
-    const badge = document.getElementById('pb-queue-badge');
     const mobileBadge = document.getElementById('pb-mobile-queue-badge');
     const mobileBadge2 = document.getElementById('pb-mobile-queue-badge-2');
     if (state.queue && state.queue.length > 0) {
-      badge.textContent = state.queue.length;
-      badge.style.display = 'flex';
+      if (badge) {
+        badge.textContent = state.queue.length;
+        badge.style.display = 'flex';
+      }
       if (mobileBadge) {
         mobileBadge.textContent = state.queue.length;
         mobileBadge.style.display = 'flex';
@@ -424,7 +423,7 @@ const playerBar = {
         mobileBadge2.style.display = 'flex';
       }
     } else {
-      badge.style.display = 'none';
+      if (badge) badge.style.display = 'none';
       if (mobileBadge) mobileBadge.style.display = 'none';
       if (mobileBadge2) mobileBadge2.style.display = 'none';
     }

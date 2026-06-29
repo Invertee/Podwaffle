@@ -144,6 +144,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
       // Add the subscription
       await userService.addSubscription(guid, feedUrl);
       console.log(`[api] POST /users/${guid}/subscriptions → subscribed to "${feedData.title}"`);
+      broadcastWs({ type: 'user:subscriptions', data: { guid } });
 
       res.json({
         feedId: feedData.feedId,
@@ -170,9 +171,29 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
 
       await userService.removeSubscription(guid, feedId);
       console.log(`[api] DELETE /users/${guid}/subscriptions/${feedId} → done`);
+      broadcastWs({ type: 'user:subscriptions', data: { guid } });
       res.json({ success: true, feedId });
     } catch (err) {
       sendError(res, 500, 'Failed to unsubscribe', err.message);
+    }
+  });
+
+  // PATCH /users/:guid/subscriptions — reorder
+  router.patch('/users/:guid/subscriptions', async (req, res) => {
+    const { guid } = req.params;
+    const { order } = req.body || {};
+    console.log(`[api] PATCH /users/${guid}/subscriptions → reorder ${(order || []).length} items`);
+    if (!Array.isArray(order)) {
+      return sendError(res, 400, '"order" must be an array of feedIds');
+    }
+    try {
+      const profile = await userService.getUser(guid);
+      if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
+      await userService.reorderSubscriptions(guid, order);
+      broadcastWs({ type: 'user:subscriptions', data: { guid } });
+      res.json({ success: true });
+    } catch (err) {
+      sendError(res, 500, 'Failed to reorder subscriptions', err.message);
     }
   });
 
@@ -207,6 +228,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
       };
       const updated = await userService.updateProgress(guid, episodeGuid, progressData);
       res.json(updated);
+      broadcastWs({ type: 'user:progress', data: { guid, episodeGuid } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);

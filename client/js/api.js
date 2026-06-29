@@ -122,6 +122,13 @@ const api = {
     });
   },
 
+  async reorderSubscriptions(guid, feedIds) {
+    return this._fetch(`/api/users/${guid}/subscriptions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ order: feedIds }),
+    });
+  },
+
   // ─── Progress ─────────────────────────────────────────
   async getProgress(guid) {
     return this._fetch(`/api/users/${guid}/progress`);

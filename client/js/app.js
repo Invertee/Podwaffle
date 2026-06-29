@@ -34,6 +34,71 @@ function resetRouteScroll(mainContent) {
   });
 }
 
+function initPullToRefresh() {
+  const mainContent = document.getElementById('main-content');
+  if (!mainContent) return;
+
+  let startY = 0;
+  let isDragging = false;
+  let pullDelta = 0;
+  const THRESHOLD = 72;
+
+  const indicator = document.createElement('div');
+  indicator.className = 'pull-refresh-indicator';
+  indicator.innerHTML = `
+    <div class="pull-refresh-icon">
+      <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+    </div>
+    <span class="pull-refresh-label">Pull down to refresh</span>
+  `;
+  document.body.insertAdjacentElement('afterbegin', indicator);
+
+  mainContent.addEventListener('touchstart', (e) => {
+    if (mainContent.scrollTop > 5) return;
+    startY = e.touches[0].clientY;
+    isDragging = true;
+    pullDelta = 0;
+  }, { passive: true });
+
+  mainContent.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    pullDelta = e.touches[0].clientY - startY;
+    if (pullDelta <= 0) { pullDelta = 0; return; }
+    const progress = Math.min(pullDelta / THRESHOLD, 1);
+    const translateY = Math.min(pullDelta * 0.45, 56);
+    indicator.style.opacity = progress;
+    indicator.style.transform = `translateY(${translateY}px)`;
+    indicator.querySelector('.pull-refresh-label').textContent =
+      pullDelta >= THRESHOLD ? 'Release to refresh' : 'Pull down to refresh';
+  }, { passive: true });
+
+  mainContent.addEventListener('touchend', async () => {
+    if (!isDragging) return;
+    isDragging = false;
+    const shouldRefresh = pullDelta >= THRESHOLD;
+    pullDelta = 0;
+
+    if (shouldRefresh) {
+      indicator.querySelector('.pull-refresh-label').textContent = 'Refreshing\u2026';
+      indicator.querySelector('.pull-refresh-icon').classList.add('spinning');
+      indicator.style.opacity = '1';
+      indicator.style.transform = 'translateY(56px)';
+      await handleRoute();
+    }
+
+    indicator.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    indicator.style.opacity = '0';
+    indicator.style.transform = 'translateY(-100%)';
+    setTimeout(() => {
+      indicator.style.transition = '';
+      indicator.querySelector('.pull-refresh-icon').classList.remove('spinning');
+    }, 300);
+  }, { passive: true });
+}
+
 async function restoreLastInProgressEpisode(guid) {
   if (!window.player || !window.api || !guid) return;
   if (window.player.mode === 'cast' && window.player._activeCastDeviceId) return;
@@ -169,6 +234,18 @@ async function initApp() {
       await restoreLastInProgressEpisode(window.appState.guid);
     }
 
+    // Set up cross-client sync listeners
+    if (window.castClient) {
+      window.castClient.on('user:progress', () => {
+        const h = window.location.hash;
+        if (h === '#/in-progress' || h === '#/history') handleRoute();
+      });
+      window.castClient.on('user:subscriptions', () => {
+        const h = window.location.hash;
+        if (!h || h === '#/' || h === '#/podcasts') handleRoute();
+      });
+    }
+
     // 5. Initial routing
     window.addEventListener('hashchange', handleRoute);
     await handleRoute();
@@ -179,6 +256,9 @@ async function initApp() {
         .then(reg => console.log('[SW] Registered scope:', reg.scope))
         .catch(err => console.error('[SW] Registration failed:', err));
     }
+
+    // 7. Init pull-to-refresh gesture
+    initPullToRefresh();
 
   } catch (err) {
     console.error('Failed to initialize app:', err);
