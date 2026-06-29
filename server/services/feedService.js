@@ -5,7 +5,8 @@ const path = require('path');
 const crypto = require('crypto');
 const Parser = require('rss-parser');
 
-const PODCASTS_DIR = path.join(__dirname, '..', '..', 'data', 'podcasts');
+const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
+const PODCASTS_DIR = path.join(_dataRoot, 'podcasts');
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap

@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const USERS_DIR = path.join(__dirname, '..', '..', 'data', 'users');
+const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
+const USERS_DIR = path.join(_dataRoot, 'users');
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap
