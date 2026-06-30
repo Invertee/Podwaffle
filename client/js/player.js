@@ -310,13 +310,13 @@ const player = {
     this.position = this.audio.currentTime || 0;
     this.duration = this.audio.duration || this.duration;
 
-    // Check 95% threshold or within 3 seconds of end to mark as played
+    // Check 95% threshold or within 15 seconds of end to mark as played
     const playedRatio = this.duration > 0 ? this.position / this.duration : 0;
-    const nearEnd = this.duration > 0 && (this.position >= this.duration - 3);
+    const nearEnd = this.duration > 0 && (this.position >= this.duration - 15);
     
     if (this.duration > 0 && (playedRatio >= 0.95 || nearEnd)) {
       if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
-        console.log(`[player] Episode 95%+ complete or within 3s of end: ${this.currentEpisode.title} (${Math.round(playedRatio * 100)}%, ${this.position.toFixed(1)}s / ${this.duration.toFixed(1)}s)`);
+        console.log(`[player] Episode 95%+ complete or within 15s of end: ${this.currentEpisode.title} (${Math.round(playedRatio * 100)}%, ${this.position.toFixed(1)}s / ${this.duration.toFixed(1)}s)`);
         this.currentEpisode._markedPlayed = true;
         this._markPlayed(this.currentEpisode, { force: true });
       }

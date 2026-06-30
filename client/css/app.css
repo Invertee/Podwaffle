@@ -333,8 +333,8 @@ body {
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .player-mobile-episode-info-wrap.expanded .player-mobile-episode-info {

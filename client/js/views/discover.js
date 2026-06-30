@@ -14,9 +14,6 @@ async function renderDiscover(container) {
       <!-- Results or empty state go here -->
     </div>
     <div class="discover-footer">
-      <p class="text-muted text-small text-center mt-6">
-        Search powered by iTunes API (fallback). Add your PodcastIndex API key in <a href="#/profile">Profile</a> for better results.
-      </p>
     </div>
   `;
 
