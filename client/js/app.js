@@ -171,6 +171,76 @@ async function handleRoute() {
   }
 }
 
+// Show modal to enter existing GUID when signups are disabled
+async function showGuidEntryModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'guid-entry-modal-overlay';
+    overlay.innerHTML = `
+      <div class="guid-entry-modal">
+        <h2>Enter Profile GUID</h2>
+        <p>New user signups are currently disabled. Please enter an existing profile GUID to continue.</p>
+        <div class="field">
+          <input id="guid-entry-input" class="input" type="text" placeholder="Paste your profile GUID here">
+          <small class="text-secondary">You can get your GUID from another device in Settings > Your GUID</small>
+        </div>
+        <div class="modal-actions">
+          <button id="guid-entry-cancel" class="button">Cancel</button>
+          <button id="guid-entry-submit" class="button is-success">Continue</button>
+        </div>
+        <div id="guid-entry-error" class="error-banner" style="display: none; margin-top: 1rem;"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const input = document.getElementById('guid-entry-input');
+    const submitBtn = document.getElementById('guid-entry-submit');
+    const cancelBtn = document.getElementById('guid-entry-cancel');
+    const errorDiv = document.getElementById('guid-entry-error');
+
+    const cleanup = () => {
+      overlay.remove();
+    };
+
+    submitBtn.addEventListener('click', async () => {
+      const guid = input.value.trim();
+      if (!guid) {
+        errorDiv.textContent = 'Please enter a GUID';
+        errorDiv.style.display = 'block';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Validating...';
+
+      try {
+        // Validate GUID exists
+        await window.api.getUser(guid);
+        localStorage.setItem('podwaffle_guid', guid);
+        window.appState.guid = guid;
+        cleanup();
+        resolve(guid);
+      } catch (err) {
+        errorDiv.textContent = 'Invalid GUID or profile not found.';
+        errorDiv.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Continue';
+      }
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      cleanup();
+      resolve(null);
+    });
+
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') submitBtn.click();
+    });
+
+    input.focus();
+  });
+}
+
 // App Initialization
 async function initApp() {
   try {
@@ -184,9 +254,22 @@ async function initApp() {
     // 1. Ensure user GUID
     if (!window.appState.guid) {
       console.log('No GUID found, creating new user profile...');
-      const { guid } = await window.api.createUser();
-      window.appState.guid = guid;
-      localStorage.setItem('podwaffle_guid', guid);
+      try {
+        const { guid } = await window.api.createUser();
+        window.appState.guid = guid;
+        localStorage.setItem('podwaffle_guid', guid);
+      } catch (err) {
+        // Check if signup is disabled (403 error)
+        if (err.message && err.message.includes('403')) {
+          console.log('New user signups are disabled, prompting for existing GUID...');
+          const guid = await showGuidEntryModal();
+          if (!guid) {
+            throw new Error('No profile GUID provided. Cannot continue.');
+          }
+        } else {
+          throw err;
+        }
+      }
     }
 
     // 2. Load user settings to configure player
