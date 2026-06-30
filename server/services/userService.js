@@ -45,8 +45,35 @@ function defaultProfile(guid) {
     stats: {
       totalListenedSeconds: 0,
       totalSkippedSeconds: 0
-    }
+    },
+    playbackSession: null
   };
+}
+
+function ensureProfileShape(profile) {
+  if (!profile || typeof profile !== 'object') return profile;
+
+  profile.settings = {
+    skipBack: 15,
+    skipForward: 45,
+    podcastIndexApiKey: '',
+    podcastIndexApiSecret: '',
+    ...(profile.settings || {})
+  };
+  profile.subscriptions = Array.isArray(profile.subscriptions) ? profile.subscriptions : [];
+  profile.seenEpisodes = profile.seenEpisodes && typeof profile.seenEpisodes === 'object' ? profile.seenEpisodes : {};
+  profile.progress = profile.progress && typeof profile.progress === 'object' ? profile.progress : {};
+  profile.history = Array.isArray(profile.history) ? profile.history : [];
+  profile.stats = {
+    totalListenedSeconds: 0,
+    totalSkippedSeconds: 0,
+    ...(profile.stats || {})
+  };
+  profile.playbackSession = profile.playbackSession && typeof profile.playbackSession === 'object'
+    ? profile.playbackSession
+    : null;
+
+  return profile;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +88,7 @@ async function getUser(guid) {
   console.log(`[userService] getUser(${guid}) → reading ${filePath}`);
   try {
     const raw = await fs.promises.readFile(filePath, 'utf8');
-    const profile = JSON.parse(raw);
+    const profile = ensureProfileShape(JSON.parse(raw));
     console.log(`[userService] getUser(${guid}) → loaded OK`);
     return profile;
   } catch (err) {
@@ -78,6 +105,7 @@ async function getUser(guid) {
  * Persist a user profile to disk, bumping updatedAt.
  */
 async function saveUser(profile) {
+  ensureProfileShape(profile);
   profile.updatedAt = new Date().toISOString();
   const filePath = userFilePath(profile.guid);
   console.log(`[userService] saveUser(${profile.guid}) → writing ${filePath}`);
@@ -238,6 +266,10 @@ async function updateProgress(guid, episodeGuid, progressData) {
     feedId: progressData.feedId || (existing ? existing.feedId : '')
   };
 
+  if (profile.progress[episodeGuid].played && profile.playbackSession?.episodeGuid === episodeGuid) {
+    profile.playbackSession = null;
+  }
+
   // Update stats
   if (delta > 0) {
     profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
@@ -248,6 +280,81 @@ async function updateProgress(guid, episodeGuid, progressData) {
   await saveUser(profile);
   console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → saved, position=${newPosition}`);
   return profile.progress[episodeGuid];
+}
+
+/**
+ * Return the active playback session for a user.
+ */
+async function getPlaybackSession(guid) {
+  console.log(`[userService] getPlaybackSession(${guid})`);
+  const profile = await getUser(guid);
+  if (!profile) {
+    console.warn(`[userService] getPlaybackSession(${guid}) → user not found`);
+    return null;
+  }
+  return profile.playbackSession || null;
+}
+
+/**
+ * Persist the latest playback session snapshot for local playback recovery.
+ */
+async function updatePlaybackSession(guid, sessionData) {
+  console.log(`[userService] updatePlaybackSession(${guid})`, sessionData);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  const existing = profile.playbackSession;
+  if (existing && sessionData.updatedAt && existing.updatedAt) {
+    const existingTime = new Date(existing.updatedAt).getTime();
+    const incomingTime = new Date(sessionData.updatedAt).getTime();
+    if (existingTime > incomingTime) {
+      console.log(`[userService] updatePlaybackSession(${guid}) → skipping, existing session is newer`);
+      return existing;
+    }
+  }
+
+  const now = new Date().toISOString();
+  profile.playbackSession = {
+    episodeGuid: sessionData.episodeGuid || '',
+    feedId: sessionData.feedId || '',
+    title: sessionData.title || '',
+    podcastTitle: sessionData.podcastTitle || '',
+    audioUrl: sessionData.audioUrl || '',
+    podcastImageUrl: sessionData.podcastImageUrl || '',
+    imageUrl: sessionData.imageUrl || '',
+    position: typeof sessionData.position === 'number' ? sessionData.position : parseFloat(sessionData.position) || 0,
+    duration: typeof sessionData.duration === 'number' ? sessionData.duration : parseFloat(sessionData.duration) || 0,
+    isPlaying: !!sessionData.isPlaying,
+    mode: sessionData.mode === 'cast' ? 'cast' : 'local',
+    updatedAt: sessionData.updatedAt || now
+  };
+
+  await saveUser(profile);
+  console.log(`[userService] updatePlaybackSession(${guid}) → saved ${profile.playbackSession.episodeGuid} @ ${profile.playbackSession.position}s`);
+  return profile.playbackSession;
+}
+
+/**
+ * Clear the active playback session.
+ */
+async function clearPlaybackSession(guid, episodeGuid) {
+  console.log(`[userService] clearPlaybackSession(${guid}, ${episodeGuid || '*'})`);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  if (!profile.playbackSession) {
+    return null;
+  }
+
+  if (episodeGuid && profile.playbackSession.episodeGuid && profile.playbackSession.episodeGuid !== episodeGuid) {
+    console.log(`[userService] clearPlaybackSession(${guid}) → skipped, different active episode`);
+    return profile.playbackSession;
+  }
+
+  profile.playbackSession = null;
+  await saveUser(profile);
+  console.log(`[userService] clearPlaybackSession(${guid}) → cleared`);
+  return null;
 }
 
 /**
@@ -398,6 +505,9 @@ module.exports = {
   getSubscriptions,
   updateProgress,
   getProgress,
+  getPlaybackSession,
+  updatePlaybackSession,
+  clearPlaybackSession,
   getHistory,
   addHistoryEntry,
   updateStats,

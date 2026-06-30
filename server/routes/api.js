@@ -26,6 +26,59 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     return res.status(statusCode).json({ error, details });
   }
 
+  function mapPlaybackToHaState(status, isPlaying) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'playing' || isPlaying === true) return 'playing';
+    if (s === 'paused' || isPlaying === false) return 'paused';
+    return 'idle';
+  }
+
+  function toNumber(value, fallback = 0) {
+    const parsed = typeof value === 'number' ? value : parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function buildHaEntityPayload(guid, playbackSession, castState) {
+    const hasSession = !!(playbackSession && playbackSession.episodeGuid);
+    const sessionMode = hasSession ? (playbackSession.mode === 'cast' ? 'cast' : 'local') : null;
+    const castAligned = !!(
+      sessionMode === 'cast' &&
+      castState &&
+      castState.activeDeviceId &&
+      (!castState.episodeGuid || castState.episodeGuid === playbackSession.episodeGuid)
+    );
+
+    const rawStatus = castAligned
+      ? castState.status
+      : (playbackSession ? (playbackSession.isPlaying ? 'playing' : 'paused') : 'idle');
+
+    const mediaPosition = hasSession
+      ? Math.max(0, Math.floor(castAligned ? toNumber(castState.position, playbackSession.position || 0) : toNumber(playbackSession.position, 0)))
+      : 0;
+
+    const mediaDuration = hasSession
+      ? Math.max(0, Math.floor(castAligned ? toNumber(castState.duration, playbackSession.duration || 0) : toNumber(playbackSession.duration, 0)))
+      : 0;
+
+    return {
+      guid,
+      entity_id: `media_player.podwaffle_${String(guid).replace(/[^a-zA-Z0-9_]/g, '_')}`,
+      state: mapPlaybackToHaState(rawStatus, playbackSession && playbackSession.isPlaying),
+      mode: sessionMode || 'idle',
+      episode_guid: hasSession ? playbackSession.episodeGuid : null,
+      media_title: hasSession ? (playbackSession.title || null) : null,
+      media_series_title: hasSession ? (playbackSession.podcastTitle || null) : null,
+      media_content_id: hasSession ? (playbackSession.episodeGuid || null) : null,
+      media_position: mediaPosition,
+      media_duration: mediaDuration,
+      media_image_url: hasSession ? (playbackSession.podcastImageUrl || playbackSession.imageUrl || null) : null,
+      volume_level: castAligned ? toNumber(castState.volume, null) : null,
+      is_volume_muted: false,
+      supported_commands: ['play', 'pause', 'play_pause', 'stop', 'seek', 'set_volume', 'next', 'previous'],
+      updated_at: (playbackSession && playbackSession.updatedAt) || new Date().toISOString(),
+    };
+  }
+
   // =========================================================================
   // USERS
   // =========================================================================
@@ -248,6 +301,164 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         return sendError(res, 404, 'User not found', err.message);
       }
       sendError(res, 500, 'Failed to update progress', err.message);
+    }
+  });
+
+  // GET /users/:guid/playback-session
+  router.get('/users/:guid/playback-session', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] GET /users/${guid}/playback-session`);
+    try {
+      const session = await userService.getPlaybackSession(guid);
+      res.json(session || null);
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to get playback session', err.message);
+    }
+  });
+
+  // PUT /users/:guid/playback-session
+  router.put('/users/:guid/playback-session', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] PUT /users/${guid}/playback-session`, req.body);
+    try {
+      const session = await userService.updatePlaybackSession(guid, req.body || {});
+      res.json(session);
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to update playback session', err.message);
+    }
+  });
+
+  // DELETE /users/:guid/playback-session
+  router.delete('/users/:guid/playback-session', async (req, res) => {
+    const { guid } = req.params;
+    const { episodeGuid } = req.query;
+    console.log(`[api] DELETE /users/${guid}/playback-session?episodeGuid=${episodeGuid || ''}`);
+    try {
+      await userService.clearPlaybackSession(guid, episodeGuid || undefined);
+      res.status(204).send();
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to clear playback session', err.message);
+    }
+  });
+
+  // =========================================================================
+  // HOME ASSISTANT BRIDGE
+  // =========================================================================
+
+  // GET /ha/users
+  router.get('/ha/users', async (req, res) => {
+    console.log('[api] GET /ha/users');
+    try {
+      const guids = await userService.getAllUserGuids();
+      res.json({ users: guids.map((guid) => ({ guid })) });
+    } catch (err) {
+      sendError(res, 500, 'Failed to list users', err.message);
+    }
+  });
+
+  // GET /ha/media-player/:guid/state
+  router.get('/ha/media-player/:guid/state', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] GET /ha/media-player/${guid}/state`);
+    try {
+      const profile = await userService.getUser(guid);
+      if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
+
+      const playbackSession = await userService.getPlaybackSession(guid);
+      const castState = castService.getState();
+      res.json(buildHaEntityPayload(guid, playbackSession, castState));
+    } catch (err) {
+      sendError(res, 500, 'Failed to get media player state', err.message);
+    }
+  });
+
+  // POST /ha/media-player/:guid/command
+  router.post('/ha/media-player/:guid/command', async (req, res) => {
+    const { guid } = req.params;
+    const { command, value, position, volume } = req.body || {};
+    const normalized = String(command || '').trim().toLowerCase();
+    console.log(`[api] POST /ha/media-player/${guid}/command`, req.body);
+
+    if (!normalized) {
+      return sendError(res, 400, 'command is required');
+    }
+
+    try {
+      const profile = await userService.getUser(guid);
+      if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
+
+      const playbackSession = await userService.getPlaybackSession(guid);
+      const castState = castService.getState();
+      const targetMode = playbackSession?.mode === 'cast' ? 'cast' : 'local';
+      const castActive = targetMode === 'cast' && !!castState.activeDeviceId;
+
+      if (castActive) {
+        let result = { status: castState.status || 'idle' };
+        switch (normalized) {
+          case 'play':
+            result = await castService.resume();
+            break;
+          case 'pause':
+            result = await castService.pause();
+            break;
+          case 'play_pause':
+            result = castState.status === 'playing'
+              ? await castService.pause()
+              : await castService.resume();
+            break;
+          case 'stop':
+            result = await castService.stop();
+            break;
+          case 'seek': {
+            const seekTo = toNumber(position, toNumber(value, NaN));
+            if (!Number.isFinite(seekTo)) {
+              return sendError(res, 400, 'position or value is required for seek');
+            }
+            result = await castService.seek(seekTo);
+            break;
+          }
+          case 'set_volume': {
+            const nextVolume = toNumber(volume, toNumber(value, NaN));
+            if (!Number.isFinite(nextVolume)) {
+              return sendError(res, 400, 'volume or value is required for set_volume');
+            }
+            result = await castService.setVolume(nextVolume);
+            break;
+          }
+          case 'next':
+          case 'previous':
+            break;
+          default:
+            return sendError(res, 400, `Unsupported command: ${normalized}`);
+        }
+
+        return res.json({ accepted: true, target: 'cast', command: normalized, result });
+      }
+
+      broadcastWs({
+        type: 'ha:command',
+        data: {
+          guid,
+          command: normalized,
+          value,
+          position,
+          volume,
+          issuedAt: new Date().toISOString(),
+        }
+      });
+
+      return res.json({ accepted: true, target: 'local', command: normalized });
+    } catch (err) {
+      sendError(res, 500, 'Failed to execute media command', err.message);
     }
   });
 
@@ -539,6 +750,23 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
                 feedId,
                 updatedAt: new Date().toISOString()
               });
+
+              await userService.updatePlaybackSession(userGuid, {
+                episodeGuid,
+                feedId,
+                title: title || '',
+                podcastTitle: podcastTitle || '',
+                audioUrl: mediaUrl || '',
+                podcastImageUrl: imageUrl || '',
+                imageUrl: imageUrl || '',
+                position: safePosition,
+                duration: safeDuration,
+                isPlaying: statusObj.status === 'playing',
+                mode: 'cast',
+                updatedAt: new Date().toISOString(),
+              });
+
+              broadcastWs({ type: 'user:progress', data: { guid: userGuid, episodeGuid } });
             }
           } catch (progressErr) {
             console.error('[api] cast onStatusUpdate → failed to persist in-progress:', progressErr.message);
@@ -560,6 +788,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
                 feedId,
                 updatedAt: new Date().toISOString()
               });
+
+              broadcastWs({ type: 'user:progress', data: { guid: userGuid, episodeGuid } });
             }
           } catch (progressErr) {
             console.error('[api] cast onStatusUpdate → failed to update progress:', progressErr.message);
