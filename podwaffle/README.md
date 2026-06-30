@@ -31,6 +31,37 @@ Use the add-on setting `disable_new_user_sessions` to prevent creation of new us
 - `false` (default): New profiles can be created automatically when a client has no saved GUID.
 - `true`: `POST /api/users` returns HTTP `403` and the client shows an error instead of creating a new profile.
 
+## Home Assistant media player bridge (per user GUID)
+
+Podwaffle now exposes Home Assistant-friendly endpoints so a custom HA integration can create one `media_player` entity per Podwaffle user profile.
+
+### Discover users
+
+- `GET /api/ha/users`
+- Response: `{ "users": [{ "guid": "..." }] }`
+
+### Read media player state for a user
+
+- `GET /api/ha/media-player/:guid/state`
+- Response includes:
+	- `entity_id` (normalized as `media_player.podwaffle_<guid>`)
+	- `state` (`playing` | `paused` | `idle`)
+	- `media_title`, `media_series_title`, `media_position`, `media_duration`, `media_image_url`
+	- `mode` (`local` | `cast` | `idle`)
+	- `supported_commands`
+
+### Send media commands for a user
+
+- `POST /api/ha/media-player/:guid/command`
+- JSON body:
+	- `command`: `play`, `pause`, `play_pause`, `stop`, `seek`, `set_volume`, `next`, `previous`
+	- Optional payload keys:
+		- `position` or `value` for `seek`
+		- `volume` or `value` for `set_volume`
+
+If the user session is currently casting, commands execute against Google Cast directly.
+If the user session is local playback, commands are delivered via Podwaffle WebSocket and applied by the active SPA session for that same GUID.
+
 ## Deployment Methods
 
 ### Via Home Assistant Ingress (Reverse Proxy)

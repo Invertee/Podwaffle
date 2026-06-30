@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Podwaffle",
+        "description": "Enter your Podwaffle server URL and the user GUID to control.",
+        "data": {
+          "server_url": "Server URL",
+          "user_guid": "User GUID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Podwaffle API.",
+      "unknown": "Unexpected error occurred."
+    }
+  }
+}

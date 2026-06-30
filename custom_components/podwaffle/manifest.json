@@ -1,0 +1,16 @@
+{
+  "domain": "podwaffle",
+  "name": "Podwaffle",
+  "codeowners": [
+    "@invertee"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/Invertee/PodWaffle",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "loggers": [
+    "custom_components.podwaffle"
+  ],
+  "requirements": [],
+  "version": "0.1.0"
+}
