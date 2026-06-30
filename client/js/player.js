@@ -378,6 +378,21 @@ const player = {
       return;
     }
 
+    // Cast progress is persisted server-side via cast status callbacks.
+    // Here we only flush skipped-time stats from local user actions.
+    if (this.mode === 'cast') {
+      if (this.skippedSeconds > 0) {
+        try {
+          await api.updateStats(guid, 0, Math.floor(this.skippedSeconds));
+          this.skippedSeconds = 0;
+        } catch (err) {
+          console.error('[player] _syncProgress cast skipped-stats error:', err);
+        }
+      }
+      this.lastSyncPosition = pos;
+      return;
+    }
+
     try {
       await api.updateProgress(guid, episode.guid, {
         position: pos,
@@ -386,10 +401,10 @@ const player = {
         feedId: episode.feedId,
       });
 
-      // Calculate listened delta
-      const listenedDelta = Math.max(0, pos - this.lastSyncPosition);
-      if (listenedDelta > 0 || this.skippedSeconds > 0) {
-        await api.updateStats(guid, Math.floor(listenedDelta), Math.floor(this.skippedSeconds));
+      // Listened stats are derived server-side from updateProgress deltas.
+      // Only sync skipped time explicitly.
+      if (this.skippedSeconds > 0) {
+        await api.updateStats(guid, 0, Math.floor(this.skippedSeconds));
       }
       this.lastSyncPosition = pos;
       this.skippedSeconds = 0;
@@ -424,9 +439,9 @@ const player = {
       });
 
       // Final stats update
-      const listenedDelta = Math.max(0, finalPosition - this.lastSyncPosition);
-      if (listenedDelta > 0) {
-        await api.updateStats(guid, Math.floor(listenedDelta), 0);
+      if (this.skippedSeconds > 0) {
+        await api.updateStats(guid, 0, Math.floor(this.skippedSeconds));
+        this.skippedSeconds = 0;
       }
       this.lastSyncPosition = finalPosition;
       console.log('[player] Episode marked as played:', episode.title);

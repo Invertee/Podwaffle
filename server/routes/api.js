@@ -11,9 +11,11 @@ const fetch = require('node-fetch');
  * @param {Object}   userService  - userService module
  * @param {Object}   castService  - castService module
  * @param {Function} broadcastWs  - function(msg) broadcasts to all WS clients
+ * @param {Object}   options      - runtime options
  */
-function createApiRouter(feedService, userService, castService, broadcastWs) {
+function createApiRouter(feedService, userService, castService, broadcastWs, options = {}) {
   const router = express.Router();
+  const disableNewUserSessions = !!options.disableNewUserSessions;
 
   // =========================================================================
   // UTILITY
@@ -30,6 +32,15 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
 
   // POST /users — create a new user
   router.post('/users', async (req, res) => {
+    if (disableNewUserSessions) {
+      return sendError(
+        res,
+        403,
+        'New user sessions are disabled',
+        'User profile creation is currently locked by server configuration.'
+      );
+    }
+
     console.log('[api] POST /users → creating new user');
     try {
       const profile = await userService.createUser();

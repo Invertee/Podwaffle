@@ -34,6 +34,8 @@ function resetRouteScroll(mainContent) {
   });
 }
 
+// DISABLED: Pull-to-refresh feature (commented out to re-enable later if needed)
+/*
 function initPullToRefresh() {
   const mainContent = document.getElementById('main-content');
   if (!mainContent) return;
@@ -98,6 +100,7 @@ function initPullToRefresh() {
     }, 300);
   }, { passive: true });
 }
+*/
 
 async function restoreLastInProgressEpisode(guid) {
   if (!window.player || !window.api || !guid) return;
@@ -266,8 +269,8 @@ async function initApp() {
         .catch(err => console.error('[SW] Registration failed:', err));
     }
 
-    // 7. Init pull-to-refresh gesture
-    initPullToRefresh();
+    // 7. Init pull-to-refresh gesture (DISABLED)
+    // initPullToRefresh();
 
   } catch (err) {
     console.error('Failed to initialize app:', err);

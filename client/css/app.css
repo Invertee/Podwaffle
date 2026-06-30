@@ -310,6 +310,55 @@ body {
   color: var(--text-secondary);
 }
 
+.player-mobile-episode-info-wrap {
+  width: 85%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: -2px;
+}
+
+.player-mobile-episode-info {
+  width: 100%;
+  background-color: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
+.player-mobile-episode-info-wrap.expanded .player-mobile-episode-info {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.player-mobile-episode-info-toggle {
+  border: none;
+  background: transparent;
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.player-mobile-episode-info-toggle:hover {
+  background-color: rgba(59,130,246,0.15);
+}
+
 .player-mobile-progress {
   width: 85%;
   display: grid;
@@ -1199,6 +1248,75 @@ input[type=range]::-moz-range-thumb {
   opacity: 0.4;
 }
 
+.player-info-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0,0,0,0.7);
+  z-index: 305;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn var(--transition-base) ease;
+}
+
+.player-info-modal-overlay.visible {
+  display: flex;
+}
+
+.player-info-modal {
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.player-info-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.player-info-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.player-info-modal-meta {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.player-info-modal-podcast {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.player-info-modal-episode {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.player-info-modal-body {
+  padding: 14px 18px 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-y: auto;
+  white-space: normal;
+}
+
 /* ----------------------------------------------------------
    12. CAST MODAL
    ---------------------------------------------------------- */
@@ -1478,7 +1596,7 @@ input[type=range]::-moz-range-thumb {
 
 .discover-search {
   width: 100%;
-  padding: 14px 14px 14px 44px;
+  padding: 14px 14px 14px 14px;
   background-color: var(--bg-elevated);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -2249,6 +2367,11 @@ input[type=range]::-moz-range-thumb {
 
   .player-mobile-overlay.visible {
     display: flex;
+  }
+
+  .pb-info-btn,
+  .player-info-modal-overlay {
+    display: none !important;
   }
 
   body.player-overlay-open {

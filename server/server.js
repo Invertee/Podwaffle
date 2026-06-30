@@ -30,6 +30,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const USERS_DIR = path.join(DATA_DIR, 'users');
 const PODCASTS_DIR = path.join(DATA_DIR, 'podcasts');
 const LOG_HTTP_REQUESTS = false;
+const DISABLE_NEW_USER_SESSIONS = String(process.env.DISABLE_NEW_USER_SESSIONS || '').toLowerCase() === 'true';
 
 // ---------------------------------------------------------------------------
 // Startup banner
@@ -47,6 +48,7 @@ function printBanner() {
   console.log(`  📡  Port      : ${PORT}`);
   console.log(`  📂  Data dir  : ${DATA_DIR}`);
   console.log(`  🌐  Client dir: ${CLIENT_DIR}`);
+  console.log(`  🔐  New user sessions disabled: ${DISABLE_NEW_USER_SESSIONS ? 'yes' : 'no'}`);
   console.log('');
 }
 
@@ -182,7 +184,9 @@ wss.on('close', () => {
 // ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
-app.use('/api', createApiRouter(feedService, userService, castService, broadcastWs));
+app.use('/api', createApiRouter(feedService, userService, castService, broadcastWs, {
+  disableNewUserSessions: DISABLE_NEW_USER_SESSIONS
+}));
 
 // ---------------------------------------------------------------------------
 // SPA catch-all — serve index.html for all non-API routes

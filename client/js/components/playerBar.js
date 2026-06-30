@@ -2,6 +2,8 @@ const playerBar = {
   container: null,
   isMobileControlsOpen: false,
   isFullscreenOpen: false,
+  isInfoModalOpen: false,
+  _lastEpisodeInfoKey: null,
   
   render(containerId) {
     this.container = document.getElementById(containerId);
@@ -49,6 +51,10 @@ const playerBar = {
             <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
             <span id="pb-queue-badge" class="queue-badge" style="display:none;">0</span>
           </button>
+
+          <button id="pb-info" class="btn-icon pb-info-btn" title="Episode info" aria-label="Episode info">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          </button>
         </div>
       </div>
       <div id="pb-mobile-overlay" class="player-mobile-overlay" aria-hidden="true">
@@ -71,6 +77,10 @@ const playerBar = {
             <div class="player-mobile-info">
               <div id="pb-mobile-title" class="player-mobile-title">Nothing playing</div>
               <div id="pb-mobile-podcast" class="player-mobile-podcast">Select a podcast to start</div>
+            </div>
+            <div id="pb-mobile-episode-info-wrap" class="player-mobile-episode-info-wrap">
+              <div id="pb-mobile-episode-info" class="player-mobile-episode-info">No episode information available.</div>
+              <button id="pb-mobile-episode-info-toggle" class="player-mobile-episode-info-toggle" type="button" aria-expanded="false">More</button>
             </div>
             <div class="player-mobile-progress">
               <span id="pb-mobile-time-current" class="pb-time">0:00</span>
@@ -103,6 +113,22 @@ const playerBar = {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="pb-info-modal" class="player-info-modal-overlay" aria-hidden="true">
+        <div class="player-info-modal">
+          <div class="player-info-modal-header">
+            <h3 class="player-info-modal-title">Episode Info</h3>
+            <button id="pb-info-close" class="btn-icon" title="Close" aria-label="Close episode info">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="player-info-modal-meta">
+            <div id="pb-info-modal-podcast" class="player-info-modal-podcast">Select a podcast to start</div>
+            <div id="pb-info-modal-episode" class="player-info-modal-episode">Nothing playing</div>
+          </div>
+          <div id="pb-info-modal-body" class="player-info-modal-body">No episode information available.</div>
         </div>
       </div>
     `;
@@ -162,6 +188,14 @@ const playerBar = {
       if (window.castModal) window.castModal.show();
     });
 
+    const infoBtn = document.getElementById('pb-info');
+    if (infoBtn) {
+      infoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleInfoModal();
+      });
+    }
+
     const miniPlayPause = document.getElementById('pb-mini-play-pause');
     const miniSkipBack = document.getElementById('pb-mini-skip-back');
     const miniSkipForward = document.getElementById('pb-mini-skip-forward');
@@ -188,6 +222,7 @@ const playerBar = {
     }
 
     this.bindMobileOverlayEvents();
+    this.bindInfoModalEvents();
   },
 
   bindMobileOverlayEvents() {
@@ -202,6 +237,7 @@ const playerBar = {
     const cast = document.getElementById('pb-mobile-cast');
     const queue = document.getElementById('pb-mobile-queue');
     const queue2 = document.getElementById('pb-mobile-queue-secondary');
+    const infoToggle = document.getElementById('pb-mobile-episode-info-toggle');
 
     if (closeBtn) closeBtn.addEventListener('click', () => this.closeFullscreenControls());
     if (playPause) playPause.addEventListener('click', () => window.player && window.player.togglePlay());
@@ -224,6 +260,13 @@ const playerBar = {
     if (cast) cast.addEventListener('click', () => window.castModal && window.castModal.show());
     if (queue) queue.addEventListener('click', () => this.toggleQueuePanel());
     if (queue2) queue2.addEventListener('click', () => this.toggleQueuePanel());
+    if (infoToggle) {
+      infoToggle.addEventListener('click', () => {
+        const wrap = document.getElementById('pb-mobile-episode-info-wrap');
+        const shouldExpand = !(wrap && wrap.classList.contains('expanded'));
+        this.setMobileEpisodeInfoExpanded(shouldExpand);
+      });
+    }
 
     if (!overlay || !sheet) return;
 
@@ -271,6 +314,21 @@ const playerBar = {
     });
   },
 
+  bindInfoModalEvents() {
+    const modal = document.getElementById('pb-info-modal');
+    const closeBtn = document.getElementById('pb-info-close');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.closeInfoModal());
+    }
+
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) this.closeInfoModal();
+      });
+    }
+  },
+
   toggleFullscreenControls() {
     this.setFullscreenControlsOpen(!this.isFullscreenOpen);
   },
@@ -292,6 +350,22 @@ const playerBar = {
 
   closeFullscreenControls() {
     this.setFullscreenControlsOpen(false);
+  },
+
+  toggleInfoModal() {
+    this.setInfoModalOpen(!this.isInfoModalOpen);
+  },
+
+  closeInfoModal() {
+    this.setInfoModalOpen(false);
+  },
+
+  setInfoModalOpen(open) {
+    this.isInfoModalOpen = open;
+    const modal = document.getElementById('pb-info-modal');
+    if (!modal) return;
+    modal.classList.toggle('visible', open);
+    modal.setAttribute('aria-hidden', String(!open));
   },
 
   setFullscreenControlsOpen(open) {
@@ -338,6 +412,45 @@ const playerBar = {
     const pct = Math.max(0, Math.min(100, (position / total) * 100));
     scrubber.style.setProperty('--progress-pct', `${pct}%`);
   },
+
+  _getEpisodeInfoText(episode) {
+    if (!episode) return 'No episode information available.';
+    const raw = episode.description || episode.summary || episode.content || '';
+    if (!raw) return 'No episode information available.';
+    const temp = document.createElement('div');
+    temp.innerHTML = String(raw);
+    const text = (temp.textContent || temp.innerText || '').replace(/\s+/g, ' ').trim();
+    return text || 'No episode information available.';
+  },
+
+  setMobileEpisodeInfoExpanded(expanded) {
+    const wrap = document.getElementById('pb-mobile-episode-info-wrap');
+    const toggle = document.getElementById('pb-mobile-episode-info-toggle');
+    if (!wrap || !toggle) return;
+    wrap.classList.toggle('expanded', expanded);
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.textContent = expanded ? 'Less' : 'More';
+  },
+
+  _syncMobileEpisodeInfoToggleVisibility() {
+    const wrap = document.getElementById('pb-mobile-episode-info-wrap');
+    const info = document.getElementById('pb-mobile-episode-info');
+    const toggle = document.getElementById('pb-mobile-episode-info-toggle');
+    if (!wrap || !info || !toggle) return;
+
+    const isExpanded = wrap.classList.contains('expanded');
+    if (isExpanded) wrap.classList.remove('expanded');
+    const needsToggle = info.scrollHeight > info.clientHeight + 1;
+    if (isExpanded) wrap.classList.add('expanded');
+
+    toggle.style.display = needsToggle ? 'inline-flex' : 'none';
+
+    if (!needsToggle) {
+      this.setMobileEpisodeInfoExpanded(false);
+    } else if (isExpanded) {
+      this.setMobileEpisodeInfoExpanded(true);
+    }
+  },
   
   update(state) {
     if (!this.container) return;
@@ -352,6 +465,10 @@ const playerBar = {
     const volSlider = document.getElementById('pb-volume');
     const castBtn = document.getElementById('pb-cast');
     const badge = document.getElementById('pb-queue-badge');
+    const mobileEpisodeInfo = document.getElementById('pb-mobile-episode-info');
+    const infoModalPodcast = document.getElementById('pb-info-modal-podcast');
+    const infoModalEpisode = document.getElementById('pb-info-modal-episode');
+    const infoModalBody = document.getElementById('pb-info-modal-body');
     
     // Slide up animation if we have an episode
     if (state.currentEpisode && !this.container.classList.contains('active')) {
@@ -365,6 +482,20 @@ const playerBar = {
       if (titleEl) titleEl.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
       if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
+      const episodeInfoText = this._getEpisodeInfoText(state.currentEpisode);
+      if (mobileEpisodeInfo) mobileEpisodeInfo.textContent = episodeInfoText;
+      if (infoModalPodcast) infoModalPodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
+      if (infoModalEpisode) infoModalEpisode.textContent = state.currentEpisode.title || 'Unknown Episode';
+      if (infoModalBody) infoModalBody.textContent = episodeInfoText;
+
+      const episodeKey = state.currentEpisode.guid || `${state.currentEpisode.title || ''}:${state.currentEpisode.audioUrl || ''}`;
+      if (episodeKey !== this._lastEpisodeInfoKey) {
+        this.setMobileEpisodeInfoExpanded(false);
+      }
+      this._lastEpisodeInfoKey = episodeKey;
+
+      window.requestAnimationFrame(() => this._syncMobileEpisodeInfoToggleVisibility());
+
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
@@ -375,12 +506,20 @@ const playerBar = {
       if (titleEl) titleEl.textContent = 'Nothing playing';
       if (podcastEl) podcastEl.textContent = 'Select a podcast to start';
       if (artEl) artEl.src = 'icons/icon-192.png';
+      if (mobileEpisodeInfo) mobileEpisodeInfo.textContent = 'No episode information available.';
+      if (infoModalPodcast) infoModalPodcast.textContent = 'Select a podcast to start';
+      if (infoModalEpisode) infoModalEpisode.textContent = 'Nothing playing';
+      if (infoModalBody) infoModalBody.textContent = 'No episode information available.';
+      this.setMobileEpisodeInfoExpanded(false);
+      this._lastEpisodeInfoKey = null;
+
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
       if (mobileArt) mobileArt.src = 'icons/icon-192.png';
       if (mobileTitle) mobileTitle.textContent = 'Nothing playing';
       if (mobilePodcast) mobilePodcast.textContent = 'Select a podcast to start';
+      window.requestAnimationFrame(() => this._syncMobileEpisodeInfoToggleVisibility());
     }
     
     // Update play/pause icon

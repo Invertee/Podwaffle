@@ -22,6 +22,13 @@ This folder contains a Home Assistant add-on package for Podwaffle.
 - The app source is copied into the add-on config share at `/config/app` on first boot so you can browse it easily under `addon_configs`.
 - If you publish under a different GitHub URL, update `url` in `config.json` and `repository.yaml`.
 
+## Add-on option: disable new user sessions
+
+Use the add-on setting `disable_new_user_sessions` to prevent creation of new user profiles after you have set up your initial profiles.
+
+- `false` (default): New profiles can be created automatically when a client has no saved GUID.
+- `true`: `POST /api/users` returns HTTP `403` and the client shows an error instead of creating a new profile.
+
 ## Deployment Methods
 
 ### Via Home Assistant Ingress (Reverse Proxy)
