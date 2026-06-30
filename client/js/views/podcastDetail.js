@@ -21,6 +21,7 @@ async function renderPodcastDetail(container, feedId) {
       window.api.getPodcast(feedId, 100, 0),
       window.api.getProgress(guid)
     ]);
+    window.replaceProgressState(progressData);
     
     // Clear new flag for this user
     await window.api.markEpisodesSeen(feedId, guid, []);
@@ -115,7 +116,8 @@ async function renderPodcastDetail(container, feedId) {
           cacheStatus: cacheStatuses[ep.guid] || 'uncached',
           onPlay: (episode) => {
             if (window.player) {
-              window.player.loadEpisode(episode, prog.position || 0);
+              const latestProgress = window.appState.progress?.[episode.guid] || prog;
+              window.player.loadEpisode(episode, latestProgress.position || 0);
               window.player.play();
             }
           },
@@ -128,17 +130,18 @@ async function renderPodcastDetail(container, feedId) {
           onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
           onMarkPlayed: async (episode) => {
             try {
-              await window.api.updateProgress(guid, episode.guid, {
+              const nextProgress = {
                 position: episode.duration || 0,
                 duration: episode.duration || 0,
                 played: true,
-                feedId: feedId
-              });
+                feedId: feedId,
+                updatedAt: new Date().toISOString(),
+              };
+              await window.api.updateProgress(guid, episode.guid, nextProgress);
+              window.setEpisodeProgressState(episode.guid, nextProgress);
               if (window.cacheManager) {
                 await window.cacheManager.deleteEpisode(episode);
               }
-              // Refresh view to show tick
-              renderPodcastDetail(container, feedId);
             } catch(e) { console.error(e); }
           }
         });
@@ -184,12 +187,15 @@ async function renderPodcastDetail(container, feedId) {
         const promises = Array.from(checked).map(cb => {
           const epGuid = cb.value;
           const episode = (podcast.episodes || []).find((ep) => ep.guid === epGuid);
-          return window.api.updateProgress(guid, epGuid, {
-            position: 1, // dummy value, played is true
-            duration: 1,
+          const nextProgress = {
+            position: episode?.duration || 1,
+            duration: episode?.duration || 1,
             played: true,
-            feedId: feedId
-          }).then(async () => {
+            feedId: feedId,
+            updatedAt: new Date().toISOString(),
+          };
+          return window.api.updateProgress(guid, epGuid, nextProgress).then(async () => {
+            window.setEpisodeProgressState(epGuid, nextProgress);
             if (episode && window.cacheManager) {
               await window.cacheManager.deleteEpisode(episode);
             }

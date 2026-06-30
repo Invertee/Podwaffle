@@ -779,6 +779,28 @@ body {
   color: #fda4af;
 }
 
+.episode-playing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: rgba(244, 63, 94, 0.16);
+  color: #fda4af;
+}
+
+.episode-playing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
 .episode-meta-sep {
   width: 3px;
   height: 3px;

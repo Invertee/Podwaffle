@@ -7,6 +7,38 @@ window.appState = {
   currentRoute: null,
 };
 
+window.replaceProgressState = function(progressMap) {
+  window.appState.progress = progressMap && typeof progressMap === 'object' ? { ...progressMap } : {};
+  return window.appState.progress;
+};
+
+window.setEpisodeProgressState = function(episodeGuid, progress) {
+  if (!episodeGuid) return null;
+  if (!window.appState.progress || typeof window.appState.progress !== 'object') {
+    window.appState.progress = {};
+  }
+
+  const nextProgress = progress ? {
+    ...(window.appState.progress[episodeGuid] || {}),
+    ...progress,
+  } : null;
+
+  if (nextProgress) {
+    window.appState.progress[episodeGuid] = nextProgress;
+  } else {
+    delete window.appState.progress[episodeGuid];
+  }
+
+  window.dispatchEvent(new CustomEvent('podwaffle:progress-updated', {
+    detail: {
+      episodeGuid,
+      progress: nextProgress,
+    },
+  }));
+
+  return nextProgress;
+};
+
 // Global format utils
 window.formatDuration = function(seconds) {
   if (!seconds || isNaN(seconds)) return '';
@@ -107,7 +139,76 @@ async function restoreLastInProgressEpisode(guid) {
   if (window.player.mode === 'cast' && window.player._activeCastDeviceId) return;
   if (window.player.currentEpisode) return;
 
+  const getStoredSession = () => {
+    try {
+      const raw = localStorage.getItem('podwaffle_playback_session');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.guid !== guid) return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const restoreFromSession = async (session) => {
+    if (!session || !session.episodeGuid) return false;
+
+    let episode = null;
+    if (session.audioUrl) {
+      episode = {
+        guid: session.episodeGuid,
+        title: session.title || 'Unknown episode',
+        podcastTitle: session.podcastTitle || 'Unknown podcast',
+        audioUrl: session.audioUrl,
+        podcastImageUrl: session.podcastImageUrl || session.imageUrl || null,
+        imageUrl: session.imageUrl || session.podcastImageUrl || null,
+        feedId: session.feedId || null,
+        duration: session.duration || 0,
+      };
+    } else if (session.feedId) {
+      try {
+        const podcast = await window.api.getPodcast(session.feedId, 500, 0);
+        const found = (podcast.episodes || []).find((ep) => ep.guid === session.episodeGuid);
+        if (found) {
+          episode = {
+            ...found,
+            podcastTitle: podcast.title,
+            podcastImageUrl: podcast.imageUrl,
+            feedId: session.feedId,
+          };
+        }
+      } catch (err) {
+        console.warn('[app] Failed to hydrate playback session episode:', session.episodeGuid, err);
+      }
+    }
+
+    if (!episode || !episode.audioUrl) return false;
+
+    window.player.loadEpisode(episode, Math.max(0, session.position || 0), { autoplay: false });
+    return true;
+  };
+
   try {
+    const localSession = getStoredSession();
+    let serverSession = null;
+
+    try {
+      serverSession = await window.api.getPlaybackSession(guid);
+    } catch (sessionErr) {
+      console.warn('[app] Failed to load playback session:', sessionErr);
+    }
+
+    const sessionCandidates = [localSession, serverSession]
+      .filter((item) => item && item.episodeGuid)
+      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+    for (const session of sessionCandidates) {
+      if (await restoreFromSession(session)) {
+        return;
+      }
+    }
+
     const progress = await window.api.getProgress(guid);
     const candidates = Object.entries(progress || {})
       .map(([episodeGuid, data]) => ({ episodeGuid, ...(data || {}) }))

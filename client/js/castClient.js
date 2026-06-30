@@ -148,6 +148,65 @@ const castClient = {
     });
   },
 
+  _handleHaCommand(commandData) {
+    if (!commandData || !commandData.guid) return;
+
+    const localGuid = localStorage.getItem('podwaffle_guid');
+    if (!localGuid || localGuid !== commandData.guid) return;
+
+    const player = window.player;
+    if (!player) return;
+
+    const command = String(commandData.command || '').toLowerCase();
+    const numericValue = Number.parseFloat(commandData.value);
+    const seekPosition = Number.isFinite(commandData.position)
+      ? commandData.position
+      : (Number.isFinite(numericValue) ? numericValue : null);
+    const volumeValue = Number.isFinite(commandData.volume)
+      ? commandData.volume
+      : (Number.isFinite(numericValue) ? numericValue : null);
+
+    try {
+      switch (command) {
+        case 'play':
+          player.play();
+          break;
+        case 'pause':
+          player.pause();
+          break;
+        case 'play_pause':
+          player.togglePlay();
+          break;
+        case 'stop':
+          player.pause();
+          player.seek(0);
+          break;
+        case 'seek':
+          if (seekPosition != null) {
+            player.seek(seekPosition);
+          }
+          break;
+        case 'set_volume':
+          if (volumeValue != null) {
+            player.setVolume(volumeValue);
+          }
+          break;
+        case 'next':
+          player.skipForward();
+          break;
+        case 'previous':
+          player.skipBack();
+          break;
+        default:
+          console.log('[castClient] Ignoring unsupported HA command:', command);
+          return;
+      }
+      console.log('[castClient] Applied HA command:', command, commandData);
+    } catch (err) {
+      console.error('[castClient] Failed to apply HA command:', commandData, err);
+    }
+  },
+
   _handleMessage(data) {
     console.log('[castClient] Message received:', data.type, data);
     switch (data.type) {
@@ -200,6 +259,11 @@ const castClient = {
 
       case 'user:subscriptions':
         this._dispatch('user:subscriptions', data.data);
+        break;
+
+      case 'ha:command':
+        this._handleHaCommand(data.data);
+        this._dispatch('ha:command', data.data);
         break;
 
       default:

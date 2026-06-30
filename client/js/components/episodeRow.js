@@ -9,8 +9,13 @@ function createEpisodeRow(episode, progress, options = {}) {
     onDownload = async () => {}
   } = options;
 
+  let currentProgress = progress && typeof progress === 'object'
+    ? { ...progress }
+    : { played: false, position: 0, duration: episode.duration || 0 };
+  let currentCacheStatus = cacheStatus;
+
   const row = document.createElement('div');
-  row.className = 'episode-row' + (progress?.played ? ' played' : '');
+  row.className = 'episode-row';
   row.dataset.guid = episode.guid;
 
   let checkboxHtml = '';
@@ -22,7 +27,6 @@ function createEpisodeRow(episode, progress, options = {}) {
     `;
   }
 
-  // Format date
   let dateStr = 'Unknown date';
   if (episode.pubDate) {
     const pubDate = new Date(episode.pubDate);
@@ -35,28 +39,17 @@ function createEpisodeRow(episode, progress, options = {}) {
     } else if (pubDate.toDateString() === yesterday.toDateString()) {
       dateStr = 'Yesterday';
     } else {
-      dateStr = pubDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: pubDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+      dateStr = pubDate.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: pubDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+      });
     }
   }
 
-  // Format duration
   let durationStr = '';
   if (episode.duration) {
     durationStr = window.formatDuration ? window.formatDuration(episode.duration) : episode.duration + 's';
-  }
-
-  // Progress bar HTML if in progress
-  let progressHtml = '';
-  if (progress && progress.position > 0 && !progress.played) {
-    const percent = Math.min(100, Math.max(0, (progress.position / progress.duration) * 100));
-    progressHtml = `
-      <div class="episode-progress-bar">
-        <div class="episode-progress-fill" style="width: ${percent}%"></div>
-      </div>
-      <div class="episode-progress-text">
-        ${window.formatDuration ? window.formatDuration(progress.duration - progress.position) : Math.round(progress.duration - progress.position) + 's'} left
-      </div>
-    `;
   }
 
   function getCacheBadgeHtml(status) {
@@ -94,20 +87,48 @@ function createEpisodeRow(episode, progress, options = {}) {
     `;
   }
 
+  function isPlayingEpisode() {
+    return !!(window.player && window.player.currentEpisode && window.player.currentEpisode.guid === episode.guid && window.player.isPlaying);
+  }
+
+  function renderProgressHtml() {
+    const position = Math.max(0, Number(currentProgress?.position || 0));
+    const duration = Math.max(position, Number(currentProgress?.duration || episode.duration || 0));
+    if (!position || currentProgress?.played || !duration) {
+      return '';
+    }
+
+    const percent = Math.min(100, Math.max(0, (position / duration) * 100));
+    const remaining = Math.max(0, duration - position);
+    return `
+      <div class="episode-progress-bar">
+        <div class="episode-progress-fill" style="width: ${percent}%"></div>
+      </div>
+      <div class="episode-progress-text">
+        ${window.formatDuration ? window.formatDuration(remaining) : Math.round(remaining) + 's'} left
+      </div>
+    `;
+  }
+
+  function renderMetaHtml() {
+    return `
+      <span class="episode-date">${dateStr}</span>
+      ${durationStr ? `<span class="episode-duration">${durationStr}</span>` : ''}
+      ${getCacheBadgeHtml(currentCacheStatus)}
+      ${isPlayingEpisode() ? `<span class="episode-playing-badge"><span class="episode-playing-dot"></span>Playing</span>` : ''}
+      ${currentProgress?.played ? `<span class="episode-played-tick"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}
+    `;
+  }
+
   row.innerHTML = `
     ${checkboxHtml}
     <div class="episode-info">
-      <div class="episode-title">${episode.title}</div>
-      <div class="episode-meta">
-        <span class="episode-date">${dateStr}</span>
-        ${durationStr ? `<span class="episode-duration">${durationStr}</span>` : ''}
-        ${getCacheBadgeHtml(cacheStatus)}
-        ${progress?.played ? `<span class="episode-played-tick"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}
-      </div>
-      ${progressHtml}
+      <div class="episode-title"></div>
+      <div class="episode-meta"></div>
+      <div class="episode-progress-slot"></div>
     </div>
     <div class="episode-actions">
-      ${getDownloadButtonHtml(cacheStatus)}
+      ${getDownloadButtonHtml(currentCacheStatus)}
       <button class="btn-icon btn-action play-btn" title="Play">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
       </button>
@@ -123,27 +144,37 @@ function createEpisodeRow(episode, progress, options = {}) {
     </div>
   `;
 
-  // Attach event listeners
+  const titleEl = row.querySelector('.episode-title');
+  const metaEl = row.querySelector('.episode-meta');
+  const progressSlotEl = row.querySelector('.episode-progress-slot');
   const playBtn = row.querySelector('.play-btn');
   const playNextBtn = row.querySelector('.play-next-btn');
   const playLastBtn = row.querySelector('.play-last-btn');
   const markPlayedBtn = row.querySelector('.mark-played-btn');
   let downloadBtn = row.querySelector('.download-btn');
 
-  const updateCacheUi = (status) => {
-    const metaEl = row.querySelector('.episode-meta');
-    const existingBadge = row.querySelector('.episode-cache-badge');
-    if (existingBadge) existingBadge.remove();
-    const badgeHtml = getCacheBadgeHtml(status);
-    if (badgeHtml && metaEl) {
-      metaEl.insertAdjacentHTML('beforeend', badgeHtml);
-    }
+  titleEl.textContent = episode.title || 'Untitled episode';
 
+  const syncUi = () => {
+    row.classList.toggle('played', !!currentProgress?.played);
+    row.classList.toggle('playing', isPlayingEpisode());
+    metaEl.innerHTML = renderMetaHtml();
+    progressSlotEl.innerHTML = renderProgressHtml();
+    if (markPlayedBtn) {
+      markPlayedBtn.disabled = !!currentProgress?.played;
+      markPlayedBtn.title = currentProgress?.played ? 'Already played' : 'Mark Played';
+      markPlayedBtn.setAttribute('aria-label', markPlayedBtn.title);
+    }
+  };
+
+  const updateCacheUi = (status) => {
+    currentCacheStatus = status;
     if (downloadBtn) {
       downloadBtn.outerHTML = getDownloadButtonHtml(status);
       downloadBtn = row.querySelector('.download-btn');
       bindDownload();
     }
+    syncUi();
   };
 
   async function handleDownloadClick(e) {
@@ -168,7 +199,11 @@ function createEpisodeRow(episode, progress, options = {}) {
   if (playBtn) playBtn.addEventListener('click', (e) => { e.stopPropagation(); onPlay(episode); });
   if (playNextBtn) playNextBtn.addEventListener('click', (e) => { e.stopPropagation(); onPlayNext(episode); });
   if (playLastBtn) playLastBtn.addEventListener('click', (e) => { e.stopPropagation(); onPlayLast(episode); });
-  if (markPlayedBtn) markPlayedBtn.addEventListener('click', (e) => { e.stopPropagation(); onMarkPlayed(episode); });
+  if (markPlayedBtn) markPlayedBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (currentProgress?.played) return;
+    onMarkPlayed(episode);
+  });
   bindDownload();
 
   if (window.cacheManager && episode.audioUrl) {
@@ -181,8 +216,35 @@ function createEpisodeRow(episode, progress, options = {}) {
     window.addEventListener('podwaffle:cache-status', cacheListener);
   }
 
-  row.updateCacheStatus = updateCacheUi;
+  const progressListener = (ev) => {
+    if (ev.detail?.episodeGuid !== episode.guid) return;
+    currentProgress = ev.detail.progress
+      ? { ...currentProgress, ...ev.detail.progress }
+      : { played: false, position: 0, duration: episode.duration || 0 };
+    syncUi();
+  };
+  window.addEventListener('podwaffle:progress-updated', progressListener);
 
+  if (window.player) {
+    window.player.onStateChange((state) => {
+      if (state?.currentEpisode?.guid === episode.guid && !currentProgress?.played) {
+        currentProgress = {
+          ...currentProgress,
+          position: Math.max(Number(currentProgress?.position || 0), Math.floor(state.position || 0)),
+          duration: Math.max(Number(currentProgress?.duration || 0), Math.floor(state.duration || 0))
+        };
+      }
+      syncUi();
+    });
+  }
+
+  row.updateCacheStatus = updateCacheUi;
+  row.updateProgressState = (nextProgress) => {
+    currentProgress = { ...currentProgress, ...(nextProgress || {}) };
+    syncUi();
+  };
+
+  syncUi();
   return row;
 }
 

@@ -15,6 +15,7 @@ async function renderInProgress(container) {
   
   try {
     const progressData = await window.api.getProgress(guid);
+    window.replaceProgressState(progressData);
     
     // Filter to only items with position > 0 and played == false
     const inProgressItems = Object.entries(progressData)
@@ -90,7 +91,8 @@ async function renderInProgress(container) {
         cacheStatus: cacheStatuses[ep.guid] || 'uncached',
         onPlay: (episode) => {
           if (window.player) {
-            window.player.loadEpisode(episode, item.position || 0);
+            const latestProgress = window.appState.progress?.[episode.guid] || item;
+            window.player.loadEpisode(episode, latestProgress.position || 0);
             window.player.play();
           }
         },
@@ -103,16 +105,18 @@ async function renderInProgress(container) {
         onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
         onMarkPlayed: async (episode) => {
           try {
-            await window.api.updateProgress(guid, episode.guid, {
+            const nextProgress = {
               position: episode.duration || item.position || 0,
               duration: episode.duration || item.duration || 0,
               played: true,
-              feedId: episode.feedId
-            });
+              feedId: episode.feedId,
+              updatedAt: new Date().toISOString(),
+            };
+            await window.api.updateProgress(guid, episode.guid, nextProgress);
+            window.setEpisodeProgressState(episode.guid, nextProgress);
             if (window.cacheManager) {
               await window.cacheManager.deleteEpisode(episode);
             }
-            // Re-render to remove it from list
             renderInProgress(container);
           } catch(e) { console.error(e); }
         }

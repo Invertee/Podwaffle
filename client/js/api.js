@@ -66,14 +66,18 @@ window.debounce = debounce;
 
 // ── API client
 const api = {
+  _buildUrl(url) {
+    return (url.startsWith('/api/') && window.APP_BASE_PATH)
+      ? window.APP_BASE_PATH + url
+      : url;
+  },
+
   _getGuid() {
     return localStorage.getItem('podwaffle_guid');
   },
 
   async _fetch(url, options = {}) {
-    const fullUrl = (url.startsWith('/api/') && window.APP_BASE_PATH)
-      ? window.APP_BASE_PATH + url
-      : url;
+    const fullUrl = this._buildUrl(url);
     const res = await fetch(fullUrl, {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options,
@@ -137,10 +141,32 @@ const api = {
     return this._fetch(`/api/users/${guid}/progress`);
   },
 
-  async updateProgress(guid, episodeGuid, data) {
-    return this._fetch(`/api/users/${guid}/progress/${episodeGuid}`, {
+  async updateProgress(guid, episodeGuid, data, requestOptions = {}) {
+    const safeEpisodeGuid = encodeURIComponent(String(episodeGuid || ''));
+    return this._fetch(`/api/users/${guid}/progress/${safeEpisodeGuid}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+      ...requestOptions,
+    });
+  },
+
+  async getPlaybackSession(guid) {
+    return this._fetch(`/api/users/${guid}/playback-session`);
+  },
+
+  async updatePlaybackSession(guid, session, requestOptions = {}) {
+    return this._fetch(`/api/users/${guid}/playback-session`, {
+      method: 'PUT',
+      body: JSON.stringify(session),
+      ...requestOptions,
+    });
+  },
+
+  async clearPlaybackSession(guid, episodeGuid, requestOptions = {}) {
+    const suffix = episodeGuid ? `?episodeGuid=${encodeURIComponent(episodeGuid)}` : '';
+    return this._fetch(`/api/users/${guid}/playback-session${suffix}`, {
+      method: 'DELETE',
+      ...requestOptions,
     });
   },
 

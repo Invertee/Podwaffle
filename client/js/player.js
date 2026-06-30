@@ -24,6 +24,7 @@ const player = {
   _castStartInFlight: false,
   _lastMediaSessionKey: null,
   _queueAutoplayTimer: null,
+  _lastPlaybackSnapshotAt: 0,
 
   // ─── Initialization ──────────────────────────────────────
   init() {
@@ -57,6 +58,18 @@ const player = {
     if (!isNaN(savedSkipBack)) this.skipBackSecs = savedSkipBack;
     if (!isNaN(savedSkipFwd)) this.skipForwardSecs = savedSkipFwd;
 
+    window.addEventListener('pagehide', () => {
+      this._flushPlaybackSnapshot({ keepalive: true });
+    });
+    window.addEventListener('beforeunload', () => {
+      this._flushPlaybackSnapshot({ keepalive: true });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        this._flushPlaybackSnapshot({ keepalive: true });
+      }
+    });
+
     console.log('[player] Initialized.');
   },
 
@@ -82,6 +95,7 @@ const player = {
       this.audio.pause();
       this.audio.removeAttribute('src');
       this.audio.load();
+      this._clearPersistedPlaybackSession({ episodeGuid: episode.guid, keepalive: true });
       this._notifyStateChange();
       this._setupProgressSync();
 
@@ -127,6 +141,7 @@ const player = {
       this.audio.currentTime = startPosition;
     }
 
+    this._persistPlaybackSnapshot({ force: true });
     this._updateMediaSession();
     this._notifyStateChange();
     this._setupProgressSync();
@@ -317,30 +332,24 @@ const player = {
     if (this.duration > 0 && (playedRatio >= 0.95 || nearEnd)) {
       if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
         console.log(`[player] Episode 95%+ complete or within 15s of end: ${this.currentEpisode.title} (${Math.round(playedRatio * 100)}%, ${this.position.toFixed(1)}s / ${this.duration.toFixed(1)}s)`);
-        this.currentEpisode._markedPlayed = true;
         this._markPlayed(this.currentEpisode, { force: true });
       }
     }
 
+    this._persistPlaybackSnapshot();
     this._notifyStateChange();
   },
 
   _onEnded() {
     console.log('[player] Episode ended:', this.currentEpisode?.title);
-    const finishedEpisode = this.currentEpisode ? { ...this.currentEpisode } : null;
     this.duration = this.audio.duration || this.duration || 0;
     this.position = this.duration > 0 ? this.duration : (this.audio.currentTime || this.position || 0);
 
     if (this.currentEpisode && !this.currentEpisode._markedPlayed && !this.currentEpisode._markingPlayed) {
-      this.currentEpisode._markedPlayed = true;
       this._markPlayed(this.currentEpisode, { force: true, position: this.position, duration: this.duration });
     }
     this.isPlaying = false;
     this._notifyStateChange();
-
-    if (finishedEpisode?._markedPlayed) {
-      this._clearEpisodeCache(finishedEpisode);
-    }
 
     // Advance queue
     if (this.queue.length > 0) {
@@ -394,12 +403,22 @@ const player = {
     }
 
     try {
-      await api.updateProgress(guid, episode.guid, {
+      const nextProgress = {
         position: pos,
         duration: dur,
         played: false,
         feedId: episode.feedId,
-      });
+        updatedAt: new Date().toISOString(),
+      };
+      await api.updateProgress(guid, episode.guid, nextProgress);
+      if (window.setEpisodeProgressState) {
+        window.setEpisodeProgressState(episode.guid, nextProgress);
+      }
+
+      await api.updatePlaybackSession(guid, this._buildPlaybackSnapshot({
+        position: pos,
+        duration: dur,
+      }));
 
       // Listened stats are derived server-side from updateProgress deltas.
       // Only sync skipped time explicitly.
@@ -421,12 +440,14 @@ const player = {
     try {
       const finalPosition = Math.max(0, Math.floor(options.position ?? this.position ?? this.audio.currentTime ?? this.duration ?? 0));
       const finalDuration = Math.max(0, Math.floor(options.duration ?? this.duration ?? this.audio.duration ?? 0));
-      await api.updateProgress(guid, episode.guid, {
+      const nextProgress = {
         position: finalPosition,
         duration: finalDuration,
         played: true,
         feedId: episode.feedId,
-      });
+        updatedAt: new Date().toISOString(),
+      };
+      await api.updateProgress(guid, episode.guid, nextProgress);
 
       await api.addHistory(guid, {
         episodeGuid: episode.guid,
@@ -443,6 +464,14 @@ const player = {
         await api.updateStats(guid, 0, Math.floor(this.skippedSeconds));
         this.skippedSeconds = 0;
       }
+      episode._markedPlayed = true;
+      if (window.setEpisodeProgressState) {
+        window.setEpisodeProgressState(episode.guid, nextProgress);
+      }
+      await api.clearPlaybackSession(guid, episode.guid).catch((err) => {
+        console.warn('[player] Failed to clear playback session after completion:', err);
+      });
+      this._clearPersistedPlaybackSession({ episodeGuid: episode.guid });
       this.lastSyncPosition = finalPosition;
       console.log('[player] Episode marked as played:', episode.title);
       this._clearEpisodeCache(episode);
@@ -450,6 +479,101 @@ const player = {
       console.error('[player] _markPlayed error:', err);
     } finally {
       episode._markingPlayed = false;
+    }
+  },
+
+  _buildPlaybackSnapshot(overrides = {}) {
+    const guid = localStorage.getItem('podwaffle_guid');
+    const episode = this.currentEpisode;
+    if (!guid || !episode || this.mode !== 'local') return null;
+
+    return {
+      guid,
+      episodeGuid: episode.guid,
+      feedId: episode.feedId || '',
+      title: episode.title || '',
+      podcastTitle: episode.podcastTitle || '',
+      audioUrl: episode.audioUrl || '',
+      podcastImageUrl: episode.podcastImageUrl || episode.imageUrl || '',
+      imageUrl: episode.imageUrl || episode.podcastImageUrl || '',
+      position: Math.max(0, Math.floor(overrides.position ?? this.position ?? this.audio.currentTime ?? 0)),
+      duration: Math.max(0, Math.floor(overrides.duration ?? this.duration ?? this.audio.duration ?? 0)),
+      isPlaying: this.isPlaying,
+      mode: this.mode,
+      updatedAt: overrides.updatedAt || new Date().toISOString(),
+    };
+  },
+
+  _persistPlaybackSnapshot(options = {}) {
+    const force = !!options.force;
+    const snapshot = this._buildPlaybackSnapshot(options);
+    if (!snapshot) return;
+
+    const now = Date.now();
+    if (!force && now - this._lastPlaybackSnapshotAt < 5000) {
+      return;
+    }
+
+    this._lastPlaybackSnapshotAt = now;
+    try {
+      localStorage.setItem('podwaffle_playback_session', JSON.stringify(snapshot));
+    } catch (err) {
+      console.warn('[player] Failed to persist local playback snapshot:', err);
+    }
+  },
+
+  _clearPersistedPlaybackSession(options = {}) {
+    const guid = localStorage.getItem('podwaffle_guid');
+    const episodeGuid = options.episodeGuid;
+
+    try {
+      const raw = localStorage.getItem('podwaffle_playback_session');
+      if (raw) {
+        const existing = JSON.parse(raw);
+        if (!episodeGuid || existing?.episodeGuid === episodeGuid) {
+          localStorage.removeItem('podwaffle_playback_session');
+        }
+      }
+    } catch (_) {
+      localStorage.removeItem('podwaffle_playback_session');
+    }
+
+    if (options.keepalive && guid) {
+      api.clearPlaybackSession(guid, episodeGuid, { keepalive: true }).catch(() => {});
+    }
+  },
+
+  _flushPlaybackSnapshot(options = {}) {
+    if (this.mode !== 'local' || !this.currentEpisode || this.currentEpisode._markedPlayed) {
+      return;
+    }
+
+    const guid = localStorage.getItem('podwaffle_guid');
+    const snapshot = this._buildPlaybackSnapshot();
+    if (!guid || !snapshot) return;
+
+    this._persistPlaybackSnapshot({ force: true });
+
+    const requestOptions = options.keepalive ? { keepalive: true } : {};
+    api.updateProgress(guid, this.currentEpisode.guid, {
+      position: snapshot.position,
+      duration: snapshot.duration,
+      played: false,
+      feedId: this.currentEpisode.feedId,
+    }, requestOptions).catch((err) => {
+      console.warn('[player] Failed to flush playback progress:', err);
+    });
+
+    api.updatePlaybackSession(guid, snapshot, requestOptions).catch((err) => {
+      console.warn('[player] Failed to flush playback session:', err);
+    });
+
+    if (this.skippedSeconds > 0 && !options.keepalive) {
+      api.updateStats(guid, 0, Math.floor(this.skippedSeconds)).then(() => {
+        this.skippedSeconds = 0;
+      }).catch((err) => {
+        console.warn('[player] Failed to flush skipped stats:', err);
+      });
     }
   },
 
@@ -587,12 +711,18 @@ const player = {
     const wasPlaying = this.isPlaying;
     const pos = this.position;
 
+    this._flushPlaybackSnapshot();
+
     // Pause local playback
     this.audio.pause();
     this.audio.removeAttribute('src');
     this.audio.load();
     this.mode = 'cast';
     this._activeCastDeviceId = deviceId;
+    this._clearPersistedPlaybackSession({
+      episodeGuid: this.currentEpisode?.guid,
+      keepalive: true,
+    });
 
     if (!this.currentEpisode) {
       this.isPlaying = false;
