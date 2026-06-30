@@ -19,7 +19,9 @@ This folder contains a Home Assistant add-on package for Podwaffle.
 
 - The add-on uses `ingress: true` and defaults to internal port `3000`.
 - Persistent app data is stored via the Home Assistant add-on `/data` volume and mounted into Podwaffle's expected data directory at runtime.
-- The app source is copied into the add-on config share at `/config/app` on first boot so you can browse it easily under `addon_configs`.
+- On every add-on start, the full app tree (client + server) is redeployed from the image source into `/config/app` before launch.
+- Docker build source fetch is tied to `BUILD_VERSION` so new add-on versions refresh source layers instead of reusing stale clone cache.
+- Startup logs include deployed source commit and file fingerprints (`client/js/app.js`, `client/css/app.css`, `server/server.js`) to confirm updated assets are active.
 - If you publish under a different GitHub URL, update `url` in `config.json` and `repository.yaml`.
 
 ## Add-on option: disable new user sessions
