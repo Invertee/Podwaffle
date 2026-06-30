@@ -36,7 +36,7 @@ async function renderProfile(container) {
 
     contentEl.innerHTML = `
       <div class="profile-section">
-        <h2 class="profile-section-title">Listening Stats</h2>
+        <h2 class="profile-section-title has-text-light">Listening Stats</h2>
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-value">${fmt1(listenedHours)}</div>
@@ -75,36 +75,49 @@ async function renderProfile(container) {
 
       <div class="profile-section">
         <div class="profile-card">
+        <h2 class="profile-section-title has-text-light">User Profile</h2>
+
+        <div class="field">
           <label class="profile-label">Your GUID</label>
+        
           <div class="profile-guid-row">
             <input id="profile-guid" class="input" value="${user.guid}" readonly>
           </div>
+          <p class="text-secondary mb-4">Your profile is identified by the GUID below. Enter this GUID on another device to sync your podcasts and progress.</p>
           <br>
           <button id="btn-copy-guid" class="button btn btn-outline">Copy</button>
-          <p class="text-secondary mb-4">Your profile is identified by the GUID below. Enter this GUID on another device to sync your podcasts and progress.</p>
+
+        </div>
+
+
+
+          
         </div>
       </div>
 
       <div class="profile-section">
         <h2 class="profile-section-title">Switch Profile</h2>
         <div class="profile-card">
+        <div class="field">
           <label class="profile-label">Existing GUID</label>
           <div class="profile-guid-row field">
             <input id="input-switch-guid" class="input" placeholder="Paste another GUID">
           </div>
             <button id="btn-switch-guid" class="btn btn-outline button is-success">Switch</button>
         </div>
+
+        </div>
       </div>
 
       <div class="profile-section">
-        <h2 class="profile-section-title">Playback Settings</h2>
+        <h2 class="profile-section-title has-text-light">Playback Settings</h2>
         <form id="form-playback-settings" class="profile-card">
           <div class="field">
-            <label class="label">Skip back (seconds)</label>
+            <label class="label has-text-light">Skip back (seconds)</label>
             <input id="setting-skip-back" class="input" type="number" min="0" value="${settings.skipBack || 15}">
           </div>
           <div class="field">
-            <label class="label">Skip forward (seconds)</label>
+            <label class="label has-text-light">Skip forward (seconds)</label>
             <input id="setting-skip-forward" class="input" type="number" min="0" value="${settings.skipForward || 45}">
           </div>
           <button type="submit" class="button is-success btn btn-primary">Save</button>
@@ -113,15 +126,15 @@ async function renderProfile(container) {
       </div>
 
       <div class="profile-section">
-        <h2 class="profile-section-title">Podcast Search API</h2>
+        <h2 class="profile-section-title has-text-light">Podcast Search API</h2>
         <p class="text-secondary mb-4">By default, Podwaffle uses the iTunes Search API. For better results, you can provide a free <a href="https://podcastindex.org/api" target="_blank" style="color:var(--accent-blue);">PodcastIndex.org</a> API key.</p>
         <form id="form-api-settings" class="profile-card">
           <div class="field">
-            <label class="label">PodcastIndex API Key</label>
+            <label class="label has-text-light">PodcastIndex API Key</label>
             <input type="password" id="setting-api-key" class="form-control input" value="${settings.podcastIndexApiKey || ''}" placeholder="Enter API Key">
           </div>
           <div class="field">
-            <label class="label">PodcastIndex API Secret</label>
+            <label class="label has-text-light">PodcastIndex API Secret</label>
             <input type="password" id="setting-api-secret" class="form-control input" value="${settings.podcastIndexApiSecret || ''}" placeholder="Enter API Secret">
           </div>
           <button type="submit" class="btn button is-success btn-primary">Save</button>
