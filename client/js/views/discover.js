@@ -72,7 +72,7 @@ async function performSearch(query, guid, resultsEl) {
       const isSubbed = subUrls.has(res.feedUrl);
       html += `
         <div class="podcast-tile search-result-tile">
-          <img src="${res.imageUrl || '/icons/icon-192.png'}" onerror="this.src='/icons/icon-192.png'">
+          <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
           <div class="tile-overlay always-visible-overlay">
             <button class="button btn btn-small btn-block mt-2  btn-discover-sub" 
                     data-url="${res.feedUrl}" 

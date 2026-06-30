@@ -18,7 +18,21 @@ This folder contains a Home Assistant add-on package for Podwaffle.
 ## Notes
 
 - The add-on uses `ingress: true` and defaults to internal port `3000`.
-- The add-on build clones the GitHub repository at build time, so your repo must be public or otherwise accessible to the Home Assistant build environment.
 - Persistent app data is stored via the Home Assistant add-on `/data` volume and mounted into Podwaffle's expected data directory at runtime.
 - The app source is copied into the add-on config share at `/config/app` on first boot so you can browse it easily under `addon_configs`.
 - If you publish under a different GitHub URL, update `url` in `config.json` and `repository.yaml`.
+
+## Deployment Methods
+
+### Via Home Assistant Ingress (Reverse Proxy)
+When installed as an HA add-on using **Ingress**, the app runs behind HA's reverse proxy at a base path like `/api/hassio/...`. The app automatically detects this base path and routes all API calls, WebSocket connections, and asset requests correctly.
+
+### Via Direct URL
+You can also access Podwaffle directly on the exposed port (default `3000`) without using Ingress:
+1. In the add-on settings, toggle **"Show in sidebar"** and/or enable **"Network"** settings to expose a port.
+2. Access via `http://[HA-IP]:[PORT]` (e.g., `http://192.168.1.100:3000`).
+
+### Behind a Reverse Proxy
+If you deploy Podwaffle behind your own reverse proxy (nginx, Traefik, etc.), the app will automatically detect the base path from `window.location.pathname` and route accordingly. This works seamlessly as long as your reverse proxy:
+- Proxies all requests to `/` on the backend
+- Preserves the request path (e.g., `/app/podcasts` → backend receives `/app/podcasts`)

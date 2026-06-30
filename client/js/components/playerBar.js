@@ -9,7 +9,7 @@ const playerBar = {
 
     this.container.innerHTML = `
       <div class="player-now-playing" id="pb-now-playing">
-        <img id="pb-art" class="player-art" src="/icons/icon-192.png" alt="Podcast artwork">
+        <img id="pb-art" class="player-art" src="icons/icon-192.png" alt="Podcast artwork">
         <div class="pb-info">
           <div id="pb-title" class="pb-title">Nothing playing</div>
           <div id="pb-podcast" class="pb-podcast">Select a podcast to start</div>
@@ -19,14 +19,14 @@ const playerBar = {
         <div class="player-controls">
           <div class="player-transport">
             <button id="pb-skip-back" class="button is-warning is-active is-rounded" title="Skip Back">
-              <img src="/icons/skip-backwards.svg" alt="Skip Back" width="24" height="24">
+              <img src="icons/skip-backwards.svg" alt="Skip Back" width="24" height="24">
             </button>
             <button id="pb-play-pause" class="button is-danger is-active is-rounded" title="Play/Pause">
-              <img id="pb-play-icon" src="/icons/play.svg" alt="Play" width="32" height="32">
-              <img id="pb-pause-icon" src="/icons/pause.svg" alt="Pause" width="32" height="32" style="display:none;">
+              <img id="pb-play-icon" src="icons/play.svg" alt="Play" width="32" height="32">
+              <img id="pb-pause-icon" src="icons/pause.svg" alt="Pause" width="32" height="32" style="display:none;">
             </button>
             <button id="pb-skip-forward" class="button is-warning is-active is-rounded" title="Skip Forward">
-              <img src="/icons/skip-forward.svg" alt="Skip Forward" width="24" height="24">
+              <img src="icons/skip-forward.svg" alt="Skip Forward" width="24" height="24">
             </button>
           </div>
           
@@ -67,7 +67,7 @@ const playerBar = {
             </button>
           </div>
           <div class="player-mobile-body">
-            <img id="pb-mobile-art" class="player-mobile-art" src="/icons/icon-192.png" alt="Podcast artwork">
+            <img id="pb-mobile-art" class="player-mobile-art" src="icons/icon-192.png" alt="Podcast artwork">
             <div class="player-mobile-info">
               <div id="pb-mobile-title" class="player-mobile-title">Nothing playing</div>
               <div id="pb-mobile-podcast" class="player-mobile-podcast">Select a podcast to start</div>
@@ -78,14 +78,14 @@ const playerBar = {
               <span id="pb-mobile-time-total" class="pb-time">-0:00</span>
             </div>
             <div class="player-mobile-transport">
-              <button id="pb-mobile-skip-back" class="btn-play-pause button is-danger" title="Skip Back">
+              <button id="pb-mobile-skip-back" class="btn-play-pause button is-danger is-active" title="Skip Back">
                 <img src="/icons/skip-backwards.svg" alt="Skip Back" width="35" height="35">
               </button>
-              <button id="pb-mobile-play-pause" class="btn-play-pause button is-danger" title="Play/Pause">
+              <button id="pb-mobile-play-pause" class="btn-play-pause button is-danger is-active" title="Play/Pause">
                 <img id="pb-mobile-play-icon" src="/icons/play.svg" alt="Play" width="40" height="40">
                 <img id="pb-mobile-pause-icon" src="/icons/pause.svg" alt="Pause" width="40" height="40" style="display:none;">
               </button>
-              <button id="pb-mobile-skip-forward" class="btn-play-pause button is-danger" title="Skip Forward">
+              <button id="pb-mobile-skip-forward" class="btn-play-pause button is-danger is-active" title="Skip Forward">
                 <img src="/icons/skip-forward.svg" alt="Skip Forward" width="35" height="35">
               </button>
             </div>
@@ -337,21 +337,21 @@ const playerBar = {
     if (state.currentEpisode) {
       if (titleEl) titleEl.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
-      if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || '/icons/icon-192.png';
+      if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
-      if (mobileArt) mobileArt.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || '/icons/icon-192.png';
+      if (mobileArt) mobileArt.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
       if (mobileTitle) mobileTitle.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (mobilePodcast) mobilePodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
     } else {
       if (titleEl) titleEl.textContent = 'Nothing playing';
       if (podcastEl) podcastEl.textContent = 'Select a podcast to start';
-      if (artEl) artEl.src = '/icons/icon-192.png';
+      if (artEl) artEl.src = 'icons/icon-192.png';
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
-      if (mobileArt) mobileArt.src = '/icons/icon-192.png';
+      if (mobileArt) mobileArt.src = 'icons/icon-192.png';
       if (mobileTitle) mobileTitle.textContent = 'Nothing playing';
       if (mobilePodcast) mobilePodcast.textContent = 'Select a podcast to start';
     }

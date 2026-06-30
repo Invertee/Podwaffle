@@ -33,7 +33,7 @@ async function renderPodcastDetail(container, feedId) {
 
     const headerHtml = `
       <div class="podcast-detail-header">
-        <img src="${podcast.imageUrl}" class="podcast-artwork-large" onerror="this.src='/icons/icon-192.png'">
+        <img src="${podcast.imageUrl}" class="podcast-artwork-large" onerror="this.src='icons/icon-192.png'">
         <div class="podcast-detail-info">
           <h2>${podcast.title}</h2>
           <div class="pd-author">${podcast.author || ''}</div>

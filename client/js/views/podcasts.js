@@ -39,7 +39,7 @@ async function renderPodcasts(container) {
     subscriptions.forEach(sub => {
       html += `
         <div class="podcast-tile" data-feed-id="${sub.feedId}" draggable="true">
-          <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='/icons/icon-192.png'" draggable="false">
+          <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
           ${sub.newEpisodesAvailable ? '<div class="new-dot"></div>' : ''}
           <div class="tile-overlay">
             <span class="tile-title">${sub.title}</span>

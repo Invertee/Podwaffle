@@ -2,7 +2,6 @@
    Podwaffle — app.css
    Dark theme override on Bulma + custom app components
    ============================================================ */
-
 /* ----------------------------------------------------------
    1. CSS CUSTOM PROPERTIES (Design Tokens)
    ---------------------------------------------------------- */
@@ -194,8 +193,8 @@ body {
   left: 0;
   right: 0;
   min-height: var(--player-height);
-  background-color: var(--bg-tertiary);
-  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  border-top: 1px var(--accent-red) solid;
   z-index: 200;
   display: grid;
   grid-template-columns: minmax(220px, 320px) minmax(0, 1fr) auto;

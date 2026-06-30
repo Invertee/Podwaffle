@@ -29,7 +29,8 @@ const castClient = {
     }
     this._intentionalClose = false;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/ws`;
+    const wsPath = (window.APP_BASE_PATH ? window.APP_BASE_PATH + '/ws' : '/ws');
+    const wsUrl = `${protocol}//${location.host}${wsPath}`;
     console.log(`[castClient] Connecting to ${wsUrl}`);
 
     try {

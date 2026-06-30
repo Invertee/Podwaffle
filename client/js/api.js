@@ -71,7 +71,10 @@ const api = {
   },
 
   async _fetch(url, options = {}) {
-    const res = await fetch(url, {
+    const fullUrl = (url.startsWith('/api/') && window.APP_BASE_PATH)
+      ? window.APP_BASE_PATH + url
+      : url;
+    const res = await fetch(fullUrl, {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options,
     });
