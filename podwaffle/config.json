@@ -1,6 +1,6 @@
 {
   "name": "Podwaffle",
-  "version": "1.7.1",
+  "version": "1.9.0",
   "slug": "podwaffle",
   "description": "A Podcast app with multi-device Podcast syncing, Google Cast and home assistant integration",
   "url": "https://github.com/Invertee/Podwaffle",
@@ -19,6 +19,10 @@
   "map": [
     "addon_config:rw"
   ],
-  "options": {},
-  "schema": {}
+  "options": {
+    "disable_new_user_sessions": false
+  },
+  "schema": {
+    "disable_new_user_sessions": "bool"
+  }
 }
