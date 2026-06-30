@@ -403,6 +403,21 @@ async function clearNewFlag(feedId) {
   console.log(`[feedService] clearNewFlag(${feedId}) → flag cleared`);
 }
 
+/**
+ * Returns true when a feed contains at least one episode published within the
+ * last `hours` hours.
+ */
+function hasRecentEpisode(feed, hours = 12) {
+  if (!feed || !Array.isArray(feed.episodes) || hours <= 0) return false;
+
+  const cutoff = Date.now() - (hours * 60 * 60 * 1000);
+  return feed.episodes.some((episode) => {
+    if (!episode || !episode.pubDate) return false;
+    const publishedAt = new Date(episode.pubDate).getTime();
+    return Number.isFinite(publishedAt) && publishedAt >= cutoff && publishedAt <= Date.now();
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -414,5 +429,6 @@ module.exports = {
   getEpisodes,
   refreshAllSubscribedFeeds,
   markEpisodesNew,
-  clearNewFlag
+  clearNewFlag,
+  hasRecentEpisode
 };

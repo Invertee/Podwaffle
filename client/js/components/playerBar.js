@@ -22,8 +22,8 @@ const playerBar = {
               <img src="icons/skip-backwards.svg" alt="Skip Back" width="24" height="24">
             </button>
             <button id="pb-play-pause" class="button is-danger is-active is-rounded" title="Play/Pause">
-              <img id="pb-play-icon" src="icons/play.svg" alt="Play" width="32" height="32">
-              <img id="pb-pause-icon" src="icons/pause.svg" alt="Pause" width="32" height="32" style="display:none;">
+              <img id="pb-play-icon" src="icons/play.svg" alt="Play" width="24" height="24">
+              <img id="pb-pause-icon" src="icons/pause.svg" alt="Pause" width="24" height="24" style="display:none;">
             </button>
             <button id="pb-skip-forward" class="button is-warning is-active is-rounded" title="Skip Forward">
               <img src="icons/skip-forward.svg" alt="Skip Forward" width="24" height="24">
@@ -161,6 +161,31 @@ const playerBar = {
     document.getElementById('pb-cast').addEventListener('click', () => {
       if (window.castModal) window.castModal.show();
     });
+
+    const miniPlayPause = document.getElementById('pb-mini-play-pause');
+    const miniSkipBack = document.getElementById('pb-mini-skip-back');
+    const miniSkipForward = document.getElementById('pb-mini-skip-forward');
+
+    if (miniPlayPause) {
+      miniPlayPause.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.player) window.player.togglePlay();
+      });
+    }
+
+    if (miniSkipBack) {
+      miniSkipBack.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.player) window.player.skipBack();
+      });
+    }
+
+    if (miniSkipForward) {
+      miniSkipForward.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.player) window.player.skipForward();
+      });
+    }
 
     this.bindMobileOverlayEvents();
   },
@@ -321,6 +346,8 @@ const playerBar = {
     const artEl = document.getElementById('pb-art');
     const playIcon = document.getElementById('pb-play-icon');
     const pauseIcon = document.getElementById('pb-pause-icon');
+    const miniPlayIcon = document.getElementById('pb-mini-play-icon');
+    const miniPauseIcon = document.getElementById('pb-mini-pause-icon');
     const scrubber = document.getElementById('pb-scrubber');
     const volSlider = document.getElementById('pb-volume');
     const castBtn = document.getElementById('pb-cast');
@@ -360,6 +387,8 @@ const playerBar = {
     if (state.isPlaying) {
       if (playIcon) playIcon.style.display = 'none';
       if (pauseIcon) pauseIcon.style.display = 'block';
+      if (miniPlayIcon) miniPlayIcon.style.display = 'none';
+      if (miniPauseIcon) miniPauseIcon.style.display = 'block';
       const mobilePlay = document.getElementById('pb-mobile-play-icon');
       const mobilePause = document.getElementById('pb-mobile-pause-icon');
       if (mobilePlay) mobilePlay.style.display = 'none';
@@ -367,6 +396,8 @@ const playerBar = {
     } else {
       if (playIcon) playIcon.style.display = 'block';
       if (pauseIcon) pauseIcon.style.display = 'none';
+      if (miniPlayIcon) miniPlayIcon.style.display = 'block';
+      if (miniPauseIcon) miniPauseIcon.style.display = 'none';
       const mobilePlay = document.getElementById('pb-mobile-play-icon');
       const mobilePause = document.getElementById('pb-mobile-pause-icon');
       if (mobilePlay) mobilePlay.style.display = 'block';

@@ -94,6 +94,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
             title: null,
             imageUrl: null,
             author: null,
+            hasRecentEpisode: false,
             newEpisodesAvailable: false,
             lastRefreshed: null,
             episodeCount: 0
@@ -105,6 +106,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
           title: cached.title,
           imageUrl: cached.imageUrl,
           author: cached.author,
+          hasRecentEpisode: feedService.hasRecentEpisode(cached, 12),
           newEpisodesAvailable: cached.newEpisodesAvailable,
           lastRefreshed: cached.lastRefreshed,
           episodeCount: (cached.episodes || []).length
@@ -153,6 +155,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
         imageUrl: feedData.imageUrl,
         author: feedData.author,
         description: feedData.description,
+        hasRecentEpisode: feedService.hasRecentEpisode(feedData, 12),
         episodeCount: (feedData.episodes || []).length,
         lastRefreshed: feedData.lastRefreshed
       });
@@ -331,6 +334,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs) {
         author: feed.author,
         link: feed.link,
         lastRefreshed: feed.lastRefreshed,
+        hasRecentEpisode: feedService.hasRecentEpisode(feed, 12),
         newEpisodesAvailable: feed.newEpisodesAvailable,
         totalEpisodes: (feed.episodes || []).length,
         episodes,

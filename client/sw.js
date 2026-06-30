@@ -1,5 +1,46 @@
-const AUDIO_CACHE_NAME = 'podwaffle-audio-v2';
+const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
+
+function createRangeResponse(rangeHeader, response) {
+  if (!rangeHeader || !response || response.type === 'opaque') {
+    return Promise.resolve(response);
+  }
+
+  const match = /^bytes=(\d+)-(\d*)$/i.exec(rangeHeader);
+  if (!match) {
+    return Promise.resolve(response);
+  }
+
+  return response.arrayBuffer().then((buffer) => {
+    const totalLength = buffer.byteLength;
+    const start = parseInt(match[1], 10);
+    const requestedEnd = match[2] ? parseInt(match[2], 10) : totalLength - 1;
+    const end = Math.min(requestedEnd, totalLength - 1);
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalLength) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${totalLength}`
+        }
+      });
+    }
+
+    const sliced = buffer.slice(start, end + 1);
+    const headers = new Headers(response.headers);
+    headers.set('Content-Range', `bytes ${start}-${end}/${totalLength}`);
+    headers.set('Content-Length', String(end - start + 1));
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'audio/mpeg');
+    }
+
+    return new Response(sliced, {
+      status: 206,
+      statusText: 'Partial Content',
+      headers,
+    });
+  }).catch(() => response);
+}
 
 // On install: skip waiting
 self.addEventListener('install', event => { 
@@ -74,7 +115,7 @@ self.addEventListener('fetch', event => {
       const cached = await cache.match(event.request);
       if (cached) {
         console.log('[SW] Serving from cache:', url.href);
-        return cached;
+        return createRangeResponse(event.request.headers.get('range'), cached.clone());
       }
 
       // Fetch and cache
@@ -82,7 +123,7 @@ self.addEventListener('fetch', event => {
         const response = await fetch(event.request);
 
         // Cache successful complete responses only (range 206 responses are intentionally excluded)
-        if (response.status === 200) {
+        if (response.status === 200 || response.type === 'opaque') {
           cache.put(event.request, response.clone());
           console.log('[SW] Cached audio:', url.href);
         }

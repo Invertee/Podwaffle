@@ -92,7 +92,11 @@ async function renderPodcastDetail(container, feedId) {
     const epsContainer = document.getElementById('pd-episodes');
     
     // Render episodes
-    const renderEps = (eps) => {
+    const renderEps = async (eps) => {
+      const cacheStatuses = window.cacheManager
+        ? await window.cacheManager.getStatuses(eps || [])
+        : {};
+
       eps.forEach(ep => {
         // Find progress if any
         let prog = progressData[ep.guid];
@@ -108,6 +112,7 @@ async function renderPodcastDetail(container, feedId) {
         
         const row = window.createEpisodeRow(ep, prog, {
           showCheckbox: true,
+          cacheStatus: cacheStatuses[ep.guid] || 'uncached',
           onPlay: (episode) => {
             if (window.player) {
               window.player.loadEpisode(episode, prog.position || 0);
@@ -120,6 +125,7 @@ async function renderPodcastDetail(container, feedId) {
           onPlayLast: (episode) => {
             if (window.player) window.player.addToQueue(episode);
           },
+          onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
           onMarkPlayed: async (episode) => {
             try {
               await window.api.updateProgress(guid, episode.guid, {
@@ -128,6 +134,9 @@ async function renderPodcastDetail(container, feedId) {
                 played: true,
                 feedId: feedId
               });
+              if (window.cacheManager) {
+                await window.cacheManager.deleteEpisode(episode);
+              }
               // Refresh view to show tick
               renderPodcastDetail(container, feedId);
             } catch(e) { console.error(e); }
@@ -137,7 +146,7 @@ async function renderPodcastDetail(container, feedId) {
       });
     };
     
-    renderEps(podcast.episodes);
+    await renderEps(podcast.episodes);
     
     // Bulk actions
     const selectAll = document.getElementById('pd-select-all');
@@ -174,12 +183,16 @@ async function renderPodcastDetail(container, feedId) {
       try {
         const promises = Array.from(checked).map(cb => {
           const epGuid = cb.value;
-          const row = cb.closest('.episode-row');
+          const episode = (podcast.episodes || []).find((ep) => ep.guid === epGuid);
           return window.api.updateProgress(guid, epGuid, {
             position: 1, // dummy value, played is true
             duration: 1,
             played: true,
             feedId: feedId
+          }).then(async () => {
+            if (episode && window.cacheManager) {
+              await window.cacheManager.deleteEpisode(episode);
+            }
           });
         });
         
@@ -201,7 +214,7 @@ async function renderPodcastDetail(container, feedId) {
         loadMoreBtn.textContent = 'Loading...';
         try {
           const nextData = await window.api.getPodcast(feedId, 100, currentOffset);
-          renderEps(nextData.episodes);
+          await renderEps(nextData.episodes);
           currentOffset += 100;
           if (nextData.episodes.length < 100) {
             loadMoreBtn.parentElement.style.display = 'none';

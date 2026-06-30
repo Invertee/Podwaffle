@@ -23,6 +23,7 @@ const player = {
   _activeCastDeviceId: null,
   _castStartInFlight: false,
   _lastMediaSessionKey: null,
+  _queueAutoplayTimer: null,
 
   // ─── Initialization ──────────────────────────────────────
   init() {
@@ -221,6 +222,7 @@ const player = {
     if (!episode) return;
     console.log('[player] Add to queue:', episode.title);
     this.queue.push(episode);
+    this._prefetchUpcomingQueue();
     this._notifyStateChange();
   },
 
@@ -228,6 +230,7 @@ const player = {
     if (!episode) return;
     console.log('[player] Play next:', episode.title);
     this.queue.unshift(episode);
+    this._prefetchUpcomingQueue();
     this._notifyStateChange();
   },
 
@@ -235,6 +238,7 @@ const player = {
     if (index < 0 || index >= this.queue.length) return;
     console.log('[player] Remove from queue index:', index);
     this.queue.splice(index, 1);
+    this._prefetchUpcomingQueue();
     this._notifyStateChange();
   },
 
@@ -245,7 +249,60 @@ const player = {
     console.log(`[player] Reorder queue: ${fromIndex} → ${toIndex}`);
     const [item] = this.queue.splice(fromIndex, 1);
     this.queue.splice(toIndex, 0, item);
+    this._prefetchUpcomingQueue();
     this._notifyStateChange();
+  },
+
+  _prefetchUpcomingQueue() {
+    if (this.mode !== 'local' || !window.cacheManager) return;
+    window.cacheManager.prefetchEpisodes(this.queue, 2).catch((err) => {
+      console.warn('[player] Queue prefetch failed:', err?.message || err);
+    });
+  },
+
+  _clearEpisodeCache(episode) {
+    if (!window.cacheManager || !episode) return;
+    window.cacheManager.deleteEpisode(episode).catch((err) => {
+      console.warn('[player] Failed to clear episode cache:', err?.message || err);
+    });
+  },
+
+  _enterIdleState() {
+    this.isPlaying = false;
+    this.position = 0;
+    this.duration = 0;
+    this.lastSyncPosition = 0;
+    this.skippedSeconds = 0;
+    this.currentEpisode = null;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
+    this._notifyStateChange();
+  },
+
+  _attemptQueuedAutoplay() {
+    if (this.mode !== 'local') return;
+    const tryPlay = () => {
+      clearTimeout(this._queueAutoplayTimer);
+      this._queueAutoplayTimer = null;
+      if (this.mode !== 'local' || !this.audio.src) return;
+      this.play();
+    };
+
+    if (this.audio.readyState >= 2) {
+      tryPlay();
+      return;
+    }
+
+    const onReady = () => {
+      this.audio.removeEventListener('canplay', onReady);
+      this.audio.removeEventListener('loadeddata', onReady);
+      tryPlay();
+    };
+
+    this.audio.addEventListener('canplay', onReady, { once: true });
+    this.audio.addEventListener('loadeddata', onReady, { once: true });
+    this._queueAutoplayTimer = setTimeout(onReady, 1200);
   },
 
   // ─── Internal Event Handlers ──────────────────────────────
@@ -270,6 +327,7 @@ const player = {
 
   _onEnded() {
     console.log('[player] Episode ended:', this.currentEpisode?.title);
+    const finishedEpisode = this.currentEpisode ? { ...this.currentEpisode } : null;
     this.duration = this.audio.duration || this.duration || 0;
     this.position = this.duration > 0 ? this.duration : (this.audio.currentTime || this.position || 0);
 
@@ -280,13 +338,19 @@ const player = {
     this.isPlaying = false;
     this._notifyStateChange();
 
+    if (finishedEpisode?._markedPlayed) {
+      this._clearEpisodeCache(finishedEpisode);
+    }
+
     // Advance queue
     if (this.queue.length > 0) {
       const next = this.queue.shift();
       this._notifyStateChange();
-      this.loadEpisode(next, 0);
+      this.loadEpisode(next, 0, { autoplay: false });
+      this._prefetchUpcomingQueue();
+      this._attemptQueuedAutoplay();
     } else {
-      this._notifyStateChange();
+      this._enterIdleState();
     }
   },
 
@@ -366,6 +430,7 @@ const player = {
       }
       this.lastSyncPosition = finalPosition;
       console.log('[player] Episode marked as played:', episode.title);
+      this._clearEpisodeCache(episode);
     } catch (err) {
       console.error('[player] _markPlayed error:', err);
     } finally {

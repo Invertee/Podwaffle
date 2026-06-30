@@ -171,6 +171,13 @@ async function handleRoute() {
 // App Initialization
 async function initApp() {
   try {
+    if (window.cacheManager) {
+      window.cacheManager.init();
+      window.setInterval(() => {
+        window.cacheManager.cleanupExpired().catch(() => {});
+      }, 6 * 60 * 60 * 1000);
+    }
+
     // 1. Ensure user GUID
     if (!window.appState.guid) {
       console.log('No GUID found, creating new user profile...');

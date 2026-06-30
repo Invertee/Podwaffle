@@ -50,8 +50,7 @@ async function renderInProgress(container) {
       if (f) feedMap[f.feedId] = f;
     });
 
-    const listEl = document.createElement('div');
-    listEl.className = 'ip-list';
+    const visibleEpisodes = [];
 
     // Render each in-progress episode
     inProgressItems.forEach(item => {
@@ -64,9 +63,31 @@ async function renderInProgress(container) {
       
       ep.podcastTitle = feed.title;
       ep.feedId = feed.feedId;
+      ep.podcastImageUrl = feed.imageUrl;
+      visibleEpisodes.push(ep);
+    });
+
+    const cacheStatuses = window.cacheManager
+      ? await window.cacheManager.getStatuses(visibleEpisodes)
+      : {};
+
+    const listEl = document.createElement('div');
+    listEl.className = 'ip-list';
+
+    inProgressItems.forEach(item => {
+      const feed = feedMap[item.feedId];
+      if (!feed) return;
+
+      const ep = feed.episodes.find(e => e.guid === item.epGuid);
+      if (!ep) return;
+
+      ep.podcastTitle = feed.title;
+      ep.feedId = feed.feedId;
+      ep.podcastImageUrl = feed.imageUrl;
 
       const row = window.createEpisodeRow(ep, item, {
         showCheckbox: false,
+        cacheStatus: cacheStatuses[ep.guid] || 'uncached',
         onPlay: (episode) => {
           if (window.player) {
             window.player.loadEpisode(episode, item.position || 0);
@@ -79,6 +100,7 @@ async function renderInProgress(container) {
         onPlayLast: (episode) => {
           if (window.player) window.player.addToQueue(episode);
         },
+        onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
         onMarkPlayed: async (episode) => {
           try {
             await window.api.updateProgress(guid, episode.guid, {
@@ -87,6 +109,9 @@ async function renderInProgress(container) {
               played: true,
               feedId: episode.feedId
             });
+            if (window.cacheManager) {
+              await window.cacheManager.deleteEpisode(episode);
+            }
             // Re-render to remove it from list
             renderInProgress(container);
           } catch(e) { console.error(e); }
@@ -101,6 +126,10 @@ async function renderInProgress(container) {
       contentEl.innerHTML = `<div class="empty-state">No episodes in progress.</div>`;
     } else {
       contentEl.appendChild(listEl);
+    }
+
+    if (window.cacheManager) {
+      window.cacheManager.prefetchEpisodes(visibleEpisodes, 2).catch(() => {});
     }
 
   } catch (err) {
