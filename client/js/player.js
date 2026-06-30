@@ -22,6 +22,7 @@ const player = {
   _stateHandlers: [],
   _activeCastDeviceId: null,
   _castStartInFlight: false,
+  _lastMediaSessionKey: null,
 
   // ─── Initialization ──────────────────────────────────────
   init() {
@@ -372,17 +373,56 @@ const player = {
     }
   },
 
+  _resolveMediaAssetUrl(src) {
+    if (!src) return null;
+    try {
+      return new URL(src, window.location.href).href;
+    } catch (_) {
+      return src;
+    }
+  },
+
+  _getMediaSessionArtwork(episode) {
+    const artworkUrl = this._resolveMediaAssetUrl(
+      episode?.podcastImageUrl || episode?.imageUrl || 'icons/icon-512.png'
+    );
+    if (!artworkUrl) return [];
+
+    return [
+      { src: artworkUrl, sizes: '96x96' },
+      { src: artworkUrl, sizes: '128x128' },
+      { src: artworkUrl, sizes: '192x192' },
+      { src: artworkUrl, sizes: '256x256' },
+      { src: artworkUrl, sizes: '384x384' },
+      { src: artworkUrl, sizes: '512x512' },
+    ];
+  },
+
+  _getMediaSessionKey(episode) {
+    if (!episode) return '';
+    return [
+      episode.guid || '',
+      episode.title || '',
+      episode.podcastTitle || '',
+      episode.podcastImageUrl || episode.imageUrl || ''
+    ].join('|');
+  },
+
   _updateMediaSession() {
     if (!('mediaSession' in navigator)) return;
     const episode = this.currentEpisode;
     if (!episode) return;
 
+    this._lastMediaSessionKey = this._getMediaSessionKey(episode);
+
     navigator.mediaSession.metadata = new MediaMetadata({
       title: episode.title || 'Unknown',
       artist: episode.podcastTitle || 'Podwaffle',
       album: 'Podwaffle',
-      artwork: [],
+      artwork: this._getMediaSessionArtwork(episode),
     });
+
+    navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused';
 
     navigator.mediaSession.setActionHandler('play', () => player.play());
     navigator.mediaSession.setActionHandler('pause', () => player.pause());
@@ -430,6 +470,16 @@ const player = {
         console.error('[player] Error in state handler:', err);
       }
     });
+
+    if ('mediaSession' in navigator) {
+      const mediaSessionKey = this._getMediaSessionKey(this.currentEpisode);
+      if (mediaSessionKey && mediaSessionKey !== this._lastMediaSessionKey) {
+        this._updateMediaSession();
+      }
+      try {
+        navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused';
+      } catch (_) {}
+    }
 
     // Update MediaSession position state
     if ('mediaSession' in navigator && this.duration > 0) {
