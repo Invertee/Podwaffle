@@ -74,6 +74,9 @@ const queue = {
             <div class="queue-item-podcast">${item.podcastTitle}</div>
           </div>
           ${durationStr ? `<div class="queue-item-duration">${durationStr}</div>` : ''}
+          <button class="btn-icon queue-item-play-now" data-index="${index}" title="Play now">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+          </button>
           <button class="btn-icon queue-item-remove" data-index="${index}" title="Remove">
             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
@@ -89,6 +92,16 @@ const queue = {
         e.stopPropagation();
         const idx = parseInt(e.currentTarget.dataset.index);
         if (window.player) window.player.removeFromQueue(idx);
+      });
+    });
+
+    listEl.querySelectorAll('.queue-item-play-now').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(e.currentTarget.dataset.index);
+        if (window.player && typeof window.player.playFromQueue === 'function') {
+          window.player.playFromQueue(idx);
+        }
       });
     });
     
@@ -143,11 +156,6 @@ const queue = {
         let insertIndex = targetIndex;
         if (e.clientY > midY) {
           insertIndex++; // Insert after
-        }
-        
-        // Adjust insert index if dragging downwards
-        if (draggedIndex < insertIndex) {
-          insertIndex--;
         }
         
         if (window.player) window.player.reorderQueue(draggedIndex, insertIndex);

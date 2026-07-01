@@ -33,6 +33,7 @@ const player = {
   _queueStateUpdatedAt: null,
   _queueStateMode: 'local',
   _queueStateSource: 'local',
+  _keyHandlerBound: null,
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -84,6 +85,52 @@ const player = {
       if (normalized) sanitized.push(normalized);
     }
     return sanitized;
+  },
+
+  _canUseGlobalKeybindings(event) {
+    if (!event) return false;
+    const target = event.target;
+    if (!target) return true;
+
+    const tagName = String(target.tagName || '').toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return false;
+    if (target.isContentEditable) return false;
+    return true;
+  },
+
+  _handleGlobalKeydown(event) {
+    if (!this._canUseGlobalKeybindings(event)) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+    switch (event.key) {
+      case ' ': {
+        event.preventDefault();
+        this.togglePlay();
+        break;
+      }
+      case 'ArrowLeft': {
+        event.preventDefault();
+        this.skipBack();
+        break;
+      }
+      case 'ArrowRight': {
+        event.preventDefault();
+        this.skipForward();
+        break;
+      }
+      case 'ArrowUp': {
+        event.preventDefault();
+        this.setVolume((this.volume || 0) + 0.05);
+        break;
+      }
+      case 'ArrowDown': {
+        event.preventDefault();
+        this.setVolume((this.volume || 0) - 0.05);
+        break;
+      }
+      default:
+        break;
+    }
   },
 
   _serializeQueueForSync() {
@@ -307,6 +354,9 @@ const player = {
         this._scheduleQueueSync({ immediate: true });
       }
     });
+
+    this._keyHandlerBound = (event) => this._handleGlobalKeydown(event);
+    window.addEventListener('keydown', this._keyHandlerBound);
 
     console.log('[player] Initialized.');
   },
@@ -578,13 +628,38 @@ const player = {
     this._notifyStateChange();
   },
 
+  playFromQueue(index) {
+    if (index < 0 || index >= this.queue.length) return;
+    const nextEpisode = this.queue[index];
+    if (!nextEpisode) return;
+
+    this.queue.splice(index, 1);
+
+    const currentAsQueueItem = this._normalizeQueueItem(this.currentEpisode);
+    if (currentAsQueueItem) {
+      this.queue.unshift(currentAsQueueItem);
+    }
+
+    this._persistQueueStateLocal({
+      mode: this.mode,
+      currentEpisodeGuid: nextEpisode.guid || '',
+      updatedAt: new Date().toISOString(),
+    });
+    this._prefetchUpcomingQueue();
+    this._scheduleQueueSync({ immediate: true });
+    this._notifyStateChange();
+
+    this.loadEpisode(nextEpisode, 0, { autoplay: true });
+  },
+
   reorderQueue(fromIndex, toIndex) {
     if (fromIndex === toIndex) return;
     if (fromIndex < 0 || fromIndex >= this.queue.length) return;
-    if (toIndex < 0 || toIndex >= this.queue.length) return;
+    if (toIndex < 0 || toIndex > this.queue.length) return;
     console.log(`[player] Reorder queue: ${fromIndex} → ${toIndex}`);
     const [item] = this.queue.splice(fromIndex, 1);
-    this.queue.splice(toIndex, 0, item);
+    const normalizedTarget = Math.max(0, Math.min(toIndex, this.queue.length));
+    this.queue.splice(normalizedTarget, 0, item);
     this._persistQueueStateLocal();
     this._prefetchUpcomingQueue();
     this._scheduleQueueSync();
