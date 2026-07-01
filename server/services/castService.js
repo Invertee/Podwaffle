@@ -120,6 +120,39 @@ function startDiscovery(onDeviceFound, onDeviceLost) {
   }
 }
 
+/**
+ * Stop the current mDNS browser, clear the stale device list, then restart discovery.
+ * Safe to call while a cast session is active — the active device entry is preserved.
+ *
+ * @param {Function} onDeviceFound
+ * @param {Function} onDeviceLost
+ */
+function restartDiscovery(onDeviceFound, onDeviceLost) {
+  console.log('[castService] restartDiscovery() → stopping existing mDNS browser');
+  try {
+    if (browser) {
+      browser.stop();
+      browser = null;
+    }
+    if (bonjourInstance) {
+      bonjourInstance.destroy();
+      bonjourInstance = null;
+    }
+  } catch (err) {
+    console.warn('[castService] restartDiscovery() → error stopping browser:', err.message);
+  }
+
+  // Purge stale entries; keep the active device so an ongoing session isn't disrupted
+  for (const [id] of devices.entries()) {
+    if (id !== state.activeDeviceId) {
+      devices.delete(id);
+    }
+  }
+
+  console.log('[castService] restartDiscovery() → restarting mDNS browse');
+  startDiscovery(onDeviceFound, onDeviceLost);
+}
+
 // ---------------------------------------------------------------------------
 // Device list
 // ---------------------------------------------------------------------------
@@ -534,6 +567,7 @@ function getState() {
 // ---------------------------------------------------------------------------
 module.exports = {
   startDiscovery,
+  restartDiscovery,
   getDevices,
   castTo,
   pause,
