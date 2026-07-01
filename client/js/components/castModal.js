@@ -1,5 +1,67 @@
 const castModal = {
   container: null,
+  _stateHandler: null,
+  _castStateHandler: null,
+
+  _formatLastUpdated(value) {
+    if (!value) return 'Unknown';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return 'Unknown';
+    return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  },
+
+  _renderHeaderState() {
+    const infoEl = document.getElementById('cast-modal-info');
+    if (!infoEl) return;
+
+    if (!window.player) {
+      infoEl.style.display = 'none';
+      return;
+    }
+
+    const queueLen = Array.isArray(window.player.queue) ? window.player.queue.length : 0;
+    const ownerMode = window.player._queueStateMode === 'cast' ? 'Cast owns state' : 'Local owns state';
+    const source = window.player._queueStateSource === 'server' ? 'Server sync' : 'Local mirror';
+    const updatedAt = this._formatLastUpdated(window.player._queueStateUpdatedAt);
+    const currentEpisodeGuid = window.player.currentEpisode?.guid || '(none)';
+
+    infoEl.innerHTML = `
+      <div class="cast-state-grid">
+        <div class="cast-state-row"><span class="cast-state-key">Owner</span><span class="cast-state-val">${ownerMode}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Queue</span><span class="cast-state-val">${queueLen} items</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Current</span><span class="cast-state-val">${currentEpisodeGuid}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Updated</span><span class="cast-state-val">${updatedAt} (${source})</span></div>
+      </div>
+    `;
+    infoEl.style.display = 'block';
+  },
+
+  _bindHeaderStateUpdates() {
+    this._unbindHeaderStateUpdates();
+
+    if (window.player) {
+      this._stateHandler = () => this._renderHeaderState();
+      window.player.onStateChange(this._stateHandler);
+    }
+
+    if (window.castClient) {
+      this._castStateHandler = () => this._renderHeaderState();
+      window.castClient.on('cast:state', this._castStateHandler);
+      window.castClient.on('user:queue', this._castStateHandler);
+    }
+  },
+
+  _unbindHeaderStateUpdates() {
+    if (window.player && this._stateHandler) {
+      window.player.offStateChange(this._stateHandler);
+    }
+    if (window.castClient && this._castStateHandler) {
+      window.castClient.off('cast:state', this._castStateHandler);
+      window.castClient.off('user:queue', this._castStateHandler);
+    }
+    this._stateHandler = null;
+    this._castStateHandler = null;
+  },
   
   render(containerId) {
     this.container = document.getElementById(containerId);
@@ -35,26 +97,14 @@ const castModal = {
     if (!this.container) return;
     this.container.style.display = 'block';
     
-    // Update header info
-    const infoEl = document.getElementById('cast-modal-info');
-    if (window.player && window.player.currentEpisode) {
-      const ep = window.player.currentEpisode;
-      infoEl.innerHTML = `
-        <!-- Artwork disabled for now -->
-        <div>
-          <div class="cmi-podcast">${ep.podcastTitle}</div>
-          <div class="cmi-title">${ep.title}</div>
-        </div>
-      `;
-      infoEl.style.display = 'flex';
-    } else {
-      infoEl.style.display = 'none';
-    }
+    this._renderHeaderState();
+    this._bindHeaderStateUpdates();
     
     await this.fetchDevices();
   },
   
   hide() {
+    this._unbindHeaderStateUpdates();
     if (this.container) this.container.style.display = 'none';
   },
   

@@ -350,6 +350,67 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     }
   });
 
+  // GET /users/:guid/queue
+  router.get('/users/:guid/queue', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] GET /users/${guid}/queue`);
+    try {
+      const queueState = await userService.getQueue(guid);
+      res.json(queueState || { queue: [], mode: 'local', currentEpisodeGuid: '', updatedAt: null });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to get queue', err.message);
+    }
+  });
+
+  // PUT /users/:guid/queue
+  router.put('/users/:guid/queue', async (req, res) => {
+    const { guid } = req.params;
+    const payload = req.body;
+    const queue = Array.isArray(payload) ? payload : (Array.isArray(payload?.queue) ? payload.queue : null);
+    const metadata = {
+      mode: payload?.mode,
+      currentEpisodeGuid: payload?.currentEpisodeGuid,
+      updatedAt: payload?.updatedAt,
+    };
+    console.log(`[api] PUT /users/${guid}/queue`, {
+      count: Array.isArray(queue) ? queue.length : 'invalid',
+      mode: metadata.mode || null,
+      currentEpisodeGuid: metadata.currentEpisodeGuid || null,
+    });
+
+    if (!Array.isArray(queue)) {
+      return sendError(res, 400, 'queue must be an array');
+    }
+
+    try {
+      const updatedQueue = await userService.updateQueue(guid, queue, metadata);
+      res.json({
+        queue: updatedQueue,
+        mode: metadata.mode || null,
+        currentEpisodeGuid: metadata.currentEpisodeGuid || null,
+        updatedAt: metadata.updatedAt || new Date().toISOString(),
+      });
+      broadcastWs({
+        type: 'user:queue',
+        data: {
+          guid,
+          count: updatedQueue.length,
+          mode: metadata.mode || null,
+          currentEpisodeGuid: metadata.currentEpisodeGuid || null,
+          updatedAt: metadata.updatedAt || new Date().toISOString(),
+        }
+      });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to update queue', err.message);
+    }
+  });
+
   // =========================================================================
   // HOME ASSISTANT BRIDGE
   // =========================================================================
@@ -707,6 +768,11 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   router.post('/cast/play', async (req, res) => {
     const { deviceId, mediaUrl, startPosition = 0, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration = 0 } = req.body || {};
     console.log('[api] POST /cast/play', { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle });
+    const CAST_PERSIST_MIN_INTERVAL_MS = 5000;
+    let lastCastPersistAt = 0;
+    let lastPersistedPosition = null;
+    let lastPersistedStatus = null;
+    let castPersistInFlight = false;
 
     if (!deviceId) return sendError(res, 400, 'deviceId is required');
     if (!mediaUrl) return sendError(res, 400, 'mediaUrl is required');
@@ -738,6 +804,25 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
 
         // Persist in-progress state while casting
         if (userGuid && episodeGuid && statusObj.status !== 'idle') {
+          if (castPersistInFlight) {
+            return;
+          }
+
+          const nowMs = Date.now();
+          const statusChanged = lastPersistedStatus !== statusObj.status;
+          const movedSeconds = lastPersistedPosition === null ? Infinity : Math.abs(safePosition - lastPersistedPosition);
+          const intervalElapsed = (nowMs - lastCastPersistAt) >= CAST_PERSIST_MIN_INTERVAL_MS;
+          const shouldPersist = statusChanged || intervalElapsed || movedSeconds >= 15;
+
+          if (!shouldPersist) {
+            return;
+          }
+
+          castPersistInFlight = true;
+          lastCastPersistAt = nowMs;
+          lastPersistedPosition = safePosition;
+          lastPersistedStatus = statusObj.status;
+
           try {
             const profile = await userService.getUser(userGuid);
             if (profile) {
@@ -770,6 +855,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
             }
           } catch (progressErr) {
             console.error('[api] cast onStatusUpdate → failed to persist in-progress:', progressErr.message);
+          } finally {
+            castPersistInFlight = false;
           }
         }
 

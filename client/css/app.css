@@ -1374,6 +1374,41 @@ input[type=range]::-moz-range-thumb {
   border-bottom: 1px solid var(--border-color);
 }
 
+.cast-modal-info {
+  flex: 1;
+  min-width: 0;
+  margin-right: 12px;
+}
+
+.cast-state-grid {
+  display: grid;
+  gap: 3px;
+}
+
+.cast-state-row {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.cast-state-key {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cast-state-val {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .cast-modal-title {
   font-size: 16px;
   font-weight: 600;

@@ -170,6 +170,23 @@ const api = {
     });
   },
 
+  async getQueue(guid) {
+    return this._fetch(`/api/users/${guid}/queue`);
+  },
+
+  async updateQueue(guid, queue, metadata = {}, requestOptions = {}) {
+    return this._fetch(`/api/users/${guid}/queue`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        queue: Array.isArray(queue) ? queue : [],
+        mode: metadata.mode,
+        currentEpisodeGuid: metadata.currentEpisodeGuid,
+        updatedAt: metadata.updatedAt,
+      }),
+      ...requestOptions,
+    });
+  },
+
   // ─── History ──────────────────────────────────────────
   async getHistory(guid, limit = 50, offset = 0) {
     return this._fetch(`/api/users/${guid}/history?limit=${limit}&offset=${offset}`);

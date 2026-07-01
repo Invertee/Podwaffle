@@ -92,8 +92,7 @@ async function renderInProgress(container) {
         onPlay: (episode) => {
           if (window.player) {
             const latestProgress = window.appState.progress?.[episode.guid] || item;
-            window.player.loadEpisode(episode, latestProgress.position || 0);
-            window.player.play();
+            window.player.loadEpisode(episode, latestProgress.position || 0, { autoplay: true });
           }
         },
         onPlayNext: (episode) => {

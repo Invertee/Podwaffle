@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const USERS_DIR = path.join(_dataRoot, 'users');
+const userWriteQueues = new Map();
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap
@@ -41,6 +42,7 @@ function defaultProfile(guid) {
     subscriptions: [],
     seenEpisodes: {},
     progress: {},
+    queue: [],
     history: [],
     stats: {
       totalListenedSeconds: 0,
@@ -63,6 +65,7 @@ function ensureProfileShape(profile) {
   profile.subscriptions = Array.isArray(profile.subscriptions) ? profile.subscriptions : [];
   profile.seenEpisodes = profile.seenEpisodes && typeof profile.seenEpisodes === 'object' ? profile.seenEpisodes : {};
   profile.progress = profile.progress && typeof profile.progress === 'object' ? profile.progress : {};
+  profile.queue = Array.isArray(profile.queue) ? normalizeQueue(profile.queue) : [];
   profile.history = Array.isArray(profile.history) ? profile.history : [];
   profile.stats = {
     totalListenedSeconds: 0,
@@ -74,6 +77,67 @@ function ensureProfileShape(profile) {
     : null;
 
   return profile;
+}
+
+function normalizeQueueItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const audioUrl = item.audioUrl ? String(item.audioUrl) : '';
+  if (!audioUrl) return null;
+
+  const duration = typeof item.duration === 'number' ? item.duration : parseFloat(item.duration) || 0;
+  return {
+    guid: item.guid ? String(item.guid) : '',
+    title: item.title ? String(item.title) : '',
+    podcastTitle: item.podcastTitle ? String(item.podcastTitle) : '',
+    audioUrl,
+    imageUrl: item.imageUrl ? String(item.imageUrl) : '',
+    podcastImageUrl: item.podcastImageUrl ? String(item.podcastImageUrl) : '',
+    feedId: item.feedId ? String(item.feedId) : '',
+    duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+  };
+}
+
+function normalizeQueue(items) {
+  if (!Array.isArray(items)) return [];
+  const normalized = [];
+  for (const item of items) {
+    const next = normalizeQueueItem(item);
+    if (next) normalized.push(next);
+  }
+  return normalized;
+}
+
+async function atomicWriteFile(targetPath, content) {
+  const tempPath = `${targetPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await fs.promises.writeFile(tempPath, content, 'utf8');
+  try {
+    await fs.promises.rename(tempPath, targetPath);
+  } catch (err) {
+    if (err && (err.code === 'EEXIST' || err.code === 'EPERM')) {
+      await fs.promises.unlink(targetPath).catch(() => {});
+      await fs.promises.rename(tempPath, targetPath);
+    } else {
+      await fs.promises.unlink(tempPath).catch(() => {});
+      throw err;
+    }
+  }
+}
+
+async function queueUserWrite(guid, writeOperation) {
+  const previous = userWriteQueues.get(guid) || Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(writeOperation);
+
+  userWriteQueues.set(guid, next);
+
+  try {
+    return await next;
+  } finally {
+    if (userWriteQueues.get(guid) === next) {
+      userWriteQueues.delete(guid);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,14 +173,16 @@ async function saveUser(profile) {
   profile.updatedAt = new Date().toISOString();
   const filePath = userFilePath(profile.guid);
   console.log(`[userService] saveUser(${profile.guid}) → writing ${filePath}`);
-  try {
-    await fs.promises.writeFile(filePath, JSON.stringify(profile, null, 2), 'utf8');
-    console.log(`[userService] saveUser(${profile.guid}) → saved OK`);
-    return profile;
-  } catch (err) {
-    console.error(`[userService] saveUser(${profile.guid}) → write error:`, err);
-    throw err;
-  }
+  return queueUserWrite(profile.guid, async () => {
+    try {
+      await atomicWriteFile(filePath, JSON.stringify(profile, null, 2));
+      console.log(`[userService] saveUser(${profile.guid}) → saved OK`);
+      return profile;
+    } catch (err) {
+      console.error(`[userService] saveUser(${profile.guid}) → write error:`, err);
+      throw err;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +380,9 @@ async function updatePlaybackSession(guid, sessionData) {
   }
 
   const now = new Date().toISOString();
+  const normalizedQueue = normalizeQueue(sessionData.queue !== undefined
+    ? sessionData.queue
+    : (existing && Array.isArray(existing.queue) ? existing.queue : []));
   profile.playbackSession = {
     episodeGuid: sessionData.episodeGuid || '',
     feedId: sessionData.feedId || '',
@@ -326,8 +395,12 @@ async function updatePlaybackSession(guid, sessionData) {
     duration: typeof sessionData.duration === 'number' ? sessionData.duration : parseFloat(sessionData.duration) || 0,
     isPlaying: !!sessionData.isPlaying,
     mode: sessionData.mode === 'cast' ? 'cast' : 'local',
+    currentEpisodeGuid: sessionData.currentEpisodeGuid || sessionData.episodeGuid || '',
+    queue: normalizedQueue,
     updatedAt: sessionData.updatedAt || now
   };
+
+  profile.queue = normalizedQueue;
 
   await saveUser(profile);
   console.log(`[userService] updatePlaybackSession(${guid}) → saved ${profile.playbackSession.episodeGuid} @ ${profile.playbackSession.position}s`);
@@ -355,6 +428,84 @@ async function clearPlaybackSession(guid, episodeGuid) {
   await saveUser(profile);
   console.log(`[userService] clearPlaybackSession(${guid}) → cleared`);
   return null;
+}
+
+async function getQueue(guid) {
+  console.log(`[userService] getQueue(${guid})`);
+  const profile = await getUser(guid);
+  if (!profile) {
+    console.warn(`[userService] getQueue(${guid}) → user not found`);
+    return {
+      queue: [],
+      mode: 'local',
+      currentEpisodeGuid: '',
+      updatedAt: null,
+    };
+  }
+  if (profile.playbackSession && typeof profile.playbackSession === 'object') {
+    profile.playbackSession.queue = normalizeQueue(profile.playbackSession.queue || profile.queue || []);
+    profile.queue = profile.playbackSession.queue;
+    return {
+      queue: profile.playbackSession.queue,
+      mode: profile.playbackSession.mode === 'cast' ? 'cast' : 'local',
+      currentEpisodeGuid: profile.playbackSession.currentEpisodeGuid || profile.playbackSession.episodeGuid || '',
+      updatedAt: profile.playbackSession.updatedAt || null,
+    };
+  }
+
+  profile.queue = normalizeQueue(profile.queue);
+  return {
+    queue: profile.queue,
+    mode: 'local',
+    currentEpisodeGuid: '',
+    updatedAt: profile.updatedAt || null,
+  };
+}
+
+async function updateQueue(guid, queueItems, metadata = {}) {
+  console.log(`[userService] updateQueue(${guid}) → ${Array.isArray(queueItems) ? queueItems.length : 0} items`);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  const normalizedQueue = normalizeQueue(queueItems);
+  const now = new Date().toISOString();
+  const existingSession = profile.playbackSession && typeof profile.playbackSession === 'object'
+    ? profile.playbackSession
+    : null;
+  const incomingUpdatedAt = metadata.updatedAt ? new Date(metadata.updatedAt).getTime() : NaN;
+  const existingUpdatedAt = existingSession && existingSession.updatedAt ? new Date(existingSession.updatedAt).getTime() : NaN;
+
+  if (Number.isFinite(incomingUpdatedAt) && Number.isFinite(existingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt) {
+    console.log(`[userService] updateQueue(${guid}) → skipped stale update (${incomingUpdatedAt} < ${existingUpdatedAt})`);
+    return normalizeQueue(existingSession.queue || profile.queue || []);
+  }
+
+  const nextMode = metadata.mode === 'cast'
+    ? 'cast'
+    : (metadata.mode === 'local'
+      ? 'local'
+      : (existingSession ? existingSession.mode : 'local'));
+
+  profile.playbackSession = {
+    episodeGuid: existingSession ? (existingSession.episodeGuid || '') : '',
+    feedId: existingSession ? (existingSession.feedId || '') : '',
+    title: existingSession ? (existingSession.title || '') : '',
+    podcastTitle: existingSession ? (existingSession.podcastTitle || '') : '',
+    audioUrl: existingSession ? (existingSession.audioUrl || '') : '',
+    podcastImageUrl: existingSession ? (existingSession.podcastImageUrl || '') : '',
+    imageUrl: existingSession ? (existingSession.imageUrl || '') : '',
+    position: existingSession ? (existingSession.position || 0) : 0,
+    duration: existingSession ? (existingSession.duration || 0) : 0,
+    isPlaying: existingSession ? !!existingSession.isPlaying : false,
+    mode: nextMode,
+    currentEpisodeGuid: metadata.currentEpisodeGuid || (existingSession ? (existingSession.currentEpisodeGuid || existingSession.episodeGuid || '') : ''),
+    queue: normalizedQueue,
+    updatedAt: metadata.updatedAt || now,
+  };
+
+  profile.queue = normalizedQueue;
+  await saveUser(profile);
+  return profile.playbackSession.queue;
 }
 
 /**
@@ -508,6 +659,8 @@ module.exports = {
   getPlaybackSession,
   updatePlaybackSession,
   clearPlaybackSession,
+  getQueue,
+  updateQueue,
   getHistory,
   addHistoryEntry,
   updateStats,

@@ -117,8 +117,8 @@ async function renderPodcastDetail(container, feedId) {
           onPlay: (episode) => {
             if (window.player) {
               const latestProgress = window.appState.progress?.[episode.guid] || prog;
-              window.player.loadEpisode(episode, latestProgress.position || 0);
-              window.player.play();
+              const resumePosition = latestProgress?.played ? 0 : (latestProgress?.position || 0);
+              window.player.loadEpisode(episode, resumePosition, { autoplay: true });
             }
           },
           onPlayNext: (episode) => {

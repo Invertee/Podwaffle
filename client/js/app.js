@@ -428,6 +428,10 @@ async function initApp() {
       await restoreLastInProgressEpisode(window.appState.guid);
     }
 
+    if (window.player && typeof window.player.hydrateQueueFromServer === 'function') {
+      await window.player.hydrateQueueFromServer();
+    }
+
     // Set up cross-client sync listeners
     if (window.castClient) {
       window.castClient.on('user:progress', () => {
@@ -437,6 +441,24 @@ async function initApp() {
       window.castClient.on('user:subscriptions', () => {
         const h = window.location.hash;
         if (!h || h === '#/' || h === '#/podcasts') handleRoute();
+      });
+      window.castClient.on('user:queue', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (!incomingGuid || incomingGuid !== window.appState.guid) return;
+        const incomingMode = payload?.mode === 'cast' ? 'cast' : (payload?.mode === 'local' ? 'local' : null);
+        if (incomingMode && window.player && window.player.mode && incomingMode !== window.player.mode) {
+          return;
+        }
+        if (window.player && payload?.updatedAt && window.player._toTimestamp) {
+          const incomingTs = window.player._toTimestamp(payload.updatedAt);
+          const localTs = window.player._toTimestamp(window.player._queueStateUpdatedAt);
+          if (incomingTs && localTs && incomingTs < localTs) {
+            return;
+          }
+        }
+        if (window.player && typeof window.player.hydrateQueueFromServer === 'function') {
+          window.player.hydrateQueueFromServer();
+        }
       });
     }
 

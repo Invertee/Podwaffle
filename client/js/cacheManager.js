@@ -84,6 +84,12 @@ const cacheManager = {
     return caches.open(this.AUDIO_CACHE_NAME);
   },
 
+  _isCacheableAudioResponse(response) {
+    if (!response || response.type === 'opaque' || !response.ok) return false;
+    const contentType = String(response.headers.get('Content-Type') || '').toLowerCase();
+    return contentType.startsWith('audio/') || contentType.includes('application/octet-stream');
+  },
+
   async getStatus(input) {
     const url = this._resolveUrl(input);
     if (!url || !this.isSupported()) return 'unsupported';
@@ -94,6 +100,13 @@ const cacheManager = {
 
     const cache = await this._getCache();
     const cached = await cache.match(url);
+
+    if (cached && cached.type === 'opaque') {
+      await cache.delete(url);
+      this._clearCachedMark(url);
+      this._statusByUrl.set(url, 'uncached');
+      return 'uncached';
+    }
 
     if (cached && this._isExpired(url)) {
       await cache.delete(url);
@@ -134,25 +147,15 @@ const cacheManager = {
       this._setStatus(url, 'downloading');
       try {
         const cache = await this._getCache();
-        let response;
-        try {
-          response = await fetch(new Request(url, {
-            method: 'GET',
-            mode: 'cors',
-            credentials: 'omit',
-            cache: 'reload'
-          }));
-        } catch (_) {
-          response = await fetch(new Request(url, {
-            method: 'GET',
-            mode: 'no-cors',
-            credentials: 'omit',
-            cache: 'reload'
-          }));
-        }
+        const response = await fetch(new Request(url, {
+          method: 'GET',
+          mode: 'cors',
+          credentials: 'omit',
+          cache: 'reload'
+        }));
 
-        if (!(response.ok || response.type === 'opaque')) {
-          throw new Error(`Unexpected cache response: ${response.status}`);
+        if (!this._isCacheableAudioResponse(response)) {
+          throw new Error(`Audio response not cacheable (status=${response.status}, type=${response.type})`);
         }
 
         await cache.put(url, response.clone());

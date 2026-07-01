@@ -223,9 +223,12 @@ const castClient = {
             podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
             imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
           };
-          // Notify player if it's in cast mode
-          if (window.player && (window.player.mode === 'cast' || this._castState.activeDeviceId)) {
-            window.player.mode = 'cast';
+          // Notify player only when cast mode is currently authoritative
+          if (window.player && window.player.mode === 'cast') {
+            if (!this._castState.activeDeviceId) {
+              return;
+            }
+
             window.player._activeCastDeviceId = this._castState.activeDeviceId || window.player._activeCastDeviceId;
             window.player.position = this._castState.position;
             window.player.duration = this._castState.duration;
@@ -240,6 +243,10 @@ const castClient = {
                 podcastTitle: this._castState.podcastTitle,
                 podcastImageUrl: this._castState.imageUrl,
               };
+            }
+
+            if (typeof window.player.handleCastStatusUpdate === 'function') {
+              window.player.handleCastStatusUpdate(this._castState);
             }
             
             window.player._notifyStateChange();

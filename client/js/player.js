@@ -17,7 +17,6 @@ const player = {
   skipForwardSecs: 45,
   progressSyncInterval: null,
   lastSyncPosition: 0,
-  lastSyncTime: 0,
   skippedSeconds: 0,
   _stateHandlers: [],
   _activeCastDeviceId: null,
@@ -25,6 +24,241 @@ const player = {
   _lastMediaSessionKey: null,
   _queueAutoplayTimer: null,
   _lastPlaybackSnapshotAt: 0,
+  _audioRecoveryEpisodeGuid: null,
+  _audioRecoveryAttempts: 0,
+  _queueSyncTimer: null,
+  _queueSyncInFlight: false,
+  _lastQueueSyncAt: 0,
+  _lastCastStatus: 'idle',
+  _queueStateUpdatedAt: null,
+  _queueStateMode: 'local',
+  _queueStateSource: 'local',
+
+  _toTimestamp(value) {
+    if (!value) return 0;
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  },
+
+  _getQueueLocalStorageKey() {
+    const guid = localStorage.getItem('podwaffle_guid');
+    if (!guid) return null;
+    return `podwaffle_queue_state_${guid}`;
+  },
+
+  _sanitizeStartPosition(episode, startPosition = 0) {
+    const parsed = Number.parseFloat(startPosition);
+    const safeStart = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    const episodeDuration = Number.parseFloat(episode?.duration);
+
+    if (Number.isFinite(episodeDuration) && episodeDuration > 0) {
+      return Math.max(0, Math.min(safeStart, Math.max(0, episodeDuration - 1)));
+    }
+
+    return Math.max(0, safeStart);
+  },
+
+  _normalizeQueueItem(item) {
+    if (!item || typeof item !== 'object') return null;
+    const audioUrl = item.audioUrl ? String(item.audioUrl) : '';
+    if (!audioUrl) return null;
+
+    const duration = typeof item.duration === 'number' ? item.duration : parseFloat(item.duration) || 0;
+    return {
+      guid: item.guid ? String(item.guid) : '',
+      title: item.title ? String(item.title) : '',
+      podcastTitle: item.podcastTitle ? String(item.podcastTitle) : '',
+      audioUrl,
+      imageUrl: item.imageUrl ? String(item.imageUrl) : '',
+      podcastImageUrl: item.podcastImageUrl ? String(item.podcastImageUrl) : '',
+      feedId: item.feedId ? String(item.feedId) : '',
+      duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+    };
+  },
+
+  _sanitizeQueue(items = []) {
+    if (!Array.isArray(items)) return [];
+    const sanitized = [];
+    for (const item of items) {
+      const normalized = this._normalizeQueueItem(item);
+      if (normalized) sanitized.push(normalized);
+    }
+    return sanitized;
+  },
+
+  _serializeQueueForSync() {
+    return this._sanitizeQueue(this.queue);
+  },
+
+  _persistQueueStateLocal(overrides = {}) {
+    const key = this._getQueueLocalStorageKey();
+    if (!key) return;
+
+    const nextState = {
+      queue: this._serializeQueueForSync(),
+      mode: overrides.mode || (this.mode === 'cast' ? 'cast' : 'local'),
+      currentEpisodeGuid: overrides.currentEpisodeGuid !== undefined
+        ? String(overrides.currentEpisodeGuid || '')
+        : String(this.currentEpisode?.guid || ''),
+      updatedAt: overrides.updatedAt || new Date().toISOString(),
+    };
+
+    try {
+      localStorage.setItem(key, JSON.stringify(nextState));
+      this._queueStateMode = nextState.mode;
+      this._queueStateUpdatedAt = nextState.updatedAt;
+      this._queueStateSource = 'local';
+    } catch (err) {
+      console.warn('[player] Failed to persist local queue state:', err?.message || err);
+    }
+  },
+
+  _loadQueueStateLocal() {
+    const key = this._getQueueLocalStorageKey();
+    if (!key) return null;
+
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw);
+      return {
+        queue: this._sanitizeQueue(parsed?.queue || []),
+        mode: parsed?.mode === 'cast' ? 'cast' : 'local',
+        currentEpisodeGuid: parsed?.currentEpisodeGuid ? String(parsed.currentEpisodeGuid) : '',
+        updatedAt: parsed?.updatedAt || null,
+      };
+    } catch (_) {
+      return null;
+    }
+  },
+
+  _scheduleQueueSync(options = {}) {
+    const delayMs = typeof options.delayMs === 'number' ? options.delayMs : 400;
+    const immediate = !!options.immediate;
+    const now = Date.now();
+    const minIntervalMs = 1000;
+    const effectiveDelay = immediate
+      ? Math.max(0, minIntervalMs - (now - this._lastQueueSyncAt))
+      : delayMs;
+
+    clearTimeout(this._queueSyncTimer);
+    this._queueSyncTimer = setTimeout(() => {
+      this._syncQueueNow().catch((err) => {
+        console.warn('[player] Queue sync failed:', err?.message || err);
+      });
+    }, effectiveDelay);
+  },
+
+  async _syncQueueNow() {
+    const guid = localStorage.getItem('podwaffle_guid');
+    if (!guid || !window.api || typeof window.api.updateQueue !== 'function') return;
+    if (this._queueSyncInFlight) {
+      this._scheduleQueueSync({ delayMs: 500 });
+      return;
+    }
+
+    this._queueSyncInFlight = true;
+    try {
+      const payload = this._serializeQueueForSync();
+      const updatedAt = new Date().toISOString();
+      const mode = this.mode === 'cast' ? 'cast' : 'local';
+      const currentEpisodeGuid = this.currentEpisode?.guid || '';
+      this._persistQueueStateLocal({ mode, currentEpisodeGuid, updatedAt });
+      await api.updateQueue(guid, payload, {
+        mode,
+        currentEpisodeGuid,
+        updatedAt,
+      });
+      this._queueStateMode = mode;
+      this._queueStateUpdatedAt = updatedAt;
+      this._lastQueueSyncAt = Date.now();
+    } finally {
+      this._queueSyncInFlight = false;
+    }
+  },
+
+  async hydrateQueueFromServer() {
+    const guid = localStorage.getItem('podwaffle_guid');
+    if (!guid || !window.api || typeof window.api.getQueue !== 'function') return;
+
+    const localQueueState = this._loadQueueStateLocal();
+
+    try {
+      const queueState = await api.getQueue(guid);
+      const remoteQueue = Array.isArray(queueState) ? queueState : (queueState?.queue || []);
+      const remoteState = {
+        queue: this._sanitizeQueue(remoteQueue || []),
+        mode: queueState?.mode === 'cast' ? 'cast' : 'local',
+        updatedAt: queueState?.updatedAt || null,
+      };
+
+      const localTs = this._toTimestamp(localQueueState?.updatedAt);
+      const remoteTs = this._toTimestamp(remoteState.updatedAt);
+      const useLocal = !!localQueueState && localTs > remoteTs;
+      const chosen = useLocal ? localQueueState : remoteState;
+
+      this.queue = this._sanitizeQueue(chosen.queue || []);
+      if (queueState && typeof queueState === 'object') {
+        this._queueStateMode = chosen.mode === 'cast' ? 'cast' : 'local';
+        this._queueStateUpdatedAt = chosen.updatedAt || this._queueStateUpdatedAt;
+      }
+
+      if (useLocal) {
+        this._queueStateSource = 'local';
+        this._scheduleQueueSync({ immediate: true });
+      } else {
+        this._queueStateSource = 'server';
+      }
+      this._prefetchUpcomingQueue();
+      this._notifyStateChange();
+    } catch (err) {
+      console.warn('[player] Failed to hydrate queue from server, using local copy if available:', err?.message || err);
+      if (!localQueueState) return;
+
+      this.queue = this._sanitizeQueue(localQueueState.queue || []);
+      this._queueStateMode = localQueueState.mode === 'cast' ? 'cast' : 'local';
+      this._queueStateUpdatedAt = localQueueState.updatedAt || this._queueStateUpdatedAt;
+      this._queueStateSource = 'local';
+      this._prefetchUpcomingQueue();
+      this._notifyStateChange();
+    }
+  },
+
+  _advanceQueueAfterCompletion() {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      this._persistQueueStateLocal({
+        mode: this.mode,
+        currentEpisodeGuid: next.guid || '',
+        updatedAt: new Date().toISOString(),
+      });
+      this._notifyStateChange();
+      this.loadEpisode(next, 0, { autoplay: false });
+      this._scheduleQueueSync({ immediate: true });
+      this._prefetchUpcomingQueue();
+      if (this.mode === 'cast') {
+        this.play();
+      } else {
+        this._attemptQueuedAutoplay();
+      }
+      return;
+    }
+
+    this._enterIdleState();
+  },
+
+  handleCastStatusUpdate(statusObj) {
+    if (!statusObj || this.mode !== 'cast') return;
+    const nextStatus = String(statusObj.status || '').toLowerCase();
+    const wasPlaying = this._lastCastStatus === 'playing';
+    const becameIdle = nextStatus === 'idle' && wasPlaying;
+    this._lastCastStatus = nextStatus || this._lastCastStatus;
+
+    if (becameIdle) {
+      this._advanceQueueAfterCompletion();
+    }
+  },
 
   // ─── Initialization ──────────────────────────────────────
   init() {
@@ -45,6 +279,7 @@ const player = {
     });
     this.audio.addEventListener('error', (e) => {
       console.error('[player] Audio error:', e);
+      this._recoverFromAudioError();
     });
 
     // Load saved volume
@@ -60,13 +295,16 @@ const player = {
 
     window.addEventListener('pagehide', () => {
       this._flushPlaybackSnapshot({ keepalive: true });
+      this._scheduleQueueSync({ immediate: true });
     });
     window.addEventListener('beforeunload', () => {
       this._flushPlaybackSnapshot({ keepalive: true });
+      this._scheduleQueueSync({ immediate: true });
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         this._flushPlaybackSnapshot({ keepalive: true });
+        this._scheduleQueueSync({ immediate: true });
       }
     });
 
@@ -74,6 +312,76 @@ const player = {
   },
 
   // ─── Load & Play ─────────────────────────────────────────
+  _buildPlaybackUrl(audioUrl, options = {}) {
+    const { bustCache = false } = options;
+    const resolved = this._resolveMediaAssetUrl(audioUrl);
+    if (!resolved || !bustCache) return resolved;
+    try {
+      const url = new URL(resolved, window.location.href);
+      url.searchParams.set('_pw_retry', String(Date.now()));
+      return url.href;
+    } catch (_) {
+      return `${resolved}${resolved.includes('?') ? '&' : '?'}_pw_retry=${Date.now()}`;
+    }
+  },
+
+  _setAudioSource(audioUrl, startPosition = 0, options = {}) {
+    const sourceUrl = this._buildPlaybackUrl(audioUrl, options);
+    const safeStart = Math.max(0, Math.floor(startPosition || 0));
+
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
+    this.audio.src = sourceUrl;
+    this.audio.load();
+    this.audio.volume = this.volume;
+
+    if (safeStart > 0) {
+      const applyStartPosition = () => {
+        try {
+          this.audio.currentTime = safeStart;
+        } catch (err) {
+          console.warn('[player] Failed to apply start position:', err);
+        }
+      };
+
+      if (this.audio.readyState >= 1) {
+        applyStartPosition();
+      } else {
+        this.audio.addEventListener('loadedmetadata', applyStartPosition, { once: true });
+      }
+    }
+
+    return sourceUrl;
+  },
+
+  _recoverFromAudioError() {
+    if (this.mode !== 'local' || !this.currentEpisode?.audioUrl) return;
+    if (this.currentEpisode._markedPlayed) return;
+
+    const episodeGuid = this.currentEpisode.guid || '';
+    if (this._audioRecoveryEpisodeGuid !== episodeGuid) {
+      this._audioRecoveryEpisodeGuid = episodeGuid;
+      this._audioRecoveryAttempts = 0;
+    }
+
+    if (this._audioRecoveryAttempts >= 1) {
+      console.warn('[player] Audio recovery exhausted for episode:', this.currentEpisode.title);
+      return;
+    }
+
+    const resumeAt = Math.max(0, Math.floor(this.position || this.audio.currentTime || 0));
+    const shouldAutoplay = this.isPlaying;
+    this._audioRecoveryAttempts += 1;
+
+    console.warn('[player] Retrying local playback with cache-busted URL:', this.currentEpisode.title);
+    this._setAudioSource(this.currentEpisode.audioUrl, resumeAt, { bustCache: true });
+
+    if (shouldAutoplay) {
+      this.play();
+    }
+  },
+
   loadEpisode(episode, startPosition = 0, options = {}) {
     const autoplay = options.autoplay !== false;
     if (!episode || !episode.audioUrl) {
@@ -81,16 +389,22 @@ const player = {
       return;
     }
 
+    const safeStartPosition = this._sanitizeStartPosition(episode, startPosition);
+    if (safeStartPosition !== startPosition) {
+      console.warn(`[player] Clamped invalid start position ${startPosition} → ${safeStartPosition} for episode:`, episode.title);
+    }
+
     if (this.mode === 'cast' && this._activeCastDeviceId) {
-      console.log('[player] Loading episode on cast device:', episode.title, 'at', startPosition);
+      console.log('[player] Loading episode on cast device:', episode.title, 'at', safeStartPosition);
       this.currentEpisode = episode;
-      this.position = startPosition;
+      this.position = safeStartPosition;
       this.duration = episode.duration || this.duration || 0;
-      this.lastSyncPosition = startPosition;
-      this.lastSyncTime = Date.now();
+      this.lastSyncPosition = safeStartPosition;
       this.skippedSeconds = 0;
       this.currentEpisode._markedPlayed = false;
       this.currentEpisode._markingPlayed = false;
+      this._audioRecoveryEpisodeGuid = episode.guid || null;
+      this._audioRecoveryAttempts = 0;
       this._castStartInFlight = true;
       this.audio.pause();
       this.audio.removeAttribute('src');
@@ -102,7 +416,7 @@ const player = {
       api.castPlay(
         this._activeCastDeviceId,
         episode.audioUrl,
-        startPosition,
+        safeStartPosition,
         episode.guid,
         localStorage.getItem('podwaffle_guid'),
         episode.title,
@@ -119,27 +433,24 @@ const player = {
       }).finally(() => {
         this._castStartInFlight = false;
       });
+      this._lastCastStatus = 'connecting';
       return;
     }
 
-    console.log('[player] Loading episode:', episode.title, 'at', startPosition);
+    console.log('[player] Loading episode:', episode.title, 'at', safeStartPosition);
 
     this.currentEpisode = episode;
     this.mode = 'local';
     this.isPlaying = false;
-    this.position = startPosition;
-    this.lastSyncPosition = startPosition;
-    this.lastSyncTime = Date.now();
+    this.position = safeStartPosition;
+    this.lastSyncPosition = safeStartPosition;
     this.skippedSeconds = 0;
     this.currentEpisode._markedPlayed = false;
     this.currentEpisode._markingPlayed = false;
+    this._audioRecoveryEpisodeGuid = episode.guid || null;
+    this._audioRecoveryAttempts = 0;
 
-    this.audio.src = episode.audioUrl;
-    this.audio.load();
-    this.audio.volume = this.volume;
-    if (startPosition > 0) {
-      this.audio.currentTime = startPosition;
-    }
+    this._setAudioSource(episode.audioUrl, safeStartPosition);
 
     this._persistPlaybackSnapshot({ force: true });
     this._updateMediaSession();
@@ -236,16 +547,24 @@ const player = {
   addToQueue(episode) {
     if (!episode) return;
     console.log('[player] Add to queue:', episode.title);
-    this.queue.push(episode);
+    const normalized = this._normalizeQueueItem(episode);
+    if (!normalized) return;
+    this.queue.push(normalized);
+    this._persistQueueStateLocal();
     this._prefetchUpcomingQueue();
+    this._scheduleQueueSync();
     this._notifyStateChange();
   },
 
   playNext(episode) {
     if (!episode) return;
     console.log('[player] Play next:', episode.title);
-    this.queue.unshift(episode);
+    const normalized = this._normalizeQueueItem(episode);
+    if (!normalized) return;
+    this.queue.unshift(normalized);
+    this._persistQueueStateLocal();
     this._prefetchUpcomingQueue();
+    this._scheduleQueueSync();
     this._notifyStateChange();
   },
 
@@ -253,7 +572,9 @@ const player = {
     if (index < 0 || index >= this.queue.length) return;
     console.log('[player] Remove from queue index:', index);
     this.queue.splice(index, 1);
+    this._persistQueueStateLocal();
     this._prefetchUpcomingQueue();
+    this._scheduleQueueSync();
     this._notifyStateChange();
   },
 
@@ -264,7 +585,9 @@ const player = {
     console.log(`[player] Reorder queue: ${fromIndex} → ${toIndex}`);
     const [item] = this.queue.splice(fromIndex, 1);
     this.queue.splice(toIndex, 0, item);
+    this._persistQueueStateLocal();
     this._prefetchUpcomingQueue();
+    this._scheduleQueueSync();
     this._notifyStateChange();
   },
 
@@ -292,6 +615,7 @@ const player = {
     this.audio.pause();
     this.audio.removeAttribute('src');
     this.audio.load();
+    this._persistQueueStateLocal({ currentEpisodeGuid: '', updatedAt: new Date().toISOString() });
     this._notifyStateChange();
   },
 
@@ -351,16 +675,7 @@ const player = {
     this.isPlaying = false;
     this._notifyStateChange();
 
-    // Advance queue
-    if (this.queue.length > 0) {
-      const next = this.queue.shift();
-      this._notifyStateChange();
-      this.loadEpisode(next, 0, { autoplay: false });
-      this._prefetchUpcomingQueue();
-      this._attemptQueuedAutoplay();
-    } else {
-      this._enterIdleState();
-    }
+    this._advanceQueueAfterCompletion();
   },
 
   _setupProgressSync() {
@@ -709,7 +1024,7 @@ const player = {
   async switchToCast(deviceId) {
     console.log('[player] Switching to cast device:', deviceId);
     const wasPlaying = this.isPlaying;
-    const pos = this.position;
+    const pos = this._sanitizeStartPosition(this.currentEpisode, this.position);
 
     this._flushPlaybackSnapshot();
 
@@ -771,26 +1086,7 @@ const player = {
     this._activeCastDeviceId = null;
     if (this.currentEpisode && this.currentEpisode.audioUrl) {
       const resumePos = Math.max(0, Math.floor(pos || 0));
-      this.audio.pause();
-      this.audio.src = this.currentEpisode.audioUrl;
-      this.audio.load();
-      this.audio.volume = this.volume;
-
-      const applyResumePosition = () => {
-        if (resumePos > 0) {
-          try {
-            this.audio.currentTime = resumePos;
-          } catch (err) {
-            console.warn('[player] Failed to restore local resume position:', err);
-          }
-        }
-      };
-
-      if (this.audio.readyState >= 1) {
-        applyResumePosition();
-      } else {
-        this.audio.addEventListener('loadedmetadata', applyResumePosition, { once: true });
-      }
+      this._setAudioSource(this.currentEpisode.audioUrl, resumePos);
     }
     this.play();
   },

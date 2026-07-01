@@ -76,6 +76,13 @@ function isArtworkRequest(request, url) {
   return /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(url.pathname);
 }
 
+function looksLikeAudioResponse(response) {
+  if (!response) return false;
+  if (response.type === 'opaque') return false;
+  const contentType = String(response.headers.get('Content-Type') || '').toLowerCase();
+  return contentType.startsWith('audio/') || contentType.includes('application/octet-stream');
+}
+
 // On fetch: intercept audio + image requests
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -114,16 +121,24 @@ self.addEventListener('fetch', event => {
     caches.open(AUDIO_CACHE_NAME).then(async cache => {
       const cached = await cache.match(event.request);
       if (cached) {
-        console.log('[SW] Serving from cache:', url.href);
-        return createRangeResponse(event.request.headers.get('range'), cached.clone());
+        if (!looksLikeAudioResponse(cached) || cached.type === 'opaque') {
+          await cache.delete(event.request);
+        } else {
+          console.log('[SW] Serving from cache:', url.href);
+          return createRangeResponse(event.request.headers.get('range'), cached.clone());
+        }
       }
 
       // Fetch and cache
       try {
         const response = await fetch(event.request);
 
+        if (!looksLikeAudioResponse(response)) {
+          return response;
+        }
+
         // Cache successful complete responses only (range 206 responses are intentionally excluded)
-        if (response.status === 200 || response.type === 'opaque') {
+        if (response.status === 200 && response.type !== 'opaque') {
           cache.put(event.request, response.clone());
           console.log('[SW] Cached audio:', url.href);
         }
