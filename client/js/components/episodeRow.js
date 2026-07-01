@@ -23,6 +23,9 @@ function createEpisodeRow(episode, progress, options = {}) {
     checkboxHtml = `
       <label class="checkbox episode-checkbox">
         <input type="checkbox" value="${episode.guid}">
+        <span class="episode-checkbox-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
       </label>
     `;
   }

@@ -62,6 +62,8 @@ const queue = {
     let html = '';
     items.forEach((item, index) => {
       const durationStr = window.formatDuration ? window.formatDuration(item.duration) : '';
+      const canMoveUp = index > 0;
+      const canMoveDown = index < items.length - 1;
       html += `
         <div class="queue-item" draggable="true" data-index="${index}">
           <div class="queue-drag-handle">
@@ -74,6 +76,12 @@ const queue = {
             <div class="queue-item-podcast">${item.podcastTitle}</div>
           </div>
           ${durationStr ? `<div class="queue-item-duration">${durationStr}</div>` : ''}
+          <button class="btn-icon queue-item-up" data-index="${index}" title="Move up" ${canMoveUp ? '' : 'disabled'}>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+          </button>
+          <button class="btn-icon queue-item-down" data-index="${index}" title="Move down" ${canMoveDown ? '' : 'disabled'}>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
           <button class="btn-icon queue-item-play-now" data-index="${index}" title="Play now">
             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
           </button>
@@ -99,8 +107,29 @@ const queue = {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const idx = parseInt(e.currentTarget.dataset.index);
+        const guid = items[idx] ? items[idx].guid : null;
         if (window.player && typeof window.player.playFromQueue === 'function') {
-          window.player.playFromQueue(idx);
+          window.player.playFromQueue(idx, guid);
+        }
+      });
+    });
+
+    listEl.querySelectorAll('.queue-item-up').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(e.currentTarget.dataset.index);
+        if (window.player && typeof window.player.moveQueueItemUp === 'function') {
+          window.player.moveQueueItemUp(idx);
+        }
+      });
+    });
+
+    listEl.querySelectorAll('.queue-item-down').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(e.currentTarget.dataset.index);
+        if (window.player && typeof window.player.moveQueueItemDown === 'function') {
+          window.player.moveQueueItemDown(idx);
         }
       });
     });

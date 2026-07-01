@@ -1,6 +1,16 @@
 let searchTimeout = null;
+const DISCOVER_VIEW_KEY = 'podwaffle_view_mode_discover';
+
+function getDiscoverViewMode() {
+  return localStorage.getItem(DISCOVER_VIEW_KEY) === 'list' ? 'list' : 'grid';
+}
+
+function setDiscoverViewMode(mode) {
+  localStorage.setItem(DISCOVER_VIEW_KEY, mode === 'list' ? 'list' : 'grid');
+}
 
 async function renderDiscover(container) {
+  let viewMode = getDiscoverViewMode();
   container.innerHTML = `
     <div class="view-header">
     </div>
@@ -15,11 +25,35 @@ async function renderDiscover(container) {
     </div>
     <div class="discover-footer">
     </div>
+    <button id="discover-view-toggle" class="view-mode-toggle" title="Toggle view mode" aria-label="Toggle view mode">
+      <svg class="view-mode-icon-grid" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+      <svg class="view-mode-icon-list" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+    </button>
   `;
 
   const inputEl = document.getElementById('discover-search-input');
   const resultsEl = document.getElementById('discover-results');
+  const toggleEl = document.getElementById('discover-view-toggle');
   const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
+
+  const applyViewMode = (mode) => {
+    viewMode = mode === 'list' ? 'list' : 'grid';
+    setDiscoverViewMode(viewMode);
+    resultsEl.classList.toggle('podcast-grid-list', viewMode === 'list');
+    toggleEl.classList.toggle('is-list', viewMode === 'list');
+    toggleEl.title = viewMode === 'list' ? 'Switch to grid view' : 'Switch to list view';
+    toggleEl.setAttribute('aria-label', toggleEl.title);
+  };
+
+  toggleEl.addEventListener('click', () => {
+    applyViewMode(viewMode === 'list' ? 'grid' : 'list');
+    const q = inputEl.value.trim();
+    if (q) {
+      performSearch(q, guid, resultsEl, viewMode);
+    }
+  });
+
+  applyViewMode(viewMode);
 
   inputEl.addEventListener('input', (e) => {
     const query = e.target.value.trim();
@@ -37,7 +71,7 @@ async function renderDiscover(container) {
     `;
 
     searchTimeout = setTimeout(() => {
-      performSearch(query, guid, resultsEl);
+      performSearch(query, guid, resultsEl, viewMode);
     }, 500);
   });
   
@@ -47,7 +81,7 @@ async function renderDiscover(container) {
   }
 }
 
-async function performSearch(query, guid, resultsEl) {
+async function performSearch(query, guid, resultsEl, viewMode = 'grid') {
   try {
     const results = await window.api.search(query, guid);
     
@@ -67,18 +101,38 @@ async function performSearch(query, guid, resultsEl) {
     let html = '';
     results.forEach(res => {
       const isSubbed = subUrls.has(res.feedUrl);
-      html += `
-        <div class="podcast-tile search-result-tile">
-          <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
-          <div class="tile-overlay always-visible-overlay">
-            <button class="button btn btn-small btn-block mt-2  btn-discover-sub" 
-                    data-url="${res.feedUrl}" 
-                    data-subbed="${isSubbed}">
-              ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}
-            </button>
+      if (viewMode === 'list') {
+        const dateLabel = res.lastReleaseDate
+          ? new Date(res.lastReleaseDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : 'Unknown date';
+        const description = res.description || res.author || 'No description available.';
+        html += `
+          <div class="podcast-list-item search-result-list-item">
+            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
+            <div class="podcast-list-body">
+              <div class="podcast-list-title">${res.title || 'Untitled podcast'}</div>
+              <div class="podcast-list-date">Last episode: ${dateLabel}</div>
+              <div class="podcast-list-description">${description}</div>
+              <button class="button btn btn-small btn-discover-sub" data-url="${res.feedUrl}" data-subbed="${isSubbed}">
+                ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}
+              </button>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        html += `
+          <div class="podcast-tile search-result-tile">
+            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
+            <div class="tile-overlay always-visible-overlay">
+              <button class="button btn btn-small btn-block mt-2  btn-discover-sub" 
+                      data-url="${res.feedUrl}" 
+                      data-subbed="${isSubbed}">
+                ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}
+              </button>
+            </div>
+          </div>
+        `;
+      }
     });
     
     resultsEl.innerHTML = html;

@@ -1,6 +1,14 @@
 async function renderPodcasts(container) {
+  const VIEW_KEY = 'podwaffle_view_mode_podcasts';
+  const getViewMode = () => localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+  const setViewMode = (mode) => localStorage.setItem(VIEW_KEY, mode === 'list' ? 'list' : 'grid');
+
   container.innerHTML = `
     <div class="view-header"></div>
+    <button id="podcasts-view-toggle" class="view-mode-toggle" title="Toggle view mode" aria-label="Toggle view mode">
+      <svg class="view-mode-icon-grid" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+      <svg class="view-mode-icon-list" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+    </button>
     <br>
     <div id="podcasts-grid" class="podcast-grid">
       <div class="loading-state">
@@ -11,6 +19,24 @@ async function renderPodcasts(container) {
   `;
 
   const gridEl = document.getElementById('podcasts-grid');
+  const toggleEl = document.getElementById('podcasts-view-toggle');
+  let currentMode = getViewMode();
+
+  const applyViewMode = (mode) => {
+    currentMode = mode === 'list' ? 'list' : 'grid';
+    setViewMode(currentMode);
+    gridEl.classList.toggle('podcast-grid-list', currentMode === 'list');
+    toggleEl.classList.toggle('is-list', currentMode === 'list');
+    toggleEl.title = currentMode === 'list' ? 'Switch to grid view' : 'Switch to list view';
+    toggleEl.setAttribute('aria-label', toggleEl.title);
+  };
+
+  toggleEl.addEventListener('click', () => {
+    applyViewMode(currentMode === 'list' ? 'grid' : 'list');
+    renderPodcasts(container);
+  });
+
+  applyViewMode(currentMode);
 
   try {
     const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
@@ -37,18 +63,36 @@ async function renderPodcasts(container) {
 
     let html = '';
     subscriptions.forEach(sub => {
-      html += `
-        <div class="podcast-tile" data-feed-id="${sub.feedId}" draggable="true">
-          <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
-          ${sub.hasRecentEpisode ? '<div class="new-dot"></div>' : ''}
-        </div>
-      `;
+      if (currentMode === 'list') {
+        const updatedText = sub.lastRefreshed
+          ? new Date(sub.lastRefreshed).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : 'Unknown date';
+        const description = sub.description || sub.author || 'No description available.';
+        html += `
+          <div class="podcast-list-item" data-feed-id="${sub.feedId}" draggable="true">
+            <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
+            <div class="podcast-list-body">
+              <div class="podcast-list-title">${sub.title || 'Untitled podcast'}</div>
+              <div class="podcast-list-date">Last update: ${updatedText}</div>
+              <div class="podcast-list-description">${description}</div>
+            </div>
+            ${sub.hasRecentEpisode ? '<div class="new-dot"></div>' : ''}
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="podcast-tile" data-feed-id="${sub.feedId}" draggable="true">
+            <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
+            ${sub.hasRecentEpisode ? '<div class="new-dot"></div>' : ''}
+          </div>
+        `;
+      }
     });
 
     gridEl.innerHTML = html;
 
     // Bind tile click (navigate only when not dragging)
-    gridEl.querySelectorAll('.podcast-tile').forEach(tile => {
+    gridEl.querySelectorAll('[data-feed-id]').forEach(tile => {
       tile.addEventListener('click', () => {
         if (tile.classList.contains('dragging')) return;
         window.navigate(`#/podcast/${tile.dataset.feedId}`);
@@ -64,7 +108,7 @@ async function renderPodcasts(container) {
 }
 
 async function _saveTileOrder(gridEl, guid) {
-  const feedIds = [...gridEl.querySelectorAll('.podcast-tile')].map(t => t.dataset.feedId);
+  const feedIds = [...gridEl.querySelectorAll('[data-feed-id]')].map(t => t.dataset.feedId);
   try {
     await window.api.reorderSubscriptions(guid, feedIds);
     console.log('[podcasts] Saved tile order:', feedIds);
@@ -74,12 +118,13 @@ async function _saveTileOrder(gridEl, guid) {
 }
 
 function _initTileDrag(gridEl, guid) {
+  const tileSelector = '[data-feed-id]';
   // ── HTML5 Drag (desktop mouse) ────────────────────────
   let dragSrcEl = null;
   let didDrag = false;
 
   gridEl.addEventListener('dragstart', (e) => {
-    dragSrcEl = e.target.closest('.podcast-tile');
+    dragSrcEl = e.target.closest(tileSelector);
     if (!dragSrcEl) return;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', dragSrcEl.dataset.feedId);
@@ -91,7 +136,7 @@ function _initTileDrag(gridEl, guid) {
   gridEl.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const target = e.target.closest('.podcast-tile');
+    const target = e.target.closest(tileSelector);
     if (!target || target === dragSrcEl) return;
     const rect = target.getBoundingClientRect();
     const isAfter = e.clientX > rect.left + rect.width / 2;
@@ -115,7 +160,7 @@ function _initTileDrag(gridEl, guid) {
   let touchStartX = 0, touchStartY = 0;
 
   gridEl.addEventListener('touchstart', (e) => {
-    const tile = e.target.closest('.podcast-tile');
+    const tile = e.target.closest(tileSelector);
     if (!tile) return;
     const touch = e.touches[0];
     const rect = tile.getBoundingClientRect();
@@ -130,7 +175,7 @@ function _initTileDrag(gridEl, guid) {
       tile.classList.add('dragging');
 
       touchGhost = tile.cloneNode(true);
-      touchGhost.className = 'podcast-tile touch-drag-ghost';
+      touchGhost.classList.add('touch-drag-ghost');
       Object.assign(touchGhost.style, {
         position: 'fixed',
         width: rect.width + 'px',
@@ -163,7 +208,7 @@ function _initTileDrag(gridEl, guid) {
     const below = document.elementFromPoint(touch.clientX, touch.clientY);
     touchGhost.style.visibility = '';
 
-    const target = below && below.closest('.podcast-tile');
+    const target = below && below.closest(tileSelector);
     if (target && target !== touchDragEl) {
       const rect = target.getBoundingClientRect();
       const isAfter = touch.clientX > rect.left + rect.width / 2;

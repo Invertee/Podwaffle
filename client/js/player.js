@@ -628,28 +628,59 @@ const player = {
     this._notifyStateChange();
   },
 
-  playFromQueue(index) {
-    if (index < 0 || index >= this.queue.length) return;
-    const nextEpisode = this.queue[index];
-    if (!nextEpisode) return;
+  playFromQueue(index, expectedGuid = null) {
+    if (!Array.isArray(this.queue) || this.queue.length === 0) return;
 
-    this.queue.splice(index, 1);
+    let resolvedIndex = Number.isInteger(index) ? index : parseInt(index, 10);
+    if (!Number.isFinite(resolvedIndex) || resolvedIndex < 0 || resolvedIndex >= this.queue.length) {
+      resolvedIndex = -1;
+    }
 
+    if (expectedGuid) {
+      if (resolvedIndex === -1 || this.queue[resolvedIndex]?.guid !== expectedGuid) {
+        resolvedIndex = this.queue.findIndex((item) => item && item.guid === expectedGuid);
+      }
+    }
+
+    if (resolvedIndex < 0 || resolvedIndex >= this.queue.length) return;
+
+    const selected = this._normalizeQueueItem(this.queue[resolvedIndex]);
+    if (!selected) return;
+
+    const remaining = this.queue.filter((_, idx) => idx !== resolvedIndex);
     const currentAsQueueItem = this._normalizeQueueItem(this.currentEpisode);
-    if (currentAsQueueItem) {
+    const isSameAsCurrent = !!(currentAsQueueItem && (
+      (selected.guid && currentAsQueueItem.guid && selected.guid === currentAsQueueItem.guid) ||
+      (selected.audioUrl && currentAsQueueItem.audioUrl && selected.audioUrl === currentAsQueueItem.audioUrl)
+    ));
+
+    this.queue = remaining;
+    if (currentAsQueueItem && !isSameAsCurrent) {
       this.queue.unshift(currentAsQueueItem);
     }
 
+    this.loadEpisode(selected, 0, { autoplay: true });
+
     this._persistQueueStateLocal({
       mode: this.mode,
-      currentEpisodeGuid: nextEpisode.guid || '',
+      currentEpisodeGuid: selected.guid || '',
       updatedAt: new Date().toISOString(),
     });
     this._prefetchUpcomingQueue();
     this._scheduleQueueSync({ immediate: true });
     this._notifyStateChange();
+  },
 
-    this.loadEpisode(nextEpisode, 0, { autoplay: true });
+  moveQueueItemUp(index) {
+    const idx = Number.isInteger(index) ? index : parseInt(index, 10);
+    if (!Number.isFinite(idx) || idx <= 0 || idx >= this.queue.length) return;
+    this.reorderQueue(idx, idx - 1);
+  },
+
+  moveQueueItemDown(index) {
+    const idx = Number.isInteger(index) ? index : parseInt(index, 10);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= this.queue.length - 1) return;
+    this.reorderQueue(idx, idx + 1);
   },
 
   reorderQueue(fromIndex, toIndex) {

@@ -66,6 +66,10 @@ function resetRouteScroll(mainContent) {
   });
 }
 
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+});
+
 // DISABLED: Pull-to-refresh feature (commented out to re-enable later if needed)
 /*
 function initPullToRefresh() {
