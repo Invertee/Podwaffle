@@ -49,9 +49,13 @@ async function renderPodcastDetail(container, feedId) {
       </div>
       
       <div class="pd-bulk-actions">
-        <label class="checkbox">
-          <input type="checkbox" id="pd-select-all"> Select All
+        <label class="checkbox episode-checkbox" id="pd-select-all-label">
+          <input type="checkbox" id="pd-select-all">
+          <span class="episode-checkbox-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
         </label>
+        <label for="pd-select-all" class="pd-select-all-text">Select All</label>
         <button id="pd-mark-selected" class="btn btn-outline btn-small" disabled>Mark Played</button>
       </div>
       
@@ -134,6 +138,7 @@ async function renderPodcastDetail(container, feedId) {
                 position: episode.duration || 0,
                 duration: episode.duration || 0,
                 played: true,
+                skipStats: true,
                 feedId: feedId,
                 updatedAt: new Date().toISOString(),
               };
@@ -191,6 +196,7 @@ async function renderPodcastDetail(container, feedId) {
             position: episode?.duration || 1,
             duration: episode?.duration || 1,
             played: true,
+            skipStats: true,
             feedId: feedId,
             updatedAt: new Date().toISOString(),
           };

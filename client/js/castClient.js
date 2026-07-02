@@ -11,6 +11,8 @@ const castClient = {
   _reconnectDelay: 5000,
   _intentionalClose: false,
   _statePollTimer: null,
+  _idleTimer: null,
+  _IDLE_TIMEOUT_MS: 20 * 60 * 1000, // 20 minutes
   _castState: {
     status: 'idle',
     position: 0,
@@ -77,6 +79,7 @@ const castClient = {
     this._intentionalClose = true;
     clearTimeout(this._reconnectTimer);
     this._stopStatePolling();
+    this._clearIdleTimer();
     if (this.ws) {
       this.ws.close(1000, 'Client disconnected');
       this.ws = null;
@@ -125,6 +128,26 @@ const castClient = {
       clearInterval(this._statePollTimer);
       this._statePollTimer = null;
     }
+  },
+
+  _clearIdleTimer() {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+  },
+
+  _startIdleTimer() {
+    this._clearIdleTimer();
+    console.log(`[castClient] Cast idle — switching to local playback in ${this._IDLE_TIMEOUT_MS / 60000} min if no activity.`);
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (window.player && window.player.mode === 'cast') {
+        console.log('[castClient] Cast idle timeout reached — switching to local playback.');
+        window.player.switchToLocal();
+        this._dispatch('cast:idle_timeout', {});
+      }
+    }, this._IDLE_TIMEOUT_MS);
   },
 
   on(event, handler) {
@@ -223,6 +246,12 @@ const castClient = {
             podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
             imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
           };
+          // Manage idle timeout: clear on playing, start on non-playing
+          if (this._castState.status === 'playing') {
+            this._clearIdleTimer();
+          } else if (this._castState.status === 'idle' || this._castState.status === 'paused' || this._castState.status === 'error') {
+            if (!this._idleTimer) this._startIdleTimer();
+          }
           // Notify player only when cast mode is currently authoritative
           if (window.player && window.player.mode === 'cast') {
             if (!this._castState.activeDeviceId) {

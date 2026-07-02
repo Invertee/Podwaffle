@@ -2,4 +2,4 @@ data/*
 Prompts/*
 server/node_modules/*
 data/podcasts/*
-
+mobile/node_modules/*

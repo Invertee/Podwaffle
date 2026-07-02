@@ -287,12 +287,13 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { guid, episodeGuid } = req.params;
     console.log(`[api] PUT /users/${guid}/progress/${episodeGuid}`, req.body);
     try {
-      const { position, duration, played, feedId } = req.body || {};
+      const { position, duration, played, feedId, skipStats } = req.body || {};
       const progressData = {
         position: typeof position === 'number' ? position : parseFloat(position) || 0,
         duration: typeof duration === 'number' ? duration : parseFloat(duration) || 0,
         played: !!played,
         feedId: feedId || '',
+        skipStats: !!skipStats,
         updatedAt: new Date().toISOString()
       };
       const updated = await userService.updateProgress(guid, episodeGuid, progressData);

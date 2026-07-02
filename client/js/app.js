@@ -482,6 +482,9 @@ async function initApp() {
     // 7. Init pull-to-refresh gesture (DISABLED)
     // initPullToRefresh();
 
+    // 8. Capacitor native bridge (no-op in browser, active in native app)
+    _initCapacitorBridge();
+
   } catch (err) {
     console.error('Failed to initialize app:', err);
     document.body.innerHTML = `
@@ -497,3 +500,64 @@ async function initApp() {
 
 // Start
 document.addEventListener('DOMContentLoaded', initApp);
+
+// ---------------------------------------------------------------------------
+// Capacitor native bridge
+// Integrates with Capacitor plugins when running inside the native Android/iOS
+// app. Safe to call in a browser — all Capacitor checks are guarded.
+// ---------------------------------------------------------------------------
+function _initCapacitorBridge() {
+  const cap = window.Capacitor;
+  if (!cap || !cap.isNativePlatform()) return;
+
+  const Plugins = cap.Plugins || {};
+  console.log('[capacitor] Native platform detected — initialising bridge.');
+
+  // Hide the splash screen now that the app shell is ready
+  Plugins.SplashScreen?.hide({ fadeOutDuration: 300 });
+
+  // Keep system bars visually aligned with app theme
+  try {
+    Plugins.StatusBar?.setStyle?.({ style: 'DARK' });
+    Plugins.StatusBar?.setBackgroundColor?.({ color: '#1a1a2e' });
+    Plugins.StatusBar?.setOverlaysWebView?.({ overlay: false });
+  } catch (err) {
+    console.warn('[capacitor] StatusBar configuration failed:', err);
+  }
+
+  // App lifecycle — flush progress to server when going to background
+  Plugins.App?.addListener('appStateChange', (state) => {
+    if (!state.isActive) {
+      // Went to background: flush playback position so it's safe if the OS kills us
+      if (window.player?.mode === 'local' && typeof window.player._syncProgress === 'function') {
+        window.player._syncProgress({ force: true });
+      }
+      console.log('[capacitor] App backgrounded — progress flushed.');
+    } else {
+      // Came to foreground: refresh queue/subscriptions in case another device updated them
+      console.log('[capacitor] App foregrounded.');
+      if (window.player && typeof window.player.hydrateQueueFromServer === 'function') {
+        window.player.hydrateQueueFromServer();
+      }
+    }
+  });
+
+  // Back button — navigate back in hash history; exit app on root
+  Plugins.App?.addListener('backButton', ({ canGoBack }) => {
+    const hash = window.location.hash;
+    const isRoot = !hash || hash === '#/' || hash === '#/podcasts';
+    if (isRoot) {
+      Plugins.App.exitApp();
+    } else {
+      window.history.back();
+    }
+  });
+
+  // Deep-link / URL open
+  Plugins.App?.addListener('appUrlOpen', (data) => {
+    try {
+      const url = new URL(data.url);
+      if (url.hash) window.navigate(url.hash);
+    } catch (_) {}
+  });
+}

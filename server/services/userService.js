@@ -336,11 +336,13 @@ async function updateProgress(guid, episodeGuid, progressData) {
     profile.playbackSession = null;
   }
 
-  // Update stats
-  if (delta > 0) {
+  // Update stats — skip when caller explicitly marks as played (avoids counting unlistened duration)
+  if (delta > 0 && !progressData.skipStats) {
     profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
     profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + delta;
     console.log(`[userService] updateProgress → listened delta: +${delta.toFixed(1)}s (total: ${profile.stats.totalListenedSeconds.toFixed(1)}s)`);
+  } else if (progressData.skipStats) {
+    console.log(`[userService] updateProgress → skipStats=true, not counting delta of ${delta.toFixed(1)}s`);
   }
 
   await saveUser(profile);

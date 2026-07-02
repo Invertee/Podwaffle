@@ -62,6 +62,12 @@ body {
   min-height: 100vh;
 }
 
+/* Native Android safe-area insets (Capacitor SystemBars injects these vars). */
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -419,7 +425,8 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: var(--bottom-nav-height);
+  height: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
+  padding-bottom: var(--safe-area-bottom);
   background-color: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   z-index: 260;
@@ -1819,6 +1826,21 @@ input[type=range]::-moz-range-thumb {
   font-weight: 500;
 }
 
+.pd-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pd-select-all-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
 .description-toggle:hover {
   text-decoration: underline;
 }
@@ -2520,6 +2542,11 @@ input[type=range]::-moz-range-thumb {
    21. RESPONSIVE / MOBILE
    ---------------------------------------------------------- */
 @media (max-width: 768px) {
+  body {
+    padding-top: var(--safe-area-top);
+    padding-bottom: 0;
+  }
+
   .app-layout {
     grid-template-columns: 1fr;
   }
@@ -2531,7 +2558,7 @@ input[type=range]::-moz-range-thumb {
   .main-content {
     grid-column: 1;
     height: 100vh;
-    padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + 16px);
+    padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-area-bottom) + 16px);
 
   }
 
@@ -2594,14 +2621,14 @@ input[type=range]::-moz-range-thumb {
 
   .player-bar {
     display: flex;
-    bottom: var(--bottom-nav-height);
+    bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
     flex-wrap: wrap;
     gap: 10px;
     padding: 8px 12px;
   }
 
   .queue-panel {
-    bottom: calc(var(--player-height) + var(--bottom-nav-height));
+    bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-area-bottom));
   }
 
   .player-now-playing {

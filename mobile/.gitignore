@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# Generated native projects — commit these once they exist
+# android/
+# ios/

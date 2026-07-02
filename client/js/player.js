@@ -34,6 +34,8 @@ const player = {
   _queueStateMode: 'local',
   _queueStateSource: 'local',
   _keyHandlerBound: null,
+  _nativeMediaSession: null,
+  _nativeMediaInitialized: false,
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -1033,6 +1035,114 @@ const player = {
     ].join('|');
   },
 
+  _normalizeNativeAction(value) {
+    if (!value) return '';
+    return String(value).toLowerCase();
+  },
+
+  _getNativeMediaSessionPlugin() {
+    if (this._nativeMediaSession) return this._nativeMediaSession;
+
+    const cap = window.Capacitor;
+    if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) {
+      return null;
+    }
+
+    const plugin = cap.Plugins?.MediaSession || null;
+    if (!plugin) {
+      return null;
+    }
+
+    this._nativeMediaSession = plugin;
+    return plugin;
+  },
+
+  async _initNativeMediaSession() {
+    const plugin = this._getNativeMediaSessionPlugin();
+    if (!plugin) return;
+    if (this._nativeMediaInitialized) return;
+
+    try {
+      await plugin.setActionHandler({ action: 'play' }, () => {
+        this.play();
+      });
+      await plugin.setActionHandler({ action: 'pause' }, () => {
+        this.pause();
+      });
+      await plugin.setActionHandler({ action: 'seekbackward' }, (details) => {
+        const offset = this.skipBackSecs;
+        this.seek(this.position - offset);
+      });
+      await plugin.setActionHandler({ action: 'seekforward' }, (details) => {
+        const offset = this.skipForwardSecs;
+        this.seek(this.position + offset);
+      });
+      this._nativeMediaInitialized = true;
+
+      console.log('[player] Native MediaSession bridge initialized.');
+    } catch (err) {
+      console.warn('[player] Failed to initialize native MediaSession bridge:', err);
+    }
+  },
+
+  async _syncNativeMediaSession() {
+    const plugin = this._getNativeMediaSessionPlugin();
+    if (!plugin) return;
+
+    await this._initNativeMediaSession();
+
+    const episode = this.currentEpisode;
+    if (!episode) {
+      try {
+        await plugin.setPlaybackState({ playbackState: 'none' });
+      } catch (_) {}
+      return;
+    }
+
+    // Playback state must be updated even if metadata/artwork fetch fails,
+    // otherwise Android won't show notification controls.
+    try {
+      await plugin.setPlaybackState({
+        playbackState: this.isPlaying ? 'playing' : 'paused',
+      });
+    } catch (err) {
+      console.warn('[player] Native MediaSession playback state sync failed:', err);
+    }
+
+    try {
+      await plugin.setMetadata({
+        title: episode.title || 'Unknown',
+        artist: episode.podcastTitle || 'Podwaffle',
+        album: 'Podwaffle',
+        artwork: this._getMediaSessionArtwork(episode),
+      });
+    } catch (err) {
+      console.warn('[player] Native MediaSession metadata sync failed (retrying without artwork):', err);
+      try {
+        await plugin.setMetadata({
+          title: episode.title || 'Unknown',
+          artist: episode.podcastTitle || 'Podwaffle',
+          album: 'Podwaffle',
+          artwork: [],
+        });
+      } catch (metaErr) {
+        console.warn('[player] Native MediaSession metadata fallback failed:', metaErr);
+      }
+    }
+
+    try {
+      if (this.duration > 0) {
+        await plugin.setPositionState({
+          duration: this.duration,
+          playbackRate: this.audio.playbackRate || 1,
+          position: Math.max(0, Math.min(this.position || 0, this.duration)),
+        });
+      }
+    } catch (err) {
+      console.warn('[player] Native MediaSession position sync failed:', err);
+    }
+  },
+
   _updateMediaSession() {
     if (!('mediaSession' in navigator)) return;
     const episode = this.currentEpisode;
@@ -1059,20 +1169,15 @@ const player = {
       const amt = details.seekOffset || player.skipForwardSecs;
       player.seek(player.position + amt);
     });
-    navigator.mediaSession.setActionHandler('previoustrack', () => player.skipBack());
-    navigator.mediaSession.setActionHandler('nexttrack', () => {
-      if (player.queue.length > 0) {
-        const next = player.queue.shift();
-        player.loadEpisode(next, 0);
-      } else {
-        player.skipForward();
-      }
-    });
+    navigator.mediaSession.setActionHandler('previoustrack', null);
+    navigator.mediaSession.setActionHandler('nexttrack', null);
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime != null) player.seek(details.seekTime);
     });
 
     console.log('[player] MediaSession updated for:', episode.title);
+
+    this._syncNativeMediaSession();
   },
 
   _notifyStateChange() {
@@ -1116,6 +1221,8 @@ const player = {
         });
       } catch (_) {}
     }
+
+    this._syncNativeMediaSession();
   },
 
   onStateChange(handler) {
