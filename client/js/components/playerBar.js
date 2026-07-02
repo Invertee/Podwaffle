@@ -89,14 +89,14 @@ const playerBar = {
             </div>
             <div class="player-mobile-transport">
               <button id="pb-mobile-skip-back" class="btn-play-pause button is-danger is-active" title="Skip Back">
-                <img src="/icons/skip-backwards.svg" alt="Skip Back" width="35" height="35">
+                <img src="icons/skip-backwards.svg" alt="Skip Back" width="35" height="35">
               </button>
               <button id="pb-mobile-play-pause" class="btn-play-pause button is-danger is-active" title="Play/Pause">
-                <img id="pb-mobile-play-icon" src="/icons/play.svg" alt="Play" width="40" height="40">
-                <img id="pb-mobile-pause-icon" src="/icons/pause.svg" alt="Pause" width="40" height="40" style="display:none;">
+                <img id="pb-mobile-play-icon" src="icons/play.svg" alt="Play" width="40" height="40">
+                <img id="pb-mobile-pause-icon" src="icons/pause.svg" alt="Pause" width="40" height="40" style="display:none;">
               </button>
               <button id="pb-mobile-skip-forward" class="btn-play-pause button is-danger is-active" title="Skip Forward">
-                <img src="/icons/skip-forward.svg" alt="Skip Forward" width="35" height="35">
+                <img src="icons/skip-forward.svg" alt="Skip Forward" width="35" height="35">
               </button>
             </div>
             <div class="player-mobile-tools">

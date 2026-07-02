@@ -553,8 +553,8 @@ async function initApp() {
 
     // 6. Register Service Worker
     if ('serviceWorker' in navigator) {
-      const swPath = (window.APP_BASE_PATH ? window.APP_BASE_PATH + '/sw.js' : '/sw.js');
-      const swScope = (window.APP_BASE_PATH || '/');
+      const swPath = (window.APP_BASE_PATH ? window.APP_BASE_PATH + '/sw.js' : './sw.js');
+      const swScope = (window.APP_BASE_PATH ? window.APP_BASE_PATH + '/' : '/');
       navigator.serviceWorker.register(swPath, { scope: swScope })
         .then(reg => console.log('[SW] Registered at:', swPath, 'scope:', reg.scope))
         .catch(err => console.error('[SW] Registration failed:', err));

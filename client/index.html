@@ -59,19 +59,21 @@
 
   <!-- Load scripts in correct order -->
   <script>
-    /* Detect base path for HA add-on or reverse proxy deployment */
+    /* Detect base path for GitHub Pages, HA add-on, or reverse proxy deployment */
     (function() {
       const pathname = window.location.pathname;
-      /* Examples: /api/hassio/... → /api/hassio, /local/podwaffle → /local/podwaffle, / → '' */
-      let basePath = '';
-      if (pathname !== '/' && !pathname.endsWith('/index.html')) {
-        const pathSegments = pathname.split('/').filter(s => s && s !== 'index.html');
-        if (pathSegments.length > 1) {
-          basePath = '/' + pathSegments.slice(0, -1).join('/');
-        }
-      }
-      window.APP_BASE_PATH = basePath;
-      console.log('[app] Detected base path:', window.APP_BASE_PATH);
+      /* Strip trailing /index.html and any trailing slash to get the true repo/sub-path base.
+         Examples:
+           https://user.github.io/Podwaffle/        → /Podwaffle
+           https://user.github.io/Podwaffle/index.html → /Podwaffle
+           http://localhost:4000/                   → ''
+           /api/hassio_ingress/TOKEN/               → /api/hassio_ingress/TOKEN
+      */
+      const trimmed = pathname
+        .replace(/\/index\.html$/i, '')
+        .replace(/\/$/, '');
+      window.APP_BASE_PATH = trimmed || '';
+      console.log('[app] Detected base path:', window.APP_BASE_PATH || '(root)');
     })();
   </script>
   <script src="js/api.js"></script>

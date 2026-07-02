@@ -270,9 +270,40 @@ const api = {
       : url;
   },
 
-  _getLocalFeedProxyUrl(feedUrl) {
-    const basePath = window.APP_BASE_PATH || '';
-    return `${basePath}/proxy/feed?url=${encodeURIComponent(feedUrl)}`;
+  _isLocalDevServer() {
+    const h = window.location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h.startsWith('10.');
+  },
+
+  async _fetchFeedXml(feedUrl) {
+    // 1. Try direct fetch first — works for feeds that send CORS headers
+    try {
+      const res = await fetch(feedUrl, {
+        headers: { Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8' },
+      });
+      if (res.ok) return await res.text();
+    } catch (_) {
+      // CORS blocked — fall through to proxy
+    }
+
+    // 2. On local dev server, use the built-in Node proxy
+    if (this._isLocalDevServer()) {
+      const basePath = window.APP_BASE_PATH || '';
+      const proxyUrl = `${basePath}/proxy/feed?url=${encodeURIComponent(feedUrl)}`;
+      const res = await fetch(proxyUrl, {
+        headers: { Accept: 'application/xml, text/xml, application/rss+xml' },
+      });
+      if (!res.ok) throw new Error(`Feed proxy failed with HTTP ${res.status}`);
+      return await res.text();
+    }
+
+    // 3. Static hosting (GitHub Pages etc.) — use corsproxy.io
+    const corsProxy = `https://corsproxy.io/?url=${encodeURIComponent(feedUrl)}`;
+    const res = await fetch(corsProxy, {
+      headers: { Accept: 'application/xml, text/xml, application/rss+xml' },
+    });
+    if (!res.ok) throw new Error(`CORS proxy failed with HTTP ${res.status}`);
+    return await res.text();
   },
 
   _getGuid() {
@@ -281,8 +312,34 @@ const api = {
 
   async _fetch(url, options = {}) {
     const cfg = this.getServerConnectionConfig();
-    if ((!cfg.enabled || !cfg.host) && url.startsWith('/api/')) {
+    const isApiCall = url.startsWith('/api/');
+
+    // No backend configured — always use local
+    if ((!cfg.enabled || !cfg.host) && isApiCall) {
       return this._handleLocalRequest(url, options);
+    }
+
+    // Backend configured — try it, but fall back to local on any failure
+    if (isApiCall) {
+      try {
+        const fullUrl = this._buildUrl(url);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(fullUrl, {
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+          ...options,
+        }).finally(() => clearTimeout(timeout));
+        if (!res.ok) {
+          const errText = await res.text().catch(() => res.statusText);
+          throw new Error(`API error ${res.status}: ${errText}`);
+        }
+        const text = await res.text();
+        try { return text ? JSON.parse(text) : null; } catch (_) { return text; }
+      } catch (err) {
+        console.warn(`[API] Backend unavailable (${err.message}) — falling back to local mode for ${url}`);
+        return this._handleLocalRequest(url, options);
+      }
     }
 
     const fullUrl = this._buildUrl(url);
@@ -539,13 +596,7 @@ const api = {
     }
 
     try {
-      const res = await fetch(this._getLocalFeedProxyUrl(cachedPodcast.feedUrl), {
-        headers: { Accept: 'application/xml, text/xml, application/rss+xml' },
-      });
-      if (!res.ok) {
-        throw new Error(`Feed request failed with HTTP ${res.status}`);
-      }
-      const xmlText = await res.text();
+      const xmlText = await this._fetchFeedXml(cachedPodcast.feedUrl);
       const parsedPodcast = this._parseExternalPodcastFeed(xmlText, cachedPodcast);
       this._saveCachedPodcasts([parsedPodcast]);
       return parsedPodcast;
