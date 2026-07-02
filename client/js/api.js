@@ -846,6 +846,18 @@ const api = {
       return [];
     }
 
+    if (subPath === '/history' && method === 'POST') {
+      const historyKey = this._localKey('podwaffle_history', guid);
+      const current = this._getJsonStorage(historyKey, []);
+      const entry = {
+        ...(body || {}),
+        completedAt: body?.completedAt || new Date().toISOString(),
+      };
+      current.unshift(entry);
+      this._setJsonStorage(historyKey, current);
+      return entry;
+    }
+
     if (subPath.startsWith('/sync/')) {
       const profile = this._getLocalProfile(guid);
       return {
@@ -873,6 +885,62 @@ const api = {
 
     if (subPath === '/cast/state' && method === 'GET') {
       return null;
+    }
+
+    if (subPath === '/cast/devices' && method === 'GET') {
+      // Return a local device for offline casting
+      return [
+        {
+          id: 'local',
+          name: 'This Device',
+          type: 'local_browser',
+          isOnline: true,
+          capabilities: ['play', 'pause', 'stop', 'seek', 'set_volume'],
+        },
+      ];
+    }
+
+    if (subPath === '/cast/play' && method === 'POST') {
+      const { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration } = body || {};
+      // For local device, just store the playback session
+      // The actual playback is handled by the web audio player
+      const session = {
+        deviceId,
+        mediaUrl,
+        episodeGuid,
+        title,
+        podcastTitle,
+        imageUrl,
+        position: startPosition || 0,
+        duration,
+        status: 'playing',
+        volume: 1.0,
+        updatedAt: new Date().toISOString(),
+      };
+      this._setJsonStorage(this._localKey('podwaffle_cast_session', userGuid || 'local'), session);
+      return { ok: true, status: 'playing' };
+    }
+
+    if (subPath === '/cast/pause' && method === 'POST') {
+      return { ok: true, status: 'paused' };
+    }
+
+    if (subPath === '/cast/resume' && method === 'POST') {
+      return { ok: true, status: 'playing' };
+    }
+
+    if (subPath === '/cast/stop' && method === 'POST') {
+      return { ok: true, status: 'stopped' };
+    }
+
+    if (subPath === '/cast/seek' && method === 'PUT') {
+      const { position } = body || {};
+      return { ok: true, position, status: 'paused' };
+    }
+
+    if (subPath === '/cast/volume' && method === 'PUT') {
+      const { volume } = body || {};
+      return { ok: true, volume, status: 'paused' };
     }
 
     throw new Error(`Local API route not implemented: ${method} ${path}`);

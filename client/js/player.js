@@ -1241,10 +1241,14 @@ const player = {
 
     this._flushPlaybackSnapshot();
 
-    // Pause local playback
-    this.audio.pause();
-    this.audio.removeAttribute('src');
-    this.audio.load();
+    // For local device, keep audio playing; for remote devices, pause it
+    const isLocalDevice = deviceId === 'local';
+    if (!isLocalDevice) {
+      this.audio.pause();
+      this.audio.removeAttribute('src');
+      this.audio.load();
+    }
+
     this.mode = 'cast';
     this._activeCastDeviceId = deviceId;
     this._clearPersistedPlaybackSession({
