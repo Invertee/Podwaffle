@@ -82,7 +82,7 @@ async function renderPodcastDetail(container, feedId) {
           btn.textContent = 'Subscribe';
           btn.className = 'button btn btn-primary is-info pd-sub-btn';
         } else {
-          await window.api.subscribe(guid, podcast.feedUrl);
+          await window.api.subscribe(guid, podcast.feedUrl, podcast);
           isSubscribed = true;
           btn.textContent = 'Unsubscribe';
           btn.className = 'button btn btn-outline is-danger pd-sub-btn';

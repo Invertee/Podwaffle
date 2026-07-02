@@ -30,9 +30,15 @@ const castClient = {
       return;
     }
     this._intentionalClose = false;
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsPath = (window.APP_BASE_PATH ? window.APP_BASE_PATH + '/ws' : '/ws');
-    const wsUrl = `${protocol}//${location.host}${wsPath}`;
+    const wsUrl = (window.api && typeof window.api.getWebSocketUrl === 'function')
+      ? window.api.getWebSocketUrl()
+      : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${window.APP_BASE_PATH ? window.APP_BASE_PATH + '/ws' : '/ws'}`;
+
+    if (!wsUrl) {
+      console.log('[castClient] Backend not configured; skipping WebSocket connection.');
+      return;
+    }
+
     console.log(`[castClient] Connecting to ${wsUrl}`);
 
     try {

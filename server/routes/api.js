@@ -1,7 +1,6 @@
 'use strict';
 
 const express = require('express');
-const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 /**
@@ -80,6 +79,28 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   }
 
   // =========================================================================
+  // HEALTH
+  // =========================================================================
+
+  // GET /health — simple connectivity and runtime snapshot
+  router.get('/health', async (_req, res) => {
+    try {
+      const castState = castService.getState();
+      res.json({
+        ok: true,
+        service: 'podwaffle-server',
+        time: new Date().toISOString(),
+        cast: {
+          status: castState.status || 'idle',
+          activeDeviceId: castState.activeDeviceId || null,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, 'Failed to get health status', err.message);
+    }
+  });
+
+  // =========================================================================
   // USERS
   // =========================================================================
 
@@ -129,6 +150,79 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         return sendError(res, 404, 'User not found', err.message);
       }
       sendError(res, 500, 'Failed to update settings', err.message);
+    }
+  });
+
+  // GET /users/:guid/sync/snapshot
+  router.get('/users/:guid/sync/snapshot', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] GET /users/${guid}/sync/snapshot`);
+    try {
+      const snapshot = await userService.getSyncSnapshot(guid);
+      res.json({ ok: true, guid, snapshot });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to fetch sync snapshot', err.message);
+    }
+  });
+
+  // GET /users/:guid/sync/bootstrap
+  router.get('/users/:guid/sync/bootstrap', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] GET /users/${guid}/sync/bootstrap`);
+    try {
+      const payload = await userService.getBootstrapSyncState(guid);
+      res.json({ ok: true, guid, ...payload });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to fetch bootstrap sync state', err.message);
+    }
+  });
+
+  // POST /users/:guid/sync/push
+  router.post('/users/:guid/sync/push', async (req, res) => {
+    const { guid } = req.params;
+    const incomingState = req.body || {};
+    console.log(`[api] POST /users/${guid}/sync/push`);
+    try {
+      const merged = await userService.mergeAndSaveSyncState(guid, incomingState);
+      broadcastWs({
+        type: 'user:sync',
+        data: {
+          guid,
+          summary: merged.summary,
+        }
+      });
+      res.json({
+        ok: true,
+        guid,
+        summary: merged.summary,
+        snapshot: merged.snapshot,
+      });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to push sync state', err.message);
+    }
+  });
+
+  // POST /users/:guid/sync/pull
+  router.post('/users/:guid/sync/pull', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] POST /users/${guid}/sync/pull`);
+    try {
+      const snapshot = await userService.getSyncSnapshot(guid);
+      res.json({ ok: true, guid, snapshot });
+    } catch (err) {
+      if (err.message && err.message.includes('not found')) {
+        return sendError(res, 404, 'User not found', err.message);
+      }
+      sendError(res, 500, 'Failed to pull sync state', err.message);
     }
   });
 
@@ -263,6 +357,71 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       res.json({ success: true });
     } catch (err) {
       sendError(res, 500, 'Failed to reorder subscriptions', err.message);
+    }
+  });
+
+  // POST /users/:guid/feeds/refresh — check all subscribed feeds for new episodes
+  router.post('/users/:guid/feeds/refresh', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] POST /users/${guid}/feeds/refresh`);
+
+    try {
+      const profile = await userService.getUser(guid);
+      if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
+
+      const feedUrls = profile.subscriptions || [];
+      const newEpisodesFound = {};
+      let feedsChecked = 0;
+      let errors = [];
+
+      console.log(`[api] Refreshing ${feedUrls.length} feed(s) for user ${guid}...`);
+
+      // Check each feed for updates
+      for (const feedUrl of feedUrls) {
+        try {
+          feedsChecked++;
+          const feedData = await feedService.fetchAndCacheFeed(feedUrl);
+          const feedId = feedData.feedId;
+
+          // Count new episodes since last refresh
+          const episodesBefore = (feedData.episodeCountBefore || 0);
+          const episodesNow = (feedData.episodes || []).length;
+          const newCount = Math.max(0, episodesNow - episodesBefore);
+
+          if (newCount > 0) {
+            newEpisodesFound[feedId] = newCount;
+            console.log(`[api] Feed ${feedData.title}: ${newCount} new episode(s)`);
+          }
+        } catch (feedErr) {
+          console.warn(`[api] Failed to refresh feed ${feedUrl}:`, feedErr.message);
+          errors.push(`${feedUrl}: ${feedErr.message}`);
+        }
+      }
+
+      const totalNewEpisodes = Object.values(newEpisodesFound).reduce((sum, count) => sum + count, 0);
+
+      res.json({
+        ok: true,
+        guid,
+        feedsChecked,
+        newEpisodesFound,
+        totalNewEpisodes,
+        errors: errors.length > 0 ? errors : undefined,
+        checkedAt: new Date().toISOString(),
+      });
+
+      // Broadcast that feeds were refreshed
+      broadcastWs({
+        type: 'feeds:refreshed',
+        data: {
+          guid,
+          feedsChecked,
+          newEpisodesFound,
+          totalNewEpisodes,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, 'Failed to refresh feeds', err.message);
     }
   });
 
@@ -666,83 +825,27 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     }
 
     try {
-      let results = [];
+      // Use iTunes Search API exclusively
+      console.log('[api] /search → using iTunes Search API');
+      const itunesUrl = `https://itunes.apple.com/search?media=podcast&term=${encodeURIComponent(q)}&limit=20`;
+      console.log(`[api] /search → fetching: ${itunesUrl}`);
 
-      // Attempt PodcastIndex search if user has API keys
-      if (guid) {
-        try {
-          const profile = await userService.getUser(guid);
-          if (profile && profile.settings && profile.settings.podcastIndexApiKey && profile.settings.podcastIndexApiSecret) {
-            console.log(`[api] /search → using PodcastIndex API for user ${guid}`);
-
-            const apiKey = profile.settings.podcastIndexApiKey;
-            const apiSecret = profile.settings.podcastIndexApiSecret;
-            const timestamp = Math.floor(Date.now() / 1000).toString();
-            const authHash = crypto.createHash('sha1')
-              .update(apiKey + apiSecret + timestamp)
-              .digest('hex');
-
-            const piUrl = `https://api.podcastindex.org/api/1.0/search/byterm?q=${encodeURIComponent(q)}&max=20`;
-            console.log(`[api] /search → fetching: ${piUrl}`);
-
-            const piRes = await fetch(piUrl, {
-              headers: {
-                'User-Agent': 'Podwaffle/1.0',
-                'X-Auth-Key': apiKey,
-                'X-Auth-Date': timestamp,
-                'Authorization': authHash
-              }
-            });
-
-            if (!piRes.ok) {
-              throw new Error(`PodcastIndex returned HTTP ${piRes.status}`);
-            }
-
-            const piData = await piRes.json();
-            console.log(`[api] /search → PodcastIndex returned ${(piData.feeds || []).length} results`);
-
-            results = (piData.feeds || []).map(feed => ({
-              feedUrl: feed.url,
-              title: feed.title,
-              author: feed.author,
-              imageUrl: feed.image,
-              description: feed.description,
-              episodeCount: feed.episodeCount || 0,
-              podcastIndexId: feed.id
-            }));
-          } else {
-            console.log(`[api] /search → user ${guid} has no PodcastIndex keys, falling back to iTunes`);
-          }
-        } catch (piErr) {
-          console.error('[api] /search → PodcastIndex search failed, falling back to iTunes:', piErr.message);
-          results = [];
-        }
+      const itunesRes = await fetch(itunesUrl);
+      if (!itunesRes.ok) {
+        throw new Error(`iTunes API returned HTTP ${itunesRes.status}`);
       }
 
-      // Fall back to iTunes Search API
-      if (results.length === 0) {
-        console.log('[api] /search → using iTunes Search API');
-        const itunesUrl = `https://itunes.apple.com/search?media=podcast&term=${encodeURIComponent(q)}&limit=20`;
-        console.log(`[api] /search → fetching: ${itunesUrl}`);
+      const itunesData = await itunesRes.json();
+      console.log(`[api] /search → iTunes returned ${(itunesData.results || []).length} results`);
 
-        const itunesRes = await fetch(itunesUrl);
-        if (!itunesRes.ok) {
-          throw new Error(`iTunes API returned HTTP ${itunesRes.status}`);
-        }
-
-        const itunesData = await itunesRes.json();
-        console.log(`[api] /search → iTunes returned ${(itunesData.results || []).length} results`);
-
-        results = (itunesData.results || []).map(item => ({
-          feedUrl: item.feedUrl,
-          title: item.trackName,
-          author: item.artistName,
-          imageUrl: item.artworkUrl600,
-          description: item.description || '',
-          episodeCount: item.trackCount || 0,
-          podcastIndexId: null
-        }));
-      }
+      const results = (itunesData.results || []).map(item => ({
+        feedUrl: item.feedUrl,
+        title: item.trackName,
+        author: item.artistName,
+        imageUrl: item.artworkUrl600,
+        description: item.description || '',
+        episodeCount: item.trackCount || 0
+      }));
 
       console.log(`[api] /search → returning ${results.length} results`);
       res.json(results);

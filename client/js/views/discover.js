@@ -11,6 +11,8 @@ function setDiscoverViewMode(mode) {
 
 async function renderDiscover(container) {
   let viewMode = getDiscoverViewMode();
+  const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
+  
   container.innerHTML = `
     <div class="view-header">
     </div>
@@ -19,6 +21,9 @@ async function renderDiscover(container) {
       <div class="search-input-wrapper">
         <input type="text" class="input" id="discover-search-input" placeholder="Search for podcasts...">
       </div>
+    </div>
+    <div id="discover-featured" class="discover-featured-section" style="display: none; margin-bottom: 2rem;">
+      <!-- New episodes or featured content goes here -->
     </div>
     <div id="discover-results" class="podcast-grid search-results-grid">
       <!-- Results or empty state go here -->
@@ -33,8 +38,8 @@ async function renderDiscover(container) {
 
   const inputEl = document.getElementById('discover-search-input');
   const resultsEl = document.getElementById('discover-results');
+  const featuredEl = document.getElementById('discover-featured');
   const toggleEl = document.getElementById('discover-view-toggle');
-  const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
 
   const applyViewMode = (mode) => {
     viewMode = mode === 'list' ? 'list' : 'grid';
@@ -50,6 +55,8 @@ async function renderDiscover(container) {
     const q = inputEl.value.trim();
     if (q) {
       performSearch(q, guid, resultsEl, viewMode);
+    } else {
+      showFeaturedContent(featuredEl, guid);
     }
   });
 
@@ -61,9 +68,11 @@ async function renderDiscover(container) {
     
     if (!query) {
       resultsEl.innerHTML = '';
+      showFeaturedContent(featuredEl, guid);
       return;
     }
 
+    featuredEl.style.display = 'none';
     resultsEl.innerHTML = `
       <div class="loading-state">
         <div class="spinner spin"></div>
@@ -74,6 +83,9 @@ async function renderDiscover(container) {
       performSearch(query, guid, resultsEl, viewMode);
     }, 500);
   });
+  
+  // Show featured content on initial load
+  showFeaturedContent(featuredEl, guid);
   
   // Focus input on load (if on desktop)
   if (window.innerWidth > 768) {
@@ -99,21 +111,29 @@ async function performSearch(query, guid, resultsEl, viewMode = 'grid') {
     }
 
     let html = '';
-    results.forEach(res => {
+    results.forEach((res, index) => {
       const isSubbed = subUrls.has(res.feedUrl);
+      const episodeCount = res.episodeCount || 0;
+      const episodeLabel = episodeCount === 1 ? '1 episode' : `${episodeCount} episodes`;
+      const author = res.author || 'Unknown creator';
+      
       if (viewMode === 'list') {
-        const dateLabel = res.lastReleaseDate
-          ? new Date(res.lastReleaseDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-          : 'Unknown date';
-        const description = res.description || res.author || 'No description available.';
+        const description = res.description || 'No description available.';
+        const truncatedDesc = description.length > 200 
+          ? description.substring(0, 200) + '...' 
+          : description;
         html += `
           <div class="podcast-list-item search-result-list-item">
-            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
+            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'" alt="${res.title}">
             <div class="podcast-list-body">
               <div class="podcast-list-title">${res.title || 'Untitled podcast'}</div>
-              <div class="podcast-list-date">Last episode: ${dateLabel}</div>
-              <div class="podcast-list-description">${description}</div>
-              <button class="button btn btn-small btn-discover-sub" data-url="${res.feedUrl}" data-subbed="${isSubbed}">
+              <div class="podcast-list-meta" style="display: flex; gap: 0.75rem; font-size: 0.85rem; color: #666; margin: 0.25rem 0 0.5rem 0;">
+                <span>${author}</span>
+                <span>•</span>
+                <span>${episodeLabel}</span>
+              </div>
+              <div class="podcast-list-description">${truncatedDesc}</div>
+              <button class="button btn btn-small btn-discover-sub" data-url="${res.feedUrl}" data-index="${index}" data-subbed="${isSubbed}">
                 ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}
               </button>
             </div>
@@ -122,10 +142,18 @@ async function performSearch(query, guid, resultsEl, viewMode = 'grid') {
       } else {
         html += `
           <div class="podcast-tile search-result-tile">
-            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'">
-            <div class="tile-overlay always-visible-overlay">
-              <button class="button btn btn-small btn-block mt-2  btn-discover-sub" 
-                      data-url="${res.feedUrl}" 
+            <img src="${res.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'" alt="${res.title}">
+            <div class="tile-info" style="padding: 0.75rem; background: rgba(0,0,0,0.6); color: white; font-size: 0.75rem; min-height: 3.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-weight: 600; margin-bottom: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${res.title || 'Untitled'}</div>
+                <div style="font-size: 0.7rem; opacity: 0.85;">${author}</div>
+              </div>
+              <div style="font-size: 0.7rem; opacity: 0.75; margin-bottom: 0.5rem;">${episodeLabel}</div>
+            </div>
+            <div class="tile-overlay">
+              <button class="button btn btn-small btn-block btn-discover-sub" 
+                      data-url="${res.feedUrl}"
+                      data-index="${index}" 
                       data-subbed="${isSubbed}">
                 ${isSubbed ? 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>' : 'Subscribe'}
               </button>
@@ -146,9 +174,10 @@ async function performSearch(query, guid, resultsEl, viewMode = 'grid') {
         btn.disabled = true;
         btn.textContent = 'Adding...';
         const feedUrl = btn.dataset.url;
+        const result = results[Number(btn.dataset.index)] || null;
         
         try {
-          await window.api.subscribe(guid, feedUrl);
+          await window.api.subscribe(guid, feedUrl, result);
           btn.dataset.subbed = "true";
           btn.innerHTML = 'Subscribed <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>';
           btn.classList.remove('btn-primary');
@@ -165,6 +194,50 @@ async function performSearch(query, guid, resultsEl, viewMode = 'grid') {
   } catch (err) {
     console.error('Search failed:', err);
     resultsEl.innerHTML = `<div class="error-state" style="grid-column: 1 / -1">Search failed. Try again later.</div>`;
+  }
+}
+
+async function showFeaturedContent(featuredEl, guid) {
+  try {
+    // Fetch user subscriptions to show in featured section
+    let subs = [];
+    try {
+      subs = await window.api.getSubscriptions(guid);
+    } catch(e) {
+      console.error('Failed to fetch subscriptions:', e);
+    }
+
+    if (subs.length === 0) {
+      featuredEl.style.display = 'none';
+      return;
+    }
+
+    // Show a simple "Your Subscriptions" section with random featured podcasts
+    const featured = subs.slice(0, 6).sort(() => Math.random() - 0.5);
+    
+    let html = `<div style="padding: 1rem 0;">
+      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--text-primary);">Your Subscriptions</h3>
+      <div class="podcast-grid" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));">`;
+    
+    featured.forEach(podcast => {
+      html += `
+        <div class="podcast-tile search-result-tile" style="cursor: pointer;" onclick="window.appState.view='podcasts'; window.renderView();">
+          <img src="${podcast.imageUrl || 'icons/icon-192.png'}" onerror="this.src='icons/icon-192.png'" alt="${podcast.title}">
+          <div class="tile-info" style="padding: 0.75rem; background: rgba(0,0,0,0.6); color: white; font-size: 0.75rem; position: absolute; bottom: 0; left: 0; right: 0;">
+            <div style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${podcast.title || 'Untitled'}</div>
+            <div style="font-size: 0.7rem; opacity: 0.85;">${podcast.author || 'Unknown'}</div>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += `</div></div>`;
+    
+    featuredEl.innerHTML = html;
+    featuredEl.style.display = 'block';
+  } catch (err) {
+    console.error('Failed to show featured content:', err);
+    featuredEl.style.display = 'none';
   }
 }
 

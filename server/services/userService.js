@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const syncService = require('./syncService');
 
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const USERS_DIR = path.join(_dataRoot, 'users');
@@ -35,9 +36,7 @@ function defaultProfile(guid) {
     updatedAt: now,
     settings: {
       skipBack: 15,
-      skipForward: 45,
-      podcastIndexApiKey: '',
-      podcastIndexApiSecret: ''
+      skipForward: 45
     },
     subscriptions: [],
     seenEpisodes: {},
@@ -55,12 +54,16 @@ function defaultProfile(guid) {
 function ensureProfileShape(profile) {
   if (!profile || typeof profile !== 'object') return profile;
 
+  const incomingSettings = profile.settings && typeof profile.settings === 'object'
+    ? { ...profile.settings }
+    : {};
+  delete incomingSettings.podcastIndexApiKey;
+  delete incomingSettings.podcastIndexApiSecret;
+
   profile.settings = {
     skipBack: 15,
     skipForward: 45,
-    podcastIndexApiKey: '',
-    podcastIndexApiSecret: '',
-    ...(profile.settings || {})
+    ...incomingSettings
   };
   profile.subscriptions = Array.isArray(profile.subscriptions) ? profile.subscriptions : [];
   profile.seenEpisodes = profile.seenEpisodes && typeof profile.seenEpisodes === 'object' ? profile.seenEpisodes : {};
@@ -644,6 +647,85 @@ async function getSeenEpisodes(guid, feedId) {
   return seen;
 }
 
+async function getSyncSnapshot(guid) {
+  console.log(`[userService] getSyncSnapshot(${guid})`);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+  return syncService.buildSnapshot(profile);
+}
+
+async function mergeAndSaveSyncState(guid, incomingState) {
+  console.log(`[userService] mergeAndSaveSyncState(${guid})`);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  const syncResult = syncService.buildSyncResult(profile, incomingState || {});
+  const merged = syncResult.mergedState;
+  const mergedSettings = merged.settings && typeof merged.settings === 'object'
+    ? { ...merged.settings }
+    : {};
+  delete mergedSettings.podcastIndexApiKey;
+  delete mergedSettings.podcastIndexApiSecret;
+
+  profile.settings = {
+    ...profile.settings,
+    ...mergedSettings,
+  };
+
+  profile.subscriptions = Array.isArray(merged.subscriptions)
+    ? merged.subscriptions
+    : profile.subscriptions;
+
+  profile.progress = merged.progress && typeof merged.progress === 'object'
+    ? merged.progress
+    : profile.progress;
+
+  profile.stats = {
+    ...(profile.stats || {}),
+    ...(merged.stats || {}),
+  };
+
+  if (Array.isArray(merged.queue)) {
+    profile.queue = normalizeQueue(merged.queue);
+  }
+
+  if (merged.playbackSession && typeof merged.playbackSession === 'object') {
+    profile.playbackSession = {
+      ...profile.playbackSession,
+      ...merged.playbackSession,
+      queue: normalizeQueue(
+        merged.playbackSession.queue !== undefined
+          ? merged.playbackSession.queue
+          : (profile.playbackSession && profile.playbackSession.queue)
+      ),
+    };
+  }
+
+  await saveUser(profile);
+  return {
+    snapshot: syncService.buildSnapshot(profile),
+    summary: syncResult.summary,
+  };
+}
+
+async function getBootstrapSyncState(guid) {
+  console.log(`[userService] getBootstrapSyncState(${guid})`);
+  const profile = await getUser(guid);
+  if (!profile) throw new Error(`User ${guid} not found`);
+
+  const snapshot = syncService.buildSnapshot(profile);
+  const queueState = await getQueue(guid);
+  const playbackSession = await getPlaybackSession(guid);
+
+  return {
+    guid,
+    snapshot,
+    queue: queueState || { queue: [], mode: 'local', currentEpisodeGuid: '', updatedAt: null },
+    playbackSession: playbackSession || null,
+    serverTime: new Date().toISOString(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -668,5 +750,8 @@ module.exports = {
   updateStats,
   getAllUserGuids,
   markEpisodesSeen,
-  getSeenEpisodes
+  getSeenEpisodes,
+  getSyncSnapshot,
+  mergeAndSaveSyncState,
+  getBootstrapSyncState
 };

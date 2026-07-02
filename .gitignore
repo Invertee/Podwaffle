@@ -3,3 +3,4 @@ Prompts/*
 server/node_modules/*
 data/podcasts/*
 mobile/node_modules/*
+client/node_modules/*

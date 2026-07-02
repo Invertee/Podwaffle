@@ -615,6 +615,14 @@ body {
   padding: 8px;
 }
 
+.podcast-tile .tile-info {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
 .podcast-tile:hover .tile-overlay {
   opacity: 1;
 }

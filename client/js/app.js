@@ -356,30 +356,103 @@ async function initApp() {
       }, 6 * 60 * 60 * 1000);
     }
 
-    // 1. Ensure user GUID
-    if (!window.appState.guid) {
-      console.log('No GUID found, creating new user profile...');
-      try {
-        const { guid } = await window.api.createUser();
-        window.appState.guid = guid;
-        localStorage.setItem('podwaffle_guid', guid);
-      } catch (err) {
-        // Check if signup is disabled (403 error)
-        if (err.message && err.message.includes('403')) {
-          console.log('New user signups are disabled, prompting for existing GUID...');
-          const guid = await showGuidEntryModal();
-          if (!guid) {
-            throw new Error('No profile GUID provided. Cannot continue.');
-          }
-        } else {
-          throw err;
+    // 1. Ensure user GUID (no backend needed - all local)
+    // GUID is created below in step 2 if it doesn't already exist
+
+    // 2. Initialize local user profile (no API calls needed)
+    // All data is stored in localStorage for offline-first operation
+    const generateUUID = () => {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    };
+
+    const loadLocalUserProfile = () => {
+      const guid = window.appState.guid;
+      if (!guid) return null;
+
+      // Load subscriptions from localStorage
+      const subsKey = `podwaffle_subscriptions_${guid}`;
+      const subscriptions = (() => {
+        try {
+          const raw = localStorage.getItem(subsKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (_) {
+          return [];
         }
-      }
+      })();
+
+      // Load progress from localStorage
+      const progressKey = `podwaffle_progress_${guid}`;
+      const progress = (() => {
+        try {
+          const raw = localStorage.getItem(progressKey);
+          return raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          return {};
+        }
+      })();
+
+      // Load playback session
+      const playbackSessionKey = 'podwaffle_playback_session';
+      const playbackSession = (() => {
+        try {
+          const raw = localStorage.getItem(playbackSessionKey);
+          return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+          return null;
+        }
+      })();
+
+      // Load queue
+      const queueKey = `podwaffle_queue_state_${guid}`;
+      const queue = (() => {
+        try {
+          const raw = localStorage.getItem(queueKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (_) {
+          return [];
+        }
+      })();
+
+      // Load settings
+      const settingsKey = `podwaffle_settings_${guid}`;
+      const settings = (() => {
+        try {
+          const raw = localStorage.getItem(settingsKey);
+          return raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          return {};
+        }
+      })();
+
+      return {
+        guid,
+        subscriptions,
+        progress,
+        playbackSession,
+        queue,
+        settings,
+        stats: { totalListenedSeconds: 0, totalSkippedSeconds: 0 },
+      };
+    };
+
+    let user = loadLocalUserProfile();
+
+    // If no GUID exists, create one locally
+    if (!window.appState.guid) {
+      window.appState.guid = generateUUID();
+      localStorage.setItem('podwaffle_guid', window.appState.guid);
+      user = loadLocalUserProfile();
+      console.log('[app] Created new local profile:', window.appState.guid);
     }
 
-    // 2. Load user settings to configure player
-    const user = await window.api.getUser(window.appState.guid);
     window.appState.user = user;
+    window.appState.subscriptions = user.subscriptions || [];
+    window.appState.progress = user.progress || {};
+
     if (user.settings && window.player) {
       window.player.skipBackSecs = user.settings.skipBack || 15;
       window.player.skipForwardSecs = user.settings.skipForward || 45;
@@ -429,11 +502,19 @@ async function initApp() {
     }
 
     if (!hasActiveCastSession) {
-      await restoreLastInProgressEpisode(window.appState.guid);
+      try {
+        await restoreLastInProgressEpisode(window.appState.guid);
+      } catch (err) {
+        console.warn('[app] Failed to restore last episode:', err);
+      }
     }
 
     if (window.player && typeof window.player.hydrateQueueFromServer === 'function') {
-      await window.player.hydrateQueueFromServer();
+      try {
+        await window.player.hydrateQueueFromServer();
+      } catch (err) {
+        console.warn('[app] Failed to hydrate queue:', err);
+      }
     }
 
     // Set up cross-client sync listeners
@@ -482,7 +563,15 @@ async function initApp() {
     // 7. Init pull-to-refresh gesture (DISABLED)
     // initPullToRefresh();
 
-    // 8. Capacitor native bridge (no-op in browser, active in native app)
+    // 8. Initialize background sync managers
+    if (window.backgroundSyncManager && typeof window.backgroundSyncManager.init === 'function') {
+      window.backgroundSyncManager.init();
+    }
+    if (window.feedRefreshScheduler && typeof window.feedRefreshScheduler.init === 'function') {
+      window.feedRefreshScheduler.init();
+    }
+
+    // 9. Capacitor native bridge (no-op in browser, active in native app)
     _initCapacitorBridge();
 
   } catch (err) {
@@ -515,6 +604,13 @@ function _initCapacitorBridge() {
 
   // Hide the splash screen now that the app shell is ready
   Plugins.SplashScreen?.hide({ fadeOutDuration: 300 });
+
+  // Setup background tasks for feed refresh on Android
+  if (Plugins.BackgroundTasks && window.capacitorBackgroundTasks) {
+    window.capacitorBackgroundTasks.init().catch((err) => {
+      console.warn('[capacitor] Background task setup failed:', err);
+    });
+  }
 
   // Keep system bars visually aligned with app theme
   try {
