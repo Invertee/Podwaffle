@@ -622,9 +622,13 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       const playbackSession = await userService.getPlaybackSession(guid);
       const castState = castService.getState();
       const targetMode = playbackSession?.mode === 'cast' ? 'cast' : 'local';
-      const castActive = targetMode === 'cast' && !!castState.activeDeviceId;
+      const browserCastActive = targetMode === 'cast'
+        && castState.source === 'browser'
+        && !!castState.activeDeviceId
+        && (!castState.ownerGuid || castState.ownerGuid === guid);
+      const serverCastActive = targetMode === 'cast' && !!castState.activeDeviceId && !browserCastActive;
 
-      if (castActive) {
+      if (serverCastActive) {
         let result = { status: castState.status || 'idle' };
         switch (normalized) {
           case 'play':
@@ -664,7 +668,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
             return sendError(res, 400, `Unsupported command: ${normalized}`);
         }
 
-        return res.json({ accepted: true, target: 'cast', command: normalized, result });
+        return res.json({ accepted: true, target: 'cast-server', command: normalized, result });
       }
 
       broadcastWs({
@@ -679,7 +683,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         }
       });
 
-      return res.json({ accepted: true, target: 'local', command: normalized });
+      return res.json({ accepted: true, target: browserCastActive ? 'cast-browser' : 'local', command: normalized });
     } catch (err) {
       sendError(res, 500, 'Failed to execute media command', err.message);
     }
@@ -1068,6 +1072,43 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       res.json(state);
     } catch (err) {
       sendError(res, 500, 'Failed to get cast state', err.message);
+    }
+  });
+
+  // PUT /cast/state — mirror browser-driven Google Cast sender state
+  router.put('/cast/state', (req, res) => {
+    console.log('[api] PUT /cast/state', req.body);
+    try {
+      const mirrored = castService.setExternalState(req.body || {});
+      broadcastWs({
+        type: 'cast:state',
+        data: {
+          ...mirrored,
+          deviceId: mirrored.activeDeviceId,
+        }
+      });
+      res.json({ ok: true, state: mirrored });
+    } catch (err) {
+      sendError(res, 500, 'Failed to update cast state', err.message);
+    }
+  });
+
+  // DELETE /cast/state — clear browser-driven mirror state
+  router.delete('/cast/state', (req, res) => {
+    const ownerGuid = typeof req.query.ownerGuid === 'string' ? req.query.ownerGuid : null;
+    console.log(`[api] DELETE /cast/state?ownerGuid=${ownerGuid || ''}`);
+    try {
+      const cleared = castService.clearExternalState(ownerGuid);
+      broadcastWs({
+        type: 'cast:state',
+        data: {
+          ...cleared,
+          deviceId: cleared.activeDeviceId,
+        }
+      });
+      res.json({ ok: true, state: cleared });
+    } catch (err) {
+      sendError(res, 500, 'Failed to clear cast state', err.message);
     }
   });
 

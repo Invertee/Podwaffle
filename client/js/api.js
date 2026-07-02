@@ -725,20 +725,25 @@ const api = {
 
     // ────── Cast endpoints (not user-scoped) ──────────────────────────
     if (cleanPath === '/cast/state' && method === 'GET') {
-      return null;
+      return this._getJsonStorage('podwaffle_cast_state', null);
     }
 
     if (cleanPath === '/cast/devices' && method === 'GET') {
-      // Return a local device for offline casting
-      return [
-        {
-          id: 'local',
-          name: 'This Device',
-          type: 'local_browser',
-          isOnline: true,
-          capabilities: ['play', 'pause', 'stop', 'seek', 'set_volume'],
-        },
-      ];
+      return [];
+    }
+
+    if (cleanPath === '/cast/state' && method === 'PUT') {
+      const nextState = {
+        ...(body || {}),
+        updatedAt: body?.updatedAt || new Date().toISOString(),
+      };
+      this._setJsonStorage('podwaffle_cast_state', nextState);
+      return { ok: true, state: nextState };
+    }
+
+    if (cleanPath === '/cast/state' && method === 'DELETE') {
+      localStorage.removeItem('podwaffle_cast_state');
+      return { ok: true, state: null };
     }
 
     if (cleanPath === '/cast/play' && method === 'POST') {
@@ -1220,6 +1225,20 @@ const api = {
 
   async getCastState() {
     return this._fetch('/api/cast/state');
+  },
+
+  async updateCastState(state) {
+    return this._fetch('/api/cast/state', {
+      method: 'PUT',
+      body: JSON.stringify(state || {}),
+    });
+  },
+
+  async clearCastState(ownerGuid) {
+    const suffix = ownerGuid ? `?ownerGuid=${encodeURIComponent(ownerGuid)}` : '';
+    return this._fetch(`/api/cast/state${suffix}`, {
+      method: 'DELETE',
+    });
   },
 };
 

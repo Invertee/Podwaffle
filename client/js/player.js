@@ -309,6 +309,30 @@ const player = {
     }
   },
 
+  applyCastState(statusObj) {
+    if (!statusObj || this.mode !== 'cast') return;
+    if (!statusObj.deviceId && !this._activeCastDeviceId) return;
+
+    this._activeCastDeviceId = statusObj.deviceId || this._activeCastDeviceId;
+    if (statusObj.position != null) this.position = statusObj.position;
+    if (statusObj.duration != null) this.duration = statusObj.duration;
+    if (statusObj.status) this.isPlaying = statusObj.status === 'playing';
+
+    if (statusObj.episodeGuid || statusObj.title) {
+      this.currentEpisode = {
+        ...(this.currentEpisode || {}),
+        guid: statusObj.episodeGuid || this.currentEpisode?.guid || '',
+        title: statusObj.title || this.currentEpisode?.title || '',
+        podcastTitle: statusObj.podcastTitle || this.currentEpisode?.podcastTitle || '',
+        podcastImageUrl: statusObj.imageUrl || this.currentEpisode?.podcastImageUrl || '',
+        imageUrl: statusObj.imageUrl || this.currentEpisode?.imageUrl || '',
+      };
+    }
+
+    this.handleCastStatusUpdate(statusObj);
+    this._notifyStateChange();
+  },
+
   // ─── Initialization ──────────────────────────────────────
   init() {
     this.audio.preload = 'auto';
@@ -465,17 +489,21 @@ const player = {
       this._notifyStateChange();
       this._setupProgressSync();
 
-      api.castPlay(
-        this._activeCastDeviceId,
-        episode.audioUrl,
-        safeStartPosition,
-        episode.guid,
-        localStorage.getItem('podwaffle_guid'),
-        episode.title,
-        episode.podcastTitle,
-        episode.podcastImageUrl || episode.imageUrl,
-        episode.duration || 0
-      ).then(() => {
+      const castLoader = (window.googleCastSender && window.googleCastSender.isConnected())
+        ? window.googleCastSender.loadEpisode(episode, safeStartPosition)
+        : api.castPlay(
+          this._activeCastDeviceId,
+          episode.audioUrl,
+          safeStartPosition,
+          episode.guid,
+          localStorage.getItem('podwaffle_guid'),
+          episode.title,
+          episode.podcastTitle,
+          episode.podcastImageUrl || episode.imageUrl,
+          episode.duration || 0
+        );
+
+      Promise.resolve(castLoader).then(() => {
         this.isPlaying = true;
         this._notifyStateChange();
       }).catch((err) => {
@@ -523,7 +551,10 @@ const player = {
         return;
       }
       this.audio.pause();
-      api.castResume().catch(err => console.error('[player] castResume error:', err));
+      const resumePromise = (window.googleCastSender && window.googleCastSender.isConnected())
+        ? window.googleCastSender.play()
+        : api.castResume();
+      Promise.resolve(resumePromise).catch(err => console.error('[player] castResume error:', err));
       this.isPlaying = true;
       this._notifyStateChange();
       return;
@@ -541,7 +572,10 @@ const player = {
 
   pause() {
     if (this.mode === 'cast') {
-      api.castPause().catch(err => console.error('[player] castPause error:', err));
+      const pausePromise = (window.googleCastSender && window.googleCastSender.isConnected())
+        ? window.googleCastSender.pause()
+        : api.castPause();
+      Promise.resolve(pausePromise).catch(err => console.error('[player] castPause error:', err));
       this.isPlaying = false;
       this._notifyStateChange();
       return;
@@ -575,7 +609,10 @@ const player = {
     position = Math.max(0, Math.floor(position));
     console.log('[player] Seek to:', position);
     if (this.mode === 'cast') {
-      api.castSeek(position).catch(err => console.error('[player] castSeek error:', err));
+      const seekPromise = (window.googleCastSender && window.googleCastSender.isConnected())
+        ? window.googleCastSender.seek(position)
+        : api.castSeek(position);
+      Promise.resolve(seekPromise).catch(err => console.error('[player] castSeek error:', err));
       this.position = position;
       this._notifyStateChange();
       return;
@@ -590,7 +627,10 @@ const player = {
     this.audio.volume = this.volume;
     localStorage.setItem('podwaffle_volume', String(this.volume));
     if (this.mode === 'cast') {
-      api.setCastVolume(this.volume).catch(err => console.error('[player] setCastVolume error:', err));
+      const volumePromise = (window.googleCastSender && window.googleCastSender.isConnected())
+        ? window.googleCastSender.setVolume(this.volume)
+        : api.setCastVolume(this.volume);
+      Promise.resolve(volumePromise).catch(err => console.error('[player] setCastVolume error:', err));
     }
     this._notifyStateChange();
   },
@@ -1235,22 +1275,29 @@ const player = {
 
   // ─── Cast switching ──────────────────────────────────────
   async switchToCast(deviceId) {
-    console.log('[player] Switching to cast device:', deviceId);
+    console.log('[player] Switching to cast device:', deviceId || '(chooser)');
     const wasPlaying = this.isPlaying;
     const pos = this._sanitizeStartPosition(this.currentEpisode, this.position);
 
     this._flushPlaybackSnapshot();
 
-    // For local device, keep audio playing; for remote devices, pause it
-    const isLocalDevice = deviceId === 'local';
-    if (!isLocalDevice) {
+    const useBrowserSender = !!(window.googleCastSender && window.googleCastSender.isSupported());
+    let resolvedDeviceId = deviceId || null;
+    if (useBrowserSender) {
+      const sessionDevice = await window.googleCastSender.ensureSession();
+      resolvedDeviceId = sessionDevice?.id || resolvedDeviceId || 'google-cast';
+    }
+
+    if (!useBrowserSender) {
       this.audio.pause();
       this.audio.removeAttribute('src');
       this.audio.load();
+    } else {
+      this.audio.pause();
     }
 
     this.mode = 'cast';
-    this._activeCastDeviceId = deviceId;
+    this._activeCastDeviceId = resolvedDeviceId;
     this._clearPersistedPlaybackSession({
       episodeGuid: this.currentEpisode?.guid,
       keepalive: true,
@@ -1266,20 +1313,24 @@ const player = {
     }
 
     try {
-      await api.castPlay(
-        deviceId,
-        this.currentEpisode.audioUrl,
-        pos,
-        this.currentEpisode.guid,
-        localStorage.getItem('podwaffle_guid'),
-        this.currentEpisode.title,
-        this.currentEpisode.podcastTitle,
-        this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
-        this.currentEpisode.duration || this.duration || 0
-      );
+      if (useBrowserSender) {
+        await window.googleCastSender.loadEpisode(this.currentEpisode, pos);
+      } else {
+        await api.castPlay(
+          resolvedDeviceId,
+          this.currentEpisode.audioUrl,
+          pos,
+          this.currentEpisode.guid,
+          localStorage.getItem('podwaffle_guid'),
+          this.currentEpisode.title,
+          this.currentEpisode.podcastTitle,
+          this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
+          this.currentEpisode.duration || this.duration || 0
+        );
+      }
       this.isPlaying = true;
       this._notifyStateChange();
-      console.log('[player] Cast started on device:', deviceId);
+      console.log('[player] Cast started on device:', resolvedDeviceId);
     } catch (err) {
       console.error('[player] switchToCast error:', err);
       this.mode = 'local';
@@ -1294,7 +1345,11 @@ const player = {
     const pos = this.position;
 
     try {
-      await api.castStop();
+      if (window.googleCastSender && window.googleCastSender.isConnected()) {
+        await window.googleCastSender.stop();
+      } else {
+        await api.castStop();
+      }
     } catch (err) {
       console.warn('[player] castStop error (continuing anyway):', err);
     }

@@ -400,6 +400,9 @@ async function updatePlaybackSession(guid, sessionData) {
     duration: typeof sessionData.duration === 'number' ? sessionData.duration : parseFloat(sessionData.duration) || 0,
     isPlaying: !!sessionData.isPlaying,
     mode: sessionData.mode === 'cast' ? 'cast' : 'local',
+    transport: sessionData.transport || '',
+    castDeviceId: sessionData.castDeviceId || '',
+    castDeviceName: sessionData.castDeviceName || '',
     currentEpisodeGuid: sessionData.currentEpisodeGuid || sessionData.episodeGuid || '',
     queue: normalizedQueue,
     updatedAt: sessionData.updatedAt || now

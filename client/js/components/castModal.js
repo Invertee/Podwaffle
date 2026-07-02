@@ -113,76 +113,79 @@ const castModal = {
     listEl.innerHTML = `
       <div class="cast-loading">
         <div class="spinner spin"></div>
-        Searching for devices...
+        Preparing Google Cast...
       </div>
     `;
     
     try {
-      const devices = await window.api.getCastDevices();
-      this.renderDeviceList(devices);
+      const availability = window.googleCastSender && typeof window.googleCastSender.getAvailability === 'function'
+        ? window.googleCastSender.getAvailability()
+        : { supported: false, connected: false, device: null };
+      this.renderDeviceList(availability);
     } catch (err) {
       console.error('Failed to fetch cast devices:', err);
       listEl.innerHTML = `
         <div class="cast-error">
           <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-          <p>Failed to find devices on network.<br>Ensure backend is running on same network as speakers.</p>
+          <p>Google Cast is not available here.<br>Use Edge or Chrome on desktop with Cast support enabled.</p>
         </div>
       `;
     }
   },
   
-  renderDeviceList(devices) {
+  renderDeviceList(availability) {
     const listEl = document.getElementById('cast-device-list');
-    let html = '';
+    const supported = !!availability?.supported;
+    const connected = !!availability?.connected;
+    const device = availability?.device || null;
+    const currentName = device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
     
-    const isCastMode = window.player && window.player.mode === 'cast';
-    const activeDeviceId = window.player ? (window.player._activeCastDeviceId || window.player.activeCastDeviceId) : null;
-    
-    // Always show Local Playback option first
-    html += `
-      <div class="cast-device-item ${!isCastMode ? 'active' : ''}" data-id="local">
-        <div class="cast-device-icon">
-          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+    if (!supported) {
+      listEl.innerHTML = `
+        <div class="cast-error">
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <p>Google Cast is unavailable in this browser context.<br>Desktop Edge/Chrome works; the Android app will still need a native Cast bridge.</p>
         </div>
-        <div class="cast-device-name">Local Playback (This device)</div>
-        ${!isCastMode ? '<div class="cast-active-dot"></div>' : ''}
-      </div>
-    `;
-    
-    if (devices && devices.length > 0) {
-      devices.forEach(d => {
-        const displayName = d.friendlyName || d.name || 'Cast device';
-        const isActive = isCastMode && activeDeviceId === d.id;
-        html += `
-          <div class="cast-device-item ${isActive ? 'active' : ''}" data-id="${d.id}">
-            <div class="cast-device-icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
-            </div>
-            <div class="cast-device-name">${displayName}</div>
-            ${isActive ? '<div class="cast-active-dot"></div>' : ''}
-          </div>
-        `;
-      });
+      `;
+      return;
     }
-    
-    listEl.innerHTML = html;
-    
-    // Bind clicks
-    listEl.querySelectorAll('.cast-device-item').forEach(item => {
-      item.addEventListener('click', async () => {
-        const id = item.dataset.id;
-        try {
-          if (id === 'local') {
-            if (window.player) await window.player.switchToLocal();
-          } else {
-            if (window.player) await window.player.switchToCast(id);
-          }
-          this.hide();
-        } catch (err) {
-          console.error('Failed to switch playback mode:', err);
-          alert('Failed to connect to device. See console.');
-        }
-      });
+
+    listEl.innerHTML = `
+      <div class="cast-device-item ${connected ? 'active' : ''}" data-action="choose">
+        <div class="cast-device-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
+        </div>
+        <div class="cast-device-name">${connected ? `Connected: ${currentName}` : 'Choose a Google Cast device'}</div>
+        ${connected ? '<div class="cast-active-dot"></div>' : ''}
+      </div>
+      ${connected ? `
+        <div class="cast-device-item" data-action="stop">
+          <div class="cast-device-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
+          </div>
+          <div class="cast-device-name">Stop casting and return to local playback</div>
+        </div>
+      ` : ''}
+    `;
+
+    listEl.querySelector('[data-action="choose"]')?.addEventListener('click', async () => {
+      try {
+        if (window.player) await window.player.switchToCast();
+        this.hide();
+      } catch (err) {
+        console.error('Failed to start Google Cast session:', err);
+        alert('Failed to start Google Cast. See console.');
+      }
+    });
+
+    listEl.querySelector('[data-action="stop"]')?.addEventListener('click', async () => {
+      try {
+        if (window.player) await window.player.switchToLocal();
+        this.hide();
+      } catch (err) {
+        console.error('Failed to stop casting:', err);
+        alert('Failed to stop casting. See console.');
+      }
     });
   }
 };

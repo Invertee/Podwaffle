@@ -18,6 +18,10 @@ const state = {
   title: null,
   podcastTitle: null,
   imageUrl: null,
+  deviceName: null,
+  ownerGuid: null,
+  transport: 'server_castv2',
+  source: 'server',
   position: 0,
   duration: 0,
   volume: 1.0,
@@ -25,6 +29,25 @@ const state = {
   client: null,
   player: null,
   statusPoller: null
+};
+
+const externalState = {
+  active: false,
+  activeDeviceId: null,
+  deviceName: null,
+  ownerGuid: null,
+  mediaUrl: null,
+  episodeGuid: null,
+  title: null,
+  podcastTitle: null,
+  imageUrl: null,
+  position: 0,
+  duration: 0,
+  volume: 1.0,
+  status: 'idle',
+  transport: null,
+  source: null,
+  updatedAt: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -177,6 +200,25 @@ function _clearStatusPoller() {
   }
 }
 
+function _resetExternalState() {
+  externalState.active = false;
+  externalState.activeDeviceId = null;
+  externalState.deviceName = null;
+  externalState.ownerGuid = null;
+  externalState.mediaUrl = null;
+  externalState.episodeGuid = null;
+  externalState.title = null;
+  externalState.podcastTitle = null;
+  externalState.imageUrl = null;
+  externalState.position = 0;
+  externalState.duration = 0;
+  externalState.volume = 1.0;
+  externalState.status = 'idle';
+  externalState.transport = null;
+  externalState.source = null;
+  externalState.updatedAt = null;
+}
+
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
   _clearStatusPoller();
@@ -186,6 +228,10 @@ function _resetState() {
   state.title = null;
   state.podcastTitle = null;
   state.imageUrl = null;
+  state.deviceName = null;
+  state.ownerGuid = null;
+  state.transport = 'server_castv2';
+  state.source = 'server';
   state.position = 0;
   state.duration = 0;
   state.volume = 1.0;
@@ -231,8 +277,11 @@ async function castTo(deviceId, mediaUrl, startPosition = 0, onStatusUpdate, met
 
   // Disconnect any existing session
   _disconnectClient();
+  _resetExternalState();
 
   state.activeDeviceId = deviceId;
+  state.deviceName = device.name;
+  state.ownerGuid = metadata.userGuid || null;
   state.mediaUrl = mediaUrl;
   state.episodeGuid = metadata.episodeGuid || null;
   state.title = metadata.title || null;
@@ -548,8 +597,30 @@ async function setVolume(level) {
  * Return the current cast state snapshot.
  */
 function getState() {
+  if (externalState.active) {
+    return {
+      activeDeviceId: externalState.activeDeviceId,
+      deviceName: externalState.deviceName,
+      ownerGuid: externalState.ownerGuid,
+      mediaUrl: externalState.mediaUrl,
+      episodeGuid: externalState.episodeGuid,
+      title: externalState.title,
+      podcastTitle: externalState.podcastTitle,
+      imageUrl: externalState.imageUrl,
+      position: externalState.position,
+      duration: externalState.duration,
+      volume: externalState.volume,
+      status: externalState.status,
+      transport: externalState.transport,
+      source: externalState.source,
+      updatedAt: externalState.updatedAt,
+    };
+  }
+
   return {
     activeDeviceId: state.activeDeviceId,
+    deviceName: state.deviceName,
+    ownerGuid: state.ownerGuid,
     mediaUrl: state.mediaUrl,
     episodeGuid: state.episodeGuid,
     title: state.title,
@@ -558,8 +629,39 @@ function getState() {
     position: state.position,
     duration: state.duration,
     volume: state.volume,
-    status: state.status
+    status: state.status,
+    transport: state.transport,
+    source: state.source,
   };
+}
+
+function setExternalState(nextState = {}) {
+  const updatedAt = nextState.updatedAt || new Date().toISOString();
+  externalState.active = !!nextState.activeDeviceId;
+  externalState.activeDeviceId = nextState.activeDeviceId || null;
+  externalState.deviceName = nextState.deviceName || null;
+  externalState.ownerGuid = nextState.ownerGuid || null;
+  externalState.mediaUrl = nextState.mediaUrl || null;
+  externalState.episodeGuid = nextState.episodeGuid || null;
+  externalState.title = nextState.title || null;
+  externalState.podcastTitle = nextState.podcastTitle || null;
+  externalState.imageUrl = nextState.imageUrl || null;
+  externalState.position = Number.isFinite(Number(nextState.position)) ? Number(nextState.position) : 0;
+  externalState.duration = Number.isFinite(Number(nextState.duration)) ? Number(nextState.duration) : 0;
+  externalState.volume = Number.isFinite(Number(nextState.volume)) ? Number(nextState.volume) : 1.0;
+  externalState.status = nextState.status || 'idle';
+  externalState.transport = nextState.transport || 'google_cast_sender';
+  externalState.source = nextState.source || 'browser';
+  externalState.updatedAt = updatedAt;
+  return getState();
+}
+
+function clearExternalState(ownerGuid = null) {
+  if (ownerGuid && externalState.ownerGuid && externalState.ownerGuid !== ownerGuid) {
+    return getState();
+  }
+  _resetExternalState();
+  return getState();
 }
 
 // ---------------------------------------------------------------------------
@@ -575,5 +677,7 @@ module.exports = {
   stop,
   seek,
   setVolume,
-  getState
+  getState,
+  setExternalState,
+  clearExternalState,
 };

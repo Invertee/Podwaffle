@@ -26,33 +26,9 @@ const castClient = {
 
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      console.log('[castClient] Already connected or connecting.');
-      return;
-    }
-    this._intentionalClose = false;
-    const wsUrl = (window.api && typeof window.api.getWebSocketUrl === 'function')
-      ? window.api.getWebSocketUrl()
-      : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${window.APP_BASE_PATH ? window.APP_BASE_PATH + '/ws' : '/ws'}`;
-
-    if (!wsUrl) {
-      console.log('[castClient] Backend not configured; skipping WebSocket connection.');
-      return;
-    }
-
-    console.log(`[castClient] Connecting to ${wsUrl}`);
-
-    try {
-      this.ws = new WebSocket(wsUrl);
-    } catch (err) {
-      console.error('[castClient] Failed to create WebSocket:', err);
-      this._scheduleReconnect();
-      return;
-    }
-
-    this.ws.addEventListener('open', () => {
-      console.log('[castClient] WebSocket connected.');
-      clearTimeout(this._reconnectTimer);
-      this._startStatePolling();
+          // Notify player only when cast mode is currently authoritative
+          if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
+            window.player.applyCastState(this._castState);
       this._dispatch('connected', {});
     });
 
