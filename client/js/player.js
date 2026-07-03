@@ -1347,9 +1347,15 @@ const player = {
     try {
       if (window.googleCastSender && window.googleCastSender.isConnected()) {
         await window.googleCastSender.stop();
-      } else {
-        await api.castStop();
       }
+
+      // Always force backend cast teardown and mirrored state cleanup as a safety net
+      await Promise.allSettled([
+        api.castStop(),
+        (window.api && typeof window.api.clearCastState === 'function')
+          ? window.api.clearCastState(localStorage.getItem('podwaffle_guid'))
+          : Promise.resolve(),
+      ]);
     } catch (err) {
       console.warn('[player] castStop error (continuing anyway):', err);
     }

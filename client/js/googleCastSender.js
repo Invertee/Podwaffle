@@ -12,6 +12,7 @@ const googleCastSender = {
   _remotePlayerController: null,
   _listeners: {},
   _mediaMeta: null,
+  _lastMirroredState: null,
   _lastMirrorAt: 0,
   _lastPersistAt: 0,
   _lastPersistedPosition: 0,
@@ -150,6 +151,35 @@ const googleCastSender = {
     return this.requestSession();
   },
 
+  _restoreMirroredState() {
+    if (!window.api || typeof window.api.getCastState !== 'function') return null;
+    return window.api.getCastState().catch(() => null);
+  },
+
+  async syncFromServerState() {
+    const mirrored = await this._restoreMirroredState();
+    if (!mirrored || !mirrored.activeDeviceId) return null;
+
+    this._lastMirroredState = mirrored;
+    this._mediaMeta = {
+      guid: mirrored.episodeGuid || '',
+      feedId: mirrored.feedId || '',
+      title: mirrored.title || 'Podwaffle',
+      podcastTitle: mirrored.podcastTitle || '',
+      imageUrl: mirrored.imageUrl || '',
+      audioUrl: mirrored.mediaUrl || '',
+      duration: Number.isFinite(Number(mirrored.duration)) ? Number(mirrored.duration) : 0,
+    };
+    this._lastKnownStatus = mirrored.status || this._lastKnownStatus;
+
+    this._dispatch('statechange', {
+      deviceId: mirrored.activeDeviceId,
+      ...mirrored,
+    });
+
+    return mirrored;
+  },
+
   async loadEpisode(episode, startPosition = 0) {
     if (!episode || !episode.audioUrl) {
       throw new Error('Cannot cast episode without audioUrl');
@@ -233,15 +263,12 @@ const googleCastSender = {
 
   async stop() {
     const session = this.getCurrentSession();
-    if (!session && !this.isConnected()) {
-      await this._clearMirroredState();
-      return { status: 'idle' };
-    }
+    const hadConnection = this.isConnected() || !!session;
 
     try {
-      if (this._castContext && typeof this._castContext.endCurrentSession === 'function') {
+      if (hadConnection && this._castContext && typeof this._castContext.endCurrentSession === 'function') {
         this._castContext.endCurrentSession(true);
-      } else if (session && typeof session.endSession === 'function') {
+      } else if (hadConnection && session && typeof session.endSession === 'function') {
         session.endSession(true);
       }
     } catch (err) {
@@ -278,17 +305,18 @@ const googleCastSender = {
     const device = this.getCurrentDevice();
     const guid = localStorage.getItem('podwaffle_guid') || null;
     const status = this._deriveStatus();
+    const fallback = this._lastMirroredState || {};
 
     if (!device) {
       return {
         activeDeviceId: null,
         deviceName: null,
         ownerGuid: guid,
-        mediaUrl: null,
-        episodeGuid: this._mediaMeta?.guid || null,
-        title: this._mediaMeta?.title || null,
-        podcastTitle: this._mediaMeta?.podcastTitle || null,
-        imageUrl: this._mediaMeta?.imageUrl || null,
+        mediaUrl: fallback.mediaUrl || this._mediaMeta?.audioUrl || null,
+        episodeGuid: fallback.episodeGuid || this._mediaMeta?.guid || null,
+        title: fallback.title || this._mediaMeta?.title || null,
+        podcastTitle: fallback.podcastTitle || this._mediaMeta?.podcastTitle || null,
+        imageUrl: fallback.imageUrl || this._mediaMeta?.imageUrl || null,
         position: 0,
         duration: 0,
         volume: this._remotePlayer?.volumeLevel ?? 1,
@@ -303,12 +331,12 @@ const googleCastSender = {
       activeDeviceId: device.id,
       deviceName: device.name,
       ownerGuid: guid,
-      mediaUrl: this._mediaMeta?.audioUrl || null,
-      episodeGuid: this._mediaMeta?.guid || null,
-      feedId: this._mediaMeta?.feedId || '',
-      title: this._mediaMeta?.title || null,
-      podcastTitle: this._mediaMeta?.podcastTitle || null,
-      imageUrl: this._mediaMeta?.imageUrl || null,
+      mediaUrl: this._mediaMeta?.audioUrl || fallback.mediaUrl || null,
+      episodeGuid: this._mediaMeta?.guid || fallback.episodeGuid || null,
+      feedId: this._mediaMeta?.feedId || fallback.feedId || '',
+      title: this._mediaMeta?.title || fallback.title || null,
+      podcastTitle: this._mediaMeta?.podcastTitle || fallback.podcastTitle || null,
+      imageUrl: this._mediaMeta?.imageUrl || fallback.imageUrl || null,
       position: Number.isFinite(Number(this._remotePlayer?.currentTime)) ? Number(this._remotePlayer.currentTime) : 0,
       duration: Number.isFinite(Number(this._remotePlayer?.duration)) ? Number(this._remotePlayer.duration) : (this._mediaMeta?.duration || 0),
       volume: Number.isFinite(Number(this._remotePlayer?.volumeLevel)) ? Number(this._remotePlayer.volumeLevel) : 1,
@@ -354,6 +382,7 @@ const googleCastSender = {
 
   async _mirrorNow(options = {}) {
     const payload = this._buildStatePayload();
+    this._lastMirroredState = payload;
     const nowMs = Date.now();
     const key = JSON.stringify([
       payload.activeDeviceId,
@@ -437,6 +466,8 @@ const googleCastSender = {
     const ownerGuid = localStorage.getItem('podwaffle_guid') || null;
     this._lastStateKey = '';
     this._lastKnownStatus = 'idle';
+    this._mediaMeta = null;
+    this._lastMirroredState = null;
 
     if (window.api && typeof window.api.clearCastState === 'function') {
       await window.api.clearCastState(ownerGuid).catch((err) => {

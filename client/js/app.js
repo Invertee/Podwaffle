@@ -471,8 +471,15 @@ async function initApp() {
       window.castClient.connect();
       try {
         const castState = await window.api.getCastState();
-        if (castState && castState.activeDeviceId && castState.mediaUrl) {
+        if (castState && castState.activeDeviceId) {
           hasActiveCastSession = true;
+
+          if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
+            await window.googleCastSender.syncFromServerState().catch((err) => {
+              console.warn('[app] Failed to sync sender state from server:', err);
+            });
+          }
+
           if (window.player) {
             window.player.audio.pause();
             window.player.audio.removeAttribute('src');
@@ -489,7 +496,7 @@ async function initApp() {
               title: castState.title || 'Casting session',
               podcastTitle: castState.podcastTitle || 'Casting',
               guid: castState.episodeGuid || null,
-              audioUrl: castState.mediaUrl,
+              audioUrl: castState.mediaUrl || window.player.currentEpisode?.audioUrl || '',
               podcastImageUrl: castState.imageUrl || null,
               feedId: null
             };

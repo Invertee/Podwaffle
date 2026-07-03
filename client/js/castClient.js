@@ -22,13 +22,40 @@ const castClient = {
     title: null,
     podcastTitle: null,
     imageUrl: null,
+    mediaUrl: null,
+    volume: 1,
   },
 
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-          // Notify player only when cast mode is currently authoritative
-          if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
-            window.player.applyCastState(this._castState);
+      console.log('[castClient] Already connected or connecting.');
+      return;
+    }
+
+    this._intentionalClose = false;
+    const wsUrl = (window.api && typeof window.api.getWebSocketUrl === 'function')
+      ? window.api.getWebSocketUrl()
+      : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${window.APP_BASE_PATH ? window.APP_BASE_PATH + '/ws' : '/ws'}`;
+
+    if (!wsUrl) {
+      console.log('[castClient] Backend not configured; skipping WebSocket connection.');
+      return;
+    }
+
+    console.log(`[castClient] Connecting to ${wsUrl}`);
+
+    try {
+      this.ws = new WebSocket(wsUrl);
+    } catch (err) {
+      console.error('[castClient] Failed to create WebSocket:', err);
+      this._scheduleReconnect();
+      return;
+    }
+
+    this.ws.addEventListener('open', () => {
+      console.log('[castClient] WebSocket connected.');
+      clearTimeout(this._reconnectTimer);
+      this._startStatePolling();
       this._dispatch('connected', {});
     });
 
@@ -83,20 +110,21 @@ const castClient = {
       try {
         if (!window.api) return;
         const castState = await window.api.getCastState();
-        if (!castState || !castState.activeDeviceId) return;
+        if (!castState) return;
+
         this._handleMessage({
           type: 'cast:state',
           data: {
-            deviceId: castState.activeDeviceId,
-            mediaUrl: castState.mediaUrl,
-            episodeGuid: castState.episodeGuid,
-            title: castState.title,
-            podcastTitle: castState.podcastTitle,
-            imageUrl: castState.imageUrl,
+            deviceId: castState.activeDeviceId || null,
+            mediaUrl: castState.mediaUrl || null,
+            episodeGuid: castState.episodeGuid || null,
+            title: castState.title || null,
+            podcastTitle: castState.podcastTitle || null,
+            imageUrl: castState.imageUrl || null,
             position: castState.position,
             duration: castState.duration,
-            status: castState.status,
-            volume: castState.volume
+            status: castState.status || 'idle',
+            volume: castState.volume,
           }
         });
       } catch (err) {
@@ -216,58 +244,47 @@ const castClient = {
     console.log('[castClient] Message received:', data.type, data);
     switch (data.type) {
       case 'cast:state':
-        // Update internal cast state
         if (data.data) {
           this._castState = {
             status: data.data.status || this._castState.status,
             position: data.data.position != null ? data.data.position : this._castState.position,
             duration: data.data.duration != null ? data.data.duration : this._castState.duration,
-            activeDeviceId: data.data.deviceId || this._castState.activeDeviceId,
+            activeDeviceId: data.data.deviceId !== undefined ? data.data.deviceId : this._castState.activeDeviceId,
             episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
             title: data.data.title != null ? data.data.title : this._castState.title,
             podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
             imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
+            mediaUrl: data.data.mediaUrl != null ? data.data.mediaUrl : this._castState.mediaUrl,
+            volume: data.data.volume != null ? data.data.volume : this._castState.volume,
           };
-          // Manage idle timeout: clear on playing, start on non-playing
-          if (this._castState.status === 'playing') {
+
+          if (!this._castState.activeDeviceId || this._castState.status === 'idle') {
             this._clearIdleTimer();
-          } else if (this._castState.status === 'idle' || this._castState.status === 'paused' || this._castState.status === 'error') {
+          } else if (this._castState.status === 'playing') {
+            this._clearIdleTimer();
+          } else if (this._castState.status === 'paused' || this._castState.status === 'error') {
             if (!this._idleTimer) this._startIdleTimer();
           }
-          // Notify player only when cast mode is currently authoritative
-          if (window.player && window.player.mode === 'cast') {
-            if (!this._castState.activeDeviceId) {
-              return;
-            }
 
-            window.player._activeCastDeviceId = this._castState.activeDeviceId || window.player._activeCastDeviceId;
-            window.player.position = this._castState.position;
-            window.player.duration = this._castState.duration;
-            window.player.isPlaying = this._castState.status === 'playing';
-            
-            // Update episode metadata if available
-            if (this._castState.episodeGuid && this._castState.title) {
-              window.player.currentEpisode = {
-                ...window.player.currentEpisode,
-                guid: this._castState.episodeGuid,
-                title: this._castState.title,
-                podcastTitle: this._castState.podcastTitle,
-                podcastImageUrl: this._castState.imageUrl,
-              };
-            }
-
-            if (typeof window.player.handleCastStatusUpdate === 'function') {
-              window.player.handleCastStatusUpdate(this._castState);
-            }
-            
-            window.player._notifyStateChange();
+          if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
+            window.player.applyCastState({
+              deviceId: this._castState.activeDeviceId,
+              episodeGuid: this._castState.episodeGuid,
+              title: this._castState.title,
+              podcastTitle: this._castState.podcastTitle,
+              imageUrl: this._castState.imageUrl,
+              position: this._castState.position,
+              duration: this._castState.duration,
+              status: this._castState.status,
+              volume: this._castState.volume,
+            });
           }
         }
+
         this._dispatch('cast:state', data.data);
         break;
 
       case 'feeds:updated':
-        // Notify any registered feed-update listeners
         this._dispatch('feeds:updated', data.data);
         break;
 
