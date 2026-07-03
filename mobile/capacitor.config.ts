@@ -53,6 +53,10 @@ const config: CapacitorConfig = {
     : {}),
 
   plugins: {
+    Cast: {
+      uiMode: 'picker',
+      autoJoinPolicy: 'origin_scoped',
+    },
     SplashScreen: {
       launchShowDuration: 1200,
       launchAutoHide: true,

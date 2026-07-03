@@ -7,6 +7,10 @@
 const googleCastSender = {
   _initialized: false,
   _available: false,
+  _nativeAvailable: false,
+  _usingNativeCast: false,
+  _nativeCast: null,
+  _nativeCastStatePollTimer: null,
   _castContext: null,
   _remotePlayer: null,
   _remotePlayerController: null,
@@ -21,11 +25,18 @@ const googleCastSender = {
   _lastStateKey: '',
 
   init() {
+    this._initNativeCast();
+
     const previousHandler = window.__onGCastApiAvailable;
     window.__onGCastApiAvailable = (isAvailable) => {
       if (typeof previousHandler === 'function') {
         try { previousHandler(isAvailable); } catch (_) {}
       }
+
+      if (this._usingNativeCast) {
+        return;
+      }
+
       this._available = !!isAvailable;
       if (isAvailable) {
         this._initializeFramework();
@@ -35,8 +46,121 @@ const googleCastSender = {
     };
 
     if (window.cast && window.cast.framework && window.chrome && window.chrome.cast) {
+      if (this._usingNativeCast) {
+        return;
+      }
       this._available = true;
       this._initializeFramework();
+    }
+  },
+
+  _isNativeRuntime() {
+    const cap = window.Capacitor;
+    return !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  },
+
+  async _startNativeCastStatePolling() {
+    this._stopNativeCastStatePolling();
+    this._nativeCastStatePollTimer = setInterval(async () => {
+      await this._pollNativeCastState();
+    }, 1000);
+  },
+
+  _stopNativeCastStatePolling() {
+    if (this._nativeCastStatePollTimer) {
+      clearInterval(this._nativeCastStatePollTimer);
+      this._nativeCastStatePollTimer = null;
+    }
+  },
+
+  async _pollNativeCastState() {
+    if (!this._usingNativeCast || !this._nativeCast) return;
+    try {
+      const stateResult = await this._nativeCast.getCastState();
+      const sessionResult = await this._nativeCast.getSession();
+      const mediaResult = await this._nativeCast.getMediaStatus();
+
+      const castState = stateResult?.castState || {};
+      const session = sessionResult?.session || null;
+      const media = mediaResult?.mediaStatus || null;
+
+      const deviceId = session?.deviceId || session?.deviceName || castState?.deviceId || null;
+      const deviceName = session?.deviceName || session?.friendlyName || castState?.deviceName || null;
+      const status = String(media?.playerState || media?.status || '').toUpperCase();
+      const normalizedStatus = status === 'PLAYING'
+        ? 'playing'
+        : (status === 'PAUSED' ? 'paused' : (status === 'IDLE' ? 'idle' : this._lastKnownStatus));
+
+      if (normalizedStatus) {
+        this._lastKnownStatus = normalizedStatus;
+      }
+
+      const payload = {
+        activeDeviceId: deviceId,
+        deviceName,
+        ownerGuid: localStorage.getItem('podwaffle_guid') || null,
+        mediaUrl: this._mediaMeta?.audioUrl || this._lastMirroredState?.mediaUrl || null,
+        episodeGuid: this._mediaMeta?.guid || this._lastMirroredState?.episodeGuid || null,
+        feedId: this._mediaMeta?.feedId || this._lastMirroredState?.feedId || '',
+        title: this._mediaMeta?.title || this._lastMirroredState?.title || null,
+        podcastTitle: this._mediaMeta?.podcastTitle || this._lastMirroredState?.podcastTitle || null,
+        imageUrl: this._mediaMeta?.imageUrl || this._lastMirroredState?.imageUrl || null,
+        position: Number.isFinite(Number(media?.position)) ? Number(media.position) : 0,
+        duration: Number.isFinite(Number(media?.duration)) ? Number(media.duration) : (this._mediaMeta?.duration || 0),
+        volume: Number.isFinite(Number(media?.volume)) ? Number(media.volume) : 1,
+        status: normalizedStatus || 'idle',
+        transport: 'capacitor_native_cast',
+        source: 'native',
+        updatedAt: new Date().toISOString(),
+      };
+
+      this._lastMirroredState = payload;
+      this._dispatch('statechange', payload);
+
+      if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function' && payload.activeDeviceId) {
+        window.player.applyCastState({
+          deviceId: payload.activeDeviceId,
+          deviceName: payload.deviceName,
+          episodeGuid: payload.episodeGuid,
+          title: payload.title,
+          podcastTitle: payload.podcastTitle,
+          imageUrl: payload.imageUrl,
+          position: payload.position,
+          duration: payload.duration,
+          status: payload.status,
+          volume: payload.volume,
+        });
+      }
+
+      this._mirrorSoon(false);
+    } catch (err) {
+      // Non-fatal polling errors are expected around session transitions
+    }
+  },
+
+  async _initNativeCast() {
+    if (!this._isNativeRuntime()) return;
+
+    const cap = window.Capacitor;
+    const plugin = cap?.Plugins?.Cast;
+    if (!plugin) return;
+
+    try {
+      await plugin.initialize();
+      const capabilities = await plugin.getCapabilities();
+      this._nativeCast = plugin;
+      this._nativeAvailable = !!capabilities?.isSupported;
+      this._usingNativeCast = this._nativeAvailable;
+      if (this._nativeAvailable) {
+        this._initialized = true;
+        this._available = false;
+        this._dispatch('availability', { available: true });
+        await this._startNativeCastStatePolling();
+      }
+    } catch (err) {
+      console.warn('[googleCastSender] Native Cast init failed, falling back to browser sender:', err?.message || err);
+      this._nativeAvailable = false;
+      this._usingNativeCast = false;
     }
   },
 
@@ -102,10 +226,16 @@ const googleCastSender = {
   },
 
   isSupported() {
+    if (this._usingNativeCast) {
+      return !!this._nativeAvailable;
+    }
     return !!(this._available && this._initialized && this._castContext);
   },
 
   isConnected() {
+    if (this._usingNativeCast) {
+      return !!(this._lastMirroredState && this._lastMirroredState.activeDeviceId);
+    }
     return !!(this._remotePlayer && this._remotePlayer.isConnected);
   },
 
@@ -120,6 +250,9 @@ const googleCastSender = {
   },
 
   getCurrentSession() {
+    if (this._usingNativeCast) {
+      return null;
+    }
     return this._castContext ? this._castContext.getCurrentSession() : null;
   },
 
@@ -135,6 +268,12 @@ const googleCastSender = {
   },
 
   async requestSession() {
+    if (this._usingNativeCast && this._nativeCast) {
+      await this._nativeCast.showDevicePicker();
+      await this._pollNativeCastState();
+      return this.getCurrentDevice();
+    }
+
     if (!this.isSupported()) {
       throw new Error('Google Cast is not available in this browser context');
     }
@@ -185,6 +324,34 @@ const googleCastSender = {
       throw new Error('Cannot cast episode without audioUrl');
     }
 
+    if (this._usingNativeCast && this._nativeCast) {
+      this._mediaMeta = {
+        guid: episode.guid || '',
+        feedId: episode.feedId || '',
+        title: episode.title || 'Podwaffle',
+        podcastTitle: episode.podcastTitle || '',
+        imageUrl: episode.podcastImageUrl || episode.imageUrl || '',
+        audioUrl: episode.audioUrl,
+        duration: Number.isFinite(Number(episode.duration)) ? Number(episode.duration) : 0,
+      };
+
+      await this.ensureSession();
+      await this._nativeCast.loadMedia({
+        url: episode.audioUrl,
+        contentType: 'audio/mpeg',
+        title: this._mediaMeta.title,
+        subtitle: this._mediaMeta.podcastTitle,
+        posterUrl: this._mediaMeta.imageUrl || undefined,
+        streamType: 'BUFFERED',
+        autoplay: true,
+        currentTime: Math.max(0, Number(startPosition) || 0),
+      });
+      this._lastKnownStatus = 'playing';
+      await this._pollNativeCastState();
+      await this._mirrorNow({ force: true });
+      return this.getCurrentDevice();
+    }
+
     await this.ensureSession();
     const session = this.getCurrentSession();
     if (!session) {
@@ -224,6 +391,14 @@ const googleCastSender = {
   },
 
   async play() {
+    if (this._usingNativeCast && this._nativeCast) {
+      await this._nativeCast.play();
+      this._lastKnownStatus = 'playing';
+      await this._pollNativeCastState();
+      await this._mirrorSoon(true);
+      return { status: 'playing' };
+    }
+
     if (!this.isConnected()) return { status: 'idle' };
     if (this._remotePlayer && this._remotePlayer.isPaused) {
       this._remotePlayerController.playOrPause();
@@ -234,6 +409,14 @@ const googleCastSender = {
   },
 
   async pause() {
+    if (this._usingNativeCast && this._nativeCast) {
+      await this._nativeCast.pause();
+      this._lastKnownStatus = 'paused';
+      await this._pollNativeCastState();
+      await this._mirrorSoon(true);
+      return { status: 'paused' };
+    }
+
     if (!this.isConnected()) return { status: 'idle' };
     if (this._remotePlayer && !this._remotePlayer.isPaused) {
       this._remotePlayerController.playOrPause();
@@ -244,6 +427,14 @@ const googleCastSender = {
   },
 
   async seek(position) {
+    if (this._usingNativeCast && this._nativeCast) {
+      const nextPosition = Math.max(0, Number(position) || 0);
+      await this._nativeCast.seek({ position: nextPosition });
+      await this._pollNativeCastState();
+      await this._mirrorSoon(true);
+      return { position: nextPosition };
+    }
+
     if (!this.isConnected()) throw new Error('No active cast session');
     const nextPosition = Math.max(0, Number(position) || 0);
     this._remotePlayer.currentTime = nextPosition;
@@ -253,6 +444,14 @@ const googleCastSender = {
   },
 
   async setVolume(level) {
+    if (this._usingNativeCast && this._nativeCast) {
+      const nextLevel = Math.max(0, Math.min(1, Number(level) || 0));
+      await this._nativeCast.setVolume({ level: nextLevel });
+      await this._pollNativeCastState();
+      await this._mirrorSoon(true);
+      return { volume: nextLevel };
+    }
+
     if (!this.isConnected()) throw new Error('No active cast session');
     const nextLevel = Math.max(0, Math.min(1, Number(level) || 0));
     this._remotePlayer.volumeLevel = nextLevel;
@@ -262,6 +461,20 @@ const googleCastSender = {
   },
 
   async stop() {
+    if (this._usingNativeCast && this._nativeCast) {
+      try {
+        await this._nativeCast.stop();
+      } catch (_) {}
+      try {
+        await this._nativeCast.endSession({ stopCasting: true });
+      } catch (_) {}
+      this._lastKnownStatus = 'idle';
+      this._stopNativeCastStatePolling();
+      await this._clearMirroredState();
+      await this._startNativeCastStatePolling();
+      return { status: 'idle' };
+    }
+
     const session = this.getCurrentSession();
     const hadConnection = this.isConnected() || !!session;
 
