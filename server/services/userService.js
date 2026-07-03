@@ -205,6 +205,21 @@ async function createUser() {
 }
 
 /**
+ * Ensure a user profile exists for the given GUID.
+ * If no profile file exists, one is created with default values.
+ * This is an idempotent upsert — safe to call at any time.
+ */
+async function ensureUser(guid) {
+  const existing = await getUser(guid);
+  if (existing) return existing;
+  console.log(`[userService] ensureUser(${guid}) → no profile found, creating default`);
+  const profile = defaultProfile(guid);
+  await saveUser(profile);
+  console.log(`[userService] ensureUser(${guid}) → created`);
+  return profile;
+}
+
+/**
  * Merge-update user settings.
  */
 async function updateSettings(guid, settings) {
@@ -734,6 +749,7 @@ async function getBootstrapSyncState(guid) {
 // ---------------------------------------------------------------------------
 module.exports = {
   createUser,
+  ensureUser,
   getUser,
   saveUser,
   updateSettings,

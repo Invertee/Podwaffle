@@ -249,37 +249,11 @@ async function start() {
   // 1. Ensure all data directories exist
   await ensureDirectories();
 
-  // 2. Start Google Cast device discovery
-  console.log('[server] Starting Google Cast mDNS discovery...');
-  const _onCastDeviceFound = (device) => {
-    console.log(`[server] Cast device found: "${device.name}" @ ${device.host}`);
-    broadcastWs({ type: 'cast:device_found', data: device });
-  };
-  const _onCastDeviceLost = (deviceId) => {
-    console.log(`[server] Cast device lost: ${deviceId}`);
-    broadcastWs({ type: 'cast:device_lost', data: { deviceId } });
-  };
-  try {
-    castService.startDiscovery(_onCastDeviceFound, _onCastDeviceLost);
-  } catch (err) {
-    console.error('[server] Cast discovery failed to start (non-fatal):', err.message);
-  }
-
-  // Restart mDNS discovery every 3 hours to pick up newly-added or renamed devices
-  setInterval(() => {
-    console.log('[server] Periodic cast device discovery refresh (3 h interval)...');
-    try {
-      castService.restartDiscovery(_onCastDeviceFound, _onCastDeviceLost);
-    } catch (err) {
-      console.error('[server] Cast discovery refresh failed (non-fatal):', err.message);
-    }
-  }, 3 * 60 * 60 * 1000);
-
-  // 3. Start the feed refresh scheduler
+  // 2. Start the feed refresh scheduler
   console.log('[server] Starting feed refresh scheduler...');
   scheduler.startScheduler(feedService, userService, broadcastWs);
 
-  // 4. Run an initial feed refresh after a 5-second delay (let the server settle)
+  // 3. Run an initial feed refresh after a 5-second delay (let the server settle)
   setTimeout(async () => {
     console.log('[server] Running initial feed refresh...');
     try {

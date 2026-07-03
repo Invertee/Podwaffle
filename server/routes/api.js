@@ -138,6 +138,22 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     }
   });
 
+  // PUT /users/:guid — register/ensure a user profile for a client-supplied GUID
+  // Idempotent: creates the profile if it doesn't exist; no-ops if it already does.
+  // Used by the client on first connection so its locally-generated GUID gets a backend profile.
+  router.put('/users/:guid', async (req, res) => {
+    const { guid } = req.params;
+    console.log(`[api] PUT /users/${guid} → ensureUser`);
+    try {
+      const profile = await userService.ensureUser(guid);
+      // 201 if we just created it, 200 if it already existed
+      const created = !!(profile && profile._justCreated);
+      res.status(200).json({ guid: profile.guid, profile });
+    } catch (err) {
+      sendError(res, 500, 'Failed to ensure user', err.message);
+    }
+  });
+
   // PUT /users/:guid/settings
   router.put('/users/:guid/settings', async (req, res) => {
     const { guid } = req.params;
@@ -619,58 +635,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       const profile = await userService.getUser(guid);
       if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
 
-      const playbackSession = await userService.getPlaybackSession(guid);
-      const castState = castService.getState();
-      const targetMode = playbackSession?.mode === 'cast' ? 'cast' : 'local';
-      const browserCastActive = targetMode === 'cast'
-        && castState.source === 'browser'
-        && !!castState.activeDeviceId
-        && (!castState.ownerGuid || castState.ownerGuid === guid);
-      const serverCastActive = targetMode === 'cast' && !!castState.activeDeviceId && !browserCastActive;
-
-      if (serverCastActive) {
-        let result = { status: castState.status || 'idle' };
-        switch (normalized) {
-          case 'play':
-            result = await castService.resume();
-            break;
-          case 'pause':
-            result = await castService.pause();
-            break;
-          case 'play_pause':
-            result = castState.status === 'playing'
-              ? await castService.pause()
-              : await castService.resume();
-            break;
-          case 'stop':
-            result = await castService.stop();
-            break;
-          case 'seek': {
-            const seekTo = toNumber(position, toNumber(value, NaN));
-            if (!Number.isFinite(seekTo)) {
-              return sendError(res, 400, 'position or value is required for seek');
-            }
-            result = await castService.seek(seekTo);
-            break;
-          }
-          case 'set_volume': {
-            const nextVolume = toNumber(volume, toNumber(value, NaN));
-            if (!Number.isFinite(nextVolume)) {
-              return sendError(res, 400, 'volume or value is required for set_volume');
-            }
-            result = await castService.setVolume(nextVolume);
-            break;
-          }
-          case 'next':
-          case 'previous':
-            break;
-          default:
-            return sendError(res, 400, `Unsupported command: ${normalized}`);
-        }
-
-        return res.json({ accepted: true, target: 'cast-server', command: normalized, result });
-      }
-
+      // All media commands are broadcast as-is to connected browser clients for local/cast handling
       broadcastWs({
         type: 'ha:command',
         data: {
@@ -683,7 +648,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         }
       });
 
-      return res.json({ accepted: true, target: browserCastActive ? 'cast-browser' : 'local', command: normalized });
+      return res.json({ accepted: true, command: normalized });
     } catch (err) {
       sendError(res, 500, 'Failed to execute media command', err.message);
     }
@@ -859,210 +824,11 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   });
 
   // =========================================================================
-  // CAST
+  // CAST — Lightweight state mirroring only
   // =========================================================================
-
-  // GET /cast/devices
-  router.get('/cast/devices', (req, res) => {
-    console.log('[api] GET /cast/devices');
-    try {
-      const devices = castService.getDevices();
-      console.log(`[api] GET /cast/devices → ${devices.length} devices`);
-      res.json(devices);
-    } catch (err) {
-      sendError(res, 500, 'Failed to get cast devices', err.message);
-    }
-  });
-
-  // POST /cast/play
-  router.post('/cast/play', async (req, res) => {
-    const { deviceId, mediaUrl, startPosition = 0, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration = 0 } = req.body || {};
-    console.log('[api] POST /cast/play', { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle });
-    const CAST_PERSIST_MIN_INTERVAL_MS = 5000;
-    let lastCastPersistAt = 0;
-    let lastPersistedPosition = null;
-    let lastPersistedStatus = null;
-    let castPersistInFlight = false;
-
-    if (!deviceId) return sendError(res, 400, 'deviceId is required');
-    if (!mediaUrl) return sendError(res, 400, 'mediaUrl is required');
-
-    try {
-      // onStatusUpdate callback: broadcasts state + handles completion
-      const onStatusUpdate = async (statusObj) => {
-        console.log('[api] cast onStatusUpdate:', statusObj);
-
-        const safePosition = Math.max(0, Math.floor(statusObj.position || 0));
-        const safeDuration = Math.max(0, Math.floor(statusObj.duration || 0));
-
-        // Broadcast to all WebSocket clients
-        broadcastWs({
-          type: 'cast:state',
-          data: {
-            deviceId,
-            mediaUrl,
-            episodeGuid,
-            title,
-            podcastTitle,
-            imageUrl,
-            position: safePosition,
-            duration: safeDuration,
-            status: statusObj.status,
-            volume: statusObj.volume
-          }
-        });
-
-        // Persist in-progress state while casting
-        if (userGuid && episodeGuid && statusObj.status !== 'idle') {
-          if (castPersistInFlight) {
-            return;
-          }
-
-          const nowMs = Date.now();
-          const statusChanged = lastPersistedStatus !== statusObj.status;
-          const movedSeconds = lastPersistedPosition === null ? Infinity : Math.abs(safePosition - lastPersistedPosition);
-          const intervalElapsed = (nowMs - lastCastPersistAt) >= CAST_PERSIST_MIN_INTERVAL_MS;
-          const shouldPersist = statusChanged || intervalElapsed || movedSeconds >= 15;
-
-          if (!shouldPersist) {
-            return;
-          }
-
-          castPersistInFlight = true;
-          lastCastPersistAt = nowMs;
-          lastPersistedPosition = safePosition;
-          lastPersistedStatus = statusObj.status;
-
-          try {
-            const profile = await userService.getUser(userGuid);
-            if (profile) {
-              const existing = profile.progress[episodeGuid];
-              const feedId = existing ? existing.feedId : '';
-              await userService.updateProgress(userGuid, episodeGuid, {
-                position: safePosition,
-                duration: safeDuration,
-                played: false,
-                feedId,
-                updatedAt: new Date().toISOString()
-              });
-
-              await userService.updatePlaybackSession(userGuid, {
-                episodeGuid,
-                feedId,
-                title: title || '',
-                podcastTitle: podcastTitle || '',
-                audioUrl: mediaUrl || '',
-                podcastImageUrl: imageUrl || '',
-                imageUrl: imageUrl || '',
-                position: safePosition,
-                duration: safeDuration,
-                isPlaying: statusObj.status === 'playing',
-                mode: 'cast',
-                updatedAt: new Date().toISOString(),
-              });
-
-              broadcastWs({ type: 'user:progress', data: { guid: userGuid, episodeGuid } });
-            }
-          } catch (progressErr) {
-            console.error('[api] cast onStatusUpdate → failed to persist in-progress:', progressErr.message);
-          } finally {
-            castPersistInFlight = false;
-          }
-        }
-
-        // If playback finished (IDLE after playing), mark as played for the user
-        if (statusObj.status === 'idle' && userGuid && episodeGuid) {
-          console.log(`[api] cast finished → marking episode ${episodeGuid} as played for user ${userGuid}`);
-          try {
-            const profile = await userService.getUser(userGuid);
-            if (profile) {
-              const existing = profile.progress[episodeGuid];
-              const feedId = existing ? existing.feedId : '';
-              await userService.updateProgress(userGuid, episodeGuid, {
-                position: safeDuration,
-                duration: safeDuration,
-                played: true,
-                feedId,
-                updatedAt: new Date().toISOString()
-              });
-
-              broadcastWs({ type: 'user:progress', data: { guid: userGuid, episodeGuid } });
-            }
-          } catch (progressErr) {
-            console.error('[api] cast onStatusUpdate → failed to update progress:', progressErr.message);
-          }
-        }
-      };
-
-      const result = await castService.castTo(deviceId, mediaUrl, startPosition, onStatusUpdate, { episodeGuid, title, podcastTitle, imageUrl, duration });
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Cast play failed', err.message);
-    }
-  });
-
-  // POST /cast/pause
-  router.post('/cast/pause', async (req, res) => {
-    console.log('[api] POST /cast/pause');
-    try {
-      const result = await castService.pause();
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Cast pause failed', err.message);
-    }
-  });
-
-  // POST /cast/resume
-  router.post('/cast/resume', async (req, res) => {
-    console.log('[api] POST /cast/resume');
-    try {
-      const result = await castService.resume();
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Cast resume failed', err.message);
-    }
-  });
-
-  // POST /cast/stop
-  router.post('/cast/stop', async (req, res) => {
-    console.log('[api] POST /cast/stop');
-    try {
-      const result = await castService.stop();
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Cast stop failed', err.message);
-    }
-  });
-
-  // PUT /cast/volume
-  router.put('/cast/volume', async (req, res) => {
-    const { volume } = req.body || {};
-    console.log(`[api] PUT /cast/volume → ${volume}`);
-    if (typeof volume !== 'number' && typeof volume !== 'string') {
-      return sendError(res, 400, 'volume (0-1) is required');
-    }
-    try {
-      const result = await castService.setVolume(parseFloat(volume));
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Set volume failed', err.message);
-    }
-  });
-
-  // PUT /cast/seek
-  router.put('/cast/seek', async (req, res) => {
-    const { position } = req.body || {};
-    console.log(`[api] PUT /cast/seek → ${position}`);
-    if (position === undefined || position === null) {
-      return sendError(res, 400, 'position (seconds) is required');
-    }
-    try {
-      const result = await castService.seek(parseFloat(position));
-      res.json(result);
-    } catch (err) {
-      sendError(res, 500, 'Cast seek failed', err.message);
-    }
-  });
+  // Server-side device discovery and media playback control have been removed.
+  // All cast control is now client-side via the Google Cast sender SDK.
+  // These endpoints manage browser-driven state mirroring only.
 
   // GET /cast/state
   router.get('/cast/state', (req, res) => {
