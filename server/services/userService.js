@@ -7,7 +7,9 @@ const syncService = require('./syncService');
 
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const USERS_DIR = path.join(_dataRoot, 'users');
+const PROGRESS_DIR = path.join(_dataRoot, 'progress');
 const userWriteQueues = new Map();
+const progressWriteQueues = new Map();
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap
@@ -18,6 +20,15 @@ const userWriteQueues = new Map();
     console.log(`[userService] Users directory ready: ${USERS_DIR}`);
   } catch (err) {
     console.error('[userService] Failed to create users directory:', err);
+  }
+})();
+
+(async () => {
+  try {
+    await fs.promises.mkdir(PROGRESS_DIR, { recursive: true });
+    console.log(`[userService] Progress directory ready: ${PROGRESS_DIR}`);
+  } catch (err) {
+    console.error('[userService] Failed to create progress directory:', err);
   }
 })();
 
@@ -171,6 +182,49 @@ async function queueUserWrite(guid, writeOperation) {
   }
 }
 
+function progressFilePath(guid) {
+  return path.join(PROGRESS_DIR, `${guid}.json`);
+}
+
+async function queueProgressWrite(guid, writeOperation) {
+  const previous = progressWriteQueues.get(guid) || Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(writeOperation);
+
+  progressWriteQueues.set(guid, next);
+
+  try {
+    return await next;
+  } finally {
+    if (progressWriteQueues.get(guid) === next) {
+      progressWriteQueues.delete(guid);
+    }
+  }
+}
+
+/**
+ * Load the progress map for a user from the dedicated progress file.
+ * Falls back to the user profile file (migration path for existing users).
+ */
+async function loadProgressForUser(guid) {
+  // Try dedicated progress file first
+  try {
+    const raw = await fs.promises.readFile(progressFilePath(guid), 'utf8');
+    return JSON.parse(raw) || {};
+  } catch (err) {
+    if (err.code !== 'ENOENT') return {};
+  }
+  // Fall back to user profile file (pre-migration)
+  try {
+    const raw = await fs.promises.readFile(userFilePath(guid), 'utf8');
+    const profile = JSON.parse(raw);
+    return (profile && typeof profile.progress === 'object') ? profile.progress : {};
+  } catch (_) {
+    return {};
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Core I/O
 // ---------------------------------------------------------------------------
@@ -198,15 +252,19 @@ async function getUser(guid) {
 
 /**
  * Persist a user profile to disk, bumping updatedAt.
+ * Progress is stored in a separate file and is stripped from the user file.
  */
 async function saveUser(profile) {
   ensureProfileShape(profile);
   profile.updatedAt = new Date().toISOString();
+  // Strip progress — it lives in data/progress/{guid}.json, not the user file.
+  // This prevents bulk progress writes from racing with subscription/settings writes.
   const filePath = userFilePath(profile.guid);
+  const profileForDisk = { ...profile, progress: {} };
   console.log(`[userService] saveUser(${profile.guid}) → writing ${filePath}`);
   return queueUserWrite(profile.guid, async () => {
     try {
-      await atomicWriteFile(filePath, JSON.stringify(profile, null, 2));
+      await atomicWriteFile(filePath, JSON.stringify(profileForDisk, null, 2));
       console.log(`[userService] saveUser(${profile.guid}) → saved OK`);
       return profile;
     } catch (err) {
@@ -341,54 +399,65 @@ async function getSubscriptions(guid) {
 
 /**
  * Update playback progress for an episode. Uses updatedAt for conflict resolution
- * (most-recent write wins). Increments totalListenedSeconds based on position delta.
+ * (most-recent write wins).
+ *
+ * Progress is stored in data/progress/{guid}.json (separate from the user profile)
+ * so bulk progress writes cannot corrupt subscriptions or settings.
+ * The read-modify-write all happens inside the progress write queue so concurrent
+ * bulk operations (e.g. marking 30 episodes played at once) are fully serialised.
  */
 async function updateProgress(guid, episodeGuid, progressData) {
   console.log(`[userService] updateProgress(${guid}, ${episodeGuid})`, progressData);
-  const profile = await ensureUser(guid);
+  await ensureUser(guid);
 
-  const existing = profile.progress[episodeGuid];
+  return queueProgressWrite(guid, async () => {
+    const progressMap = await loadProgressForUser(guid);
+    const existing = progressMap[episodeGuid];
 
-  // Conflict resolution: most recent updatedAt wins
-  if (existing && progressData.updatedAt && existing.updatedAt) {
-    const existingTime = new Date(existing.updatedAt).getTime();
-    const incomingTime = new Date(progressData.updatedAt).getTime();
-    if (existingTime >= incomingTime) {
-      console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → skipping, existing record is newer`);
-      return existing;
+    // Conflict resolution: most recent updatedAt wins
+    if (existing && progressData.updatedAt && existing.updatedAt) {
+      const existingTime = new Date(existing.updatedAt).getTime();
+      const incomingTime = new Date(progressData.updatedAt).getTime();
+      if (existingTime >= incomingTime) {
+        console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → skipping, existing record is newer`);
+        return existing;
+      }
     }
-  }
 
-  // Calculate listened delta
-  const oldPosition = existing ? (existing.position || 0) : 0;
-  const newPosition = typeof progressData.position === 'number' ? progressData.position : oldPosition;
-  const delta = Math.max(0, newPosition - oldPosition);
+    const oldPosition = existing ? (existing.position || 0) : 0;
+    const newPosition = typeof progressData.position === 'number' ? progressData.position : oldPosition;
+    const delta = Math.max(0, newPosition - oldPosition);
 
-  const now = new Date().toISOString();
-  profile.progress[episodeGuid] = {
-    position: newPosition,
-    duration: progressData.duration !== undefined ? progressData.duration : (existing ? existing.duration : 0),
-    updatedAt: progressData.updatedAt || now,
-    played: progressData.played !== undefined ? progressData.played : (existing ? existing.played : false),
-    feedId: progressData.feedId || (existing ? existing.feedId : '')
-  };
+    const now = new Date().toISOString();
+    progressMap[episodeGuid] = {
+      position: newPosition,
+      duration: progressData.duration !== undefined ? progressData.duration : (existing ? existing.duration : 0),
+      updatedAt: progressData.updatedAt || now,
+      played: progressData.played !== undefined ? progressData.played : (existing ? existing.played : false),
+      feedId: progressData.feedId || (existing ? existing.feedId : '')
+    };
 
-  if (profile.progress[episodeGuid].played && profile.playbackSession?.episodeGuid === episodeGuid) {
-    profile.playbackSession = null;
-  }
+    await atomicWriteFile(progressFilePath(guid), JSON.stringify(progressMap, null, 2));
+    console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → saved, position=${newPosition}`);
 
-  // Update stats — skip when caller explicitly marks as played (avoids counting unlistened duration)
-  if (delta > 0 && !progressData.skipStats) {
-    profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
-    profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + delta;
-    console.log(`[userService] updateProgress → listened delta: +${delta.toFixed(1)}s (total: ${profile.stats.totalListenedSeconds.toFixed(1)}s)`);
-  } else if (progressData.skipStats) {
-    console.log(`[userService] updateProgress → skipStats=true, not counting delta of ${delta.toFixed(1)}s`);
-  }
+    // Update stats on the user file (non-blocking; queued separately so it never
+    // races with subscription/settings writes on the main user write queue).
+    if (delta > 0 && !progressData.skipStats) {
+      queueUserWrite(guid, async () => {
+        const profile = await getUser(guid);
+        if (!profile) return;
+        profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
+        profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + delta;
+        console.log(`[userService] updateProgress → stats +${delta.toFixed(1)}s (total: ${profile.stats.totalListenedSeconds.toFixed(1)}s)`);
+        const profileForDisk = { ...profile, progress: {} };
+        await atomicWriteFile(userFilePath(guid), JSON.stringify(profileForDisk, null, 2));
+      }).catch((err) => {
+        console.warn(`[userService] updateProgress → stats update failed (non-fatal): ${err.message}`);
+      });
+    }
 
-  await saveUser(profile);
-  console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → saved, position=${newPosition}`);
-  return profile.progress[episodeGuid];
+    return progressMap[episodeGuid];
+  });
 }
 
 /**
@@ -552,18 +621,14 @@ async function updateQueue(guid, queueItems, metadata = {}) {
 }
 
 /**
- * Return all progress records for a user.
+ * Return all progress records for a user (from the dedicated progress file).
  */
 async function getProgress(guid) {
   console.log(`[userService] getProgress(${guid})`);
-  const profile = await getUser(guid);
-  if (!profile) {
-    console.warn(`[userService] getProgress(${guid}) → user not found`);
-    return {};
-  }
-  const count = Object.keys(profile.progress).length;
+  const progressMap = await loadProgressForUser(guid);
+  const count = Object.keys(progressMap).length;
   console.log(`[userService] getProgress(${guid}) → ${count} records`);
-  return profile.progress;
+  return progressMap;
 }
 
 /**
@@ -686,14 +751,17 @@ async function getSyncSnapshot(guid) {
   console.log(`[userService] getSyncSnapshot(${guid})`);
   const profile = await getUser(guid);
   if (!profile) throw new Error(`User ${guid} not found`);
-  return syncService.buildSnapshot(profile);
+  const progress = await loadProgressForUser(guid);
+  return syncService.buildSnapshot({ ...profile, progress });
 }
 
 async function mergeAndSaveSyncState(guid, incomingState) {
   console.log(`[userService] mergeAndSaveSyncState(${guid})`);
   const profile = await ensureUser(guid);
+  const existingProgress = await loadProgressForUser(guid);
 
-  const syncResult = syncService.buildSyncResult(profile, incomingState || {});
+  // Build the sync result with actual progress from the progress file
+  const syncResult = syncService.buildSyncResult({ ...profile, progress: existingProgress }, incomingState || {});
   const merged = syncResult.mergedState;
   const mergedSettings = merged.settings && typeof merged.settings === 'object'
     ? { ...merged.settings }
@@ -710,10 +778,7 @@ async function mergeAndSaveSyncState(guid, incomingState) {
     ? merged.subscriptions
     : profile.subscriptions;
 
-  profile.progress = merged.progress && typeof merged.progress === 'object'
-    ? merged.progress
-    : profile.progress;
-
+  // Progress is intentionally NOT written to profile — it lives in the progress file
   profile.stats = {
     ...(profile.stats || {}),
     ...(merged.stats || {}),
@@ -735,9 +800,19 @@ async function mergeAndSaveSyncState(guid, incomingState) {
     };
   }
 
+  // Save user profile (without progress)
   await saveUser(profile);
+
+  // Save merged progress to the dedicated progress file
+  if (merged.progress && typeof merged.progress === 'object') {
+    await queueProgressWrite(guid, async () => {
+      await atomicWriteFile(progressFilePath(guid), JSON.stringify(merged.progress, null, 2));
+    });
+  }
+
+  const finalProgress = merged.progress || existingProgress;
   return {
-    snapshot: syncService.buildSnapshot(profile),
+    snapshot: syncService.buildSnapshot({ ...profile, progress: finalProgress }),
     summary: syncResult.summary,
   };
 }
@@ -745,8 +820,9 @@ async function mergeAndSaveSyncState(guid, incomingState) {
 async function getBootstrapSyncState(guid) {
   console.log(`[userService] getBootstrapSyncState(${guid})`);
   const profile = await ensureUser(guid);
+  const progress = await loadProgressForUser(guid);
 
-  const snapshot = syncService.buildSnapshot(profile);
+  const snapshot = syncService.buildSnapshot({ ...profile, progress });
   const queueState = await getQueue(guid);
   const playbackSession = await getPlaybackSession(guid);
 

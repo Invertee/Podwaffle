@@ -384,16 +384,20 @@ const googleCastSender = {
     const payload = this._buildStatePayload();
     this._lastMirroredState = payload;
     const nowMs = Date.now();
+    // Quantise position to 15-second buckets so a smoothly-advancing position counter
+    // doesn't produce a new key every second and trigger a mirror call unnecessarily.
+    // Status/device/episode/volume changes still produce a different key immediately.
     const key = JSON.stringify([
       payload.activeDeviceId,
       payload.episodeGuid,
-      Math.floor(payload.position || 0),
+      Math.floor((payload.position || 0) / 15),
       Math.floor(payload.duration || 0),
       payload.status,
       Math.round((payload.volume || 0) * 100),
     ]);
 
-    if (!options.force && key === this._lastStateKey && (nowMs - this._lastMirrorAt) < 1000) {
+    // Throttle: skip if nothing meaningful changed within the last 15 seconds
+    if (!options.force && key === this._lastStateKey && (nowMs - this._lastMirrorAt) < 15000) {
       return payload;
     }
 
