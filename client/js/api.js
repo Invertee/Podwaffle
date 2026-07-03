@@ -297,13 +297,8 @@ const api = {
       return await res.text();
     }
 
-    // 3. Static hosting (GitHub Pages etc.) — use corsproxy.io
-    const corsProxy = `https://corsproxy.io/?url=${encodeURIComponent(feedUrl)}`;
-    const res = await fetch(corsProxy, {
-      headers: { Accept: 'application/xml, text/xml, application/rss+xml' },
-    });
-    if (!res.ok) throw new Error(`CORS proxy failed with HTTP ${res.status}`);
-    return await res.text();
+    // 3. No third-party CORS proxy fallback
+    throw new Error('Feed fetch blocked by CORS. Connect to a Podwaffle backend or run the local client proxy to refresh this feed.');
   },
 
   _getGuid() {
@@ -542,6 +537,11 @@ const api = {
       const audioUrl = enclosure && enclosure.getAttribute ? enclosure.getAttribute('url') : '';
       const itemImage = this._findXmlNode(item, ['itunes:image']);
       const episodeGuid = this._getXmlText(item, ['guid']) || `${seedPodcast.feedId}-episode-${index + 1}`;
+      const rawPublished = this._getXmlText(item, ['pubDate', 'published', 'dc:date', 'date']) || '';
+      const parsedPublished = rawPublished ? new Date(rawPublished) : null;
+      const normalizedPublished = parsedPublished && !Number.isNaN(parsedPublished.getTime())
+        ? parsedPublished.toISOString()
+        : new Date().toISOString();
       return {
         guid: episodeGuid,
         title: this._getXmlText(item, ['title']) || `Episode ${index + 1}`,
@@ -551,7 +551,8 @@ const api = {
         podcastImageUrl: imageUrl,
         podcastTitle: seedPodcast.title,
         feedId: seedPodcast.feedId,
-        publishedAt: this._getXmlText(item, ['pubDate', 'published']) || new Date().toISOString(),
+        pubDate: normalizedPublished,
+        publishedAt: normalizedPublished,
         duration: this._parseDurationSeconds(this._getXmlText(item, ['itunes:duration', 'duration'])),
       };
     }).filter((episode) => episode.audioUrl);
@@ -1133,6 +1134,16 @@ const api = {
   // ─── Podcasts ─────────────────────────────────────────
   async getPodcast(feedId, limit = 100, offset = 0) {
     return this._fetch(`/api/podcasts/${feedId}?limit=${limit}&offset=${offset}`);
+  },
+
+  async refreshPodcast(feedId) {
+    const podcast = await this.getPodcast(feedId, 500, 0);
+    return {
+      ok: true,
+      feedId,
+      refreshedAt: new Date().toISOString(),
+      episodeCount: Array.isArray(podcast?.episodes) ? podcast.episodes.length : 0,
+    };
   },
 
   async markEpisodesSeen(feedId, guid, episodeGuids) {

@@ -39,9 +39,12 @@ async function renderPodcastDetail(container, feedId) {
           <h2>${podcast.title}</h2>
           <div class="pd-author">${podcast.author || ''}</div>
           <br>
-          <button id="pd-sub-btn" class="btn button ${isSubscribed ? 'btn-outline is-danger' : 'btn-primary is-info'} pd-sub-btn">
-            ${isSubscribed ? 'Unsubscribe' : 'Subscribe'}
-          </button>
+          <div class="pd-action-row">
+            <button id="pd-sub-btn" class="btn button ${isSubscribed ? 'btn-outline is-danger' : 'btn-primary is-info'} pd-sub-btn">
+              ${isSubscribed ? 'Unsubscribe' : 'Subscribe'}
+            </button>
+            <button id="pd-refresh-btn" class="btn button btn-outline pd-sub-btn">Refresh Episodes</button>
+          </div>
         </div>
       </div>
       <div class="podcast-description" id="pd-desc">
@@ -92,6 +95,22 @@ async function renderPodcastDetail(container, feedId) {
         alert('Failed to change subscription status');
       }
       btn.disabled = false;
+    });
+
+    document.getElementById('pd-refresh-btn').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = 'Refreshing...';
+      try {
+        await window.api.refreshPodcast(feedId);
+        await renderPodcastDetail(container, feedId);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to refresh episodes. If this feed blocks browser CORS, use your local/backend server connection.');
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
     });
 
     const epsContainer = document.getElementById('pd-episodes');

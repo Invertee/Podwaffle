@@ -1641,6 +1641,12 @@ input[type=range]::-moz-range-thumb {
   margin-top: 2px;
 }
 
+.pd-action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .cast-active-dot {
   width: 8px;
   height: 8px;

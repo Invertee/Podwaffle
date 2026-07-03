@@ -31,8 +31,10 @@ function createEpisodeRow(episode, progress, options = {}) {
   }
 
   let dateStr = 'Unknown date';
-  if (episode.pubDate) {
-    const pubDate = new Date(episode.pubDate);
+  const dateSource = episode.pubDate || episode.publishedAt || null;
+  if (dateSource) {
+    const pubDate = new Date(dateSource);
+    if (!Number.isNaN(pubDate.getTime())) {
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -47,6 +49,7 @@ function createEpisodeRow(episode, progress, options = {}) {
         day: 'numeric',
         year: pubDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
       });
+    }
     }
   }
 
