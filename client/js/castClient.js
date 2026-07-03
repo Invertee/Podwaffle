@@ -109,6 +109,15 @@ const castClient = {
     this._statePollTimer = setInterval(async () => {
       try {
         if (!window.api) return;
+
+        const shouldPoll = !!(
+          this._castState.activeDeviceId
+          || this._castState.status === 'playing'
+          || this._castState.status === 'paused'
+          || (window.player && window.player.mode === 'cast')
+        );
+        if (!shouldPoll) return;
+
         const castState = await window.api.getCastState();
         if (!castState) return;
 
@@ -130,7 +139,7 @@ const castClient = {
       } catch (err) {
         console.warn('[castClient] cast state poll failed:', err.message || err);
       }
-    }, 1000);
+    }, 5000);
   },
 
   _stopStatePolling() {
@@ -241,7 +250,9 @@ const castClient = {
   },
 
   _handleMessage(data) {
-    console.log('[castClient] Message received:', data.type, data);
+    if (data.type !== 'cast:state') {
+      console.log('[castClient] Message received:', data.type, data);
+    }
     switch (data.type) {
       case 'cast:state':
         if (data.data) {

@@ -36,6 +36,7 @@ const player = {
   _keyHandlerBound: null,
   _nativeMediaSession: null,
   _nativeMediaInitialized: false,
+  _nativeMediaSyncTimer: null,
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -489,21 +490,7 @@ const player = {
       this._notifyStateChange();
       this._setupProgressSync();
 
-      const castLoader = (window.googleCastSender && window.googleCastSender.isConnected())
-        ? window.googleCastSender.loadEpisode(episode, safeStartPosition)
-        : api.castPlay(
-          this._activeCastDeviceId,
-          episode.audioUrl,
-          safeStartPosition,
-          episode.guid,
-          localStorage.getItem('podwaffle_guid'),
-          episode.title,
-          episode.podcastTitle,
-          episode.podcastImageUrl || episode.imageUrl,
-          episode.duration || 0
-        );
-
-      Promise.resolve(castLoader).then(() => {
+        Promise.resolve(window.googleCastSender.loadEpisode(episode, safeStartPosition)).then(() => {
         this.isPlaying = true;
         this._notifyStateChange();
       }).catch((err) => {
@@ -550,11 +537,12 @@ const player = {
         console.warn('[player] play ignored in cast mode: no episode loaded yet');
         return;
       }
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] play ignored in cast mode: no active Google Cast session');
+        return;
+      }
       this.audio.pause();
-      const resumePromise = (window.googleCastSender && window.googleCastSender.isConnected())
-        ? window.googleCastSender.play()
-        : api.castResume();
-      Promise.resolve(resumePromise).catch(err => console.error('[player] castResume error:', err));
+      Promise.resolve(window.googleCastSender.play()).catch(err => console.error('[player] cast play error:', err));
       this.isPlaying = true;
       this._notifyStateChange();
       return;
@@ -572,10 +560,11 @@ const player = {
 
   pause() {
     if (this.mode === 'cast') {
-      const pausePromise = (window.googleCastSender && window.googleCastSender.isConnected())
-        ? window.googleCastSender.pause()
-        : api.castPause();
-      Promise.resolve(pausePromise).catch(err => console.error('[player] castPause error:', err));
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] pause ignored in cast mode: no active Google Cast session');
+        return;
+      }
+      Promise.resolve(window.googleCastSender.pause()).catch(err => console.error('[player] cast pause error:', err));
       this.isPlaying = false;
       this._notifyStateChange();
       return;
@@ -609,10 +598,11 @@ const player = {
     position = Math.max(0, Math.floor(position));
     console.log('[player] Seek to:', position);
     if (this.mode === 'cast') {
-      const seekPromise = (window.googleCastSender && window.googleCastSender.isConnected())
-        ? window.googleCastSender.seek(position)
-        : api.castSeek(position);
-      Promise.resolve(seekPromise).catch(err => console.error('[player] castSeek error:', err));
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] seek ignored in cast mode: no active Google Cast session');
+        return;
+      }
+      Promise.resolve(window.googleCastSender.seek(position)).catch(err => console.error('[player] cast seek error:', err));
       this.position = position;
       this._notifyStateChange();
       return;
@@ -626,11 +616,8 @@ const player = {
     this.volume = Math.max(0, Math.min(1, level));
     this.audio.volume = this.volume;
     localStorage.setItem('podwaffle_volume', String(this.volume));
-    if (this.mode === 'cast') {
-      const volumePromise = (window.googleCastSender && window.googleCastSender.isConnected())
-        ? window.googleCastSender.setVolume(this.volume)
-        : api.setCastVolume(this.volume);
-      Promise.resolve(volumePromise).catch(err => console.error('[player] setCastVolume error:', err));
+    if (this.mode === 'cast' && window.googleCastSender && window.googleCastSender.isConnected()) {
+      Promise.resolve(window.googleCastSender.setVolume(this.volume)).catch(err => console.error('[player] setCastVolume error:', err));
     }
     this._notifyStateChange();
   },
@@ -1097,28 +1084,56 @@ const player = {
     return plugin;
   },
 
+  _scheduleNativeMediaSessionSync(force = false) {
+    clearTimeout(this._nativeMediaSyncTimer);
+    const delay = force ? 0 : 250;
+    this._nativeMediaSyncTimer = setTimeout(() => {
+      this._syncNativeMediaSession().catch((err) => {
+        console.warn('[player] Native MediaSession sync failed:', err?.message || err);
+      });
+    }, delay);
+  },
+
   async _initNativeMediaSession() {
     const plugin = this._getNativeMediaSessionPlugin();
     if (!plugin) return;
     if (this._nativeMediaInitialized) return;
 
-    try {
-      await plugin.setActionHandler({ action: 'play' }, () => {
-        this.play();
-      });
-      await plugin.setActionHandler({ action: 'pause' }, () => {
-        this.pause();
-      });
-      await plugin.setActionHandler({ action: 'seekbackward' }, (details) => {
-        const offset = this.skipBackSecs;
-        this.seek(this.position - offset);
-      });
-      await plugin.setActionHandler({ action: 'seekforward' }, (details) => {
-        const offset = this.skipForwardSecs;
-        this.seek(this.position + offset);
-      });
-      this._nativeMediaInitialized = true;
+    const run = (fn) => {
+      try {
+        const result = fn();
+        if (result && typeof result.then === 'function') {
+          result.catch((err) => console.warn('[player] Native MediaSession action failed:', err?.message || err));
+        }
+      } catch (err) {
+        console.warn('[player] Native MediaSession action failed:', err?.message || err);
+      }
+    };
 
+    try {
+      await plugin.setActionHandler({ action: 'play' }, () => run(() => this.play()));
+      await plugin.setActionHandler({ action: 'pause' }, () => run(() => this.pause()));
+      await plugin.setActionHandler({ action: 'seekbackward' }, (details) => run(() => {
+        const offset = Number.isFinite(Number(details?.seekOffset)) ? Number(details.seekOffset) : this.skipBackSecs;
+        this.seek(this.position - offset);
+      }));
+      await plugin.setActionHandler({ action: 'seekforward' }, (details) => run(() => {
+        const offset = Number.isFinite(Number(details?.seekOffset)) ? Number(details.seekOffset) : this.skipForwardSecs;
+        this.seek(this.position + offset);
+      }));
+      await plugin.setActionHandler({ action: 'seekto' }, (details) => run(() => {
+        if (Number.isFinite(Number(details?.seekTime))) {
+          this.seek(Number(details.seekTime));
+        }
+      }));
+      await plugin.setActionHandler({ action: 'previoustrack' }, () => run(() => this.skipBack()));
+      await plugin.setActionHandler({ action: 'nexttrack' }, () => run(() => this.skipForward()));
+      await plugin.setActionHandler({ action: 'stop' }, () => run(() => {
+        this.pause();
+        this.seek(0);
+      }));
+
+      this._nativeMediaInitialized = true;
       console.log('[player] Native MediaSession bridge initialized.');
     } catch (err) {
       console.warn('[player] Failed to initialize native MediaSession bridge:', err);
@@ -1217,7 +1232,7 @@ const player = {
 
     console.log('[player] MediaSession updated for:', episode.title);
 
-    this._syncNativeMediaSession();
+    this._scheduleNativeMediaSessionSync(true);
   },
 
   _notifyStateChange() {
@@ -1262,7 +1277,7 @@ const player = {
       } catch (_) {}
     }
 
-    this._syncNativeMediaSession();
+    this._scheduleNativeMediaSessionSync();
   },
 
   onStateChange(handler) {
@@ -1282,19 +1297,15 @@ const player = {
     this._flushPlaybackSnapshot();
 
     const useBrowserSender = !!(window.googleCastSender && window.googleCastSender.isSupported());
-    let resolvedDeviceId = deviceId || null;
-    if (useBrowserSender) {
-      const sessionDevice = await window.googleCastSender.ensureSession();
-      resolvedDeviceId = sessionDevice?.id || resolvedDeviceId || 'google-cast';
+    if (!useBrowserSender) {
+      throw new Error('Google Cast is not available in this app runtime. Android WebView requires a native Cast bridge.');
     }
 
-    if (!useBrowserSender) {
-      this.audio.pause();
-      this.audio.removeAttribute('src');
-      this.audio.load();
-    } else {
-      this.audio.pause();
-    }
+    let resolvedDeviceId = deviceId || null;
+    const sessionDevice = await window.googleCastSender.ensureSession();
+    resolvedDeviceId = sessionDevice?.id || resolvedDeviceId || 'google-cast';
+
+    this.audio.pause();
 
     this.mode = 'cast';
     this._activeCastDeviceId = resolvedDeviceId;
@@ -1313,21 +1324,7 @@ const player = {
     }
 
     try {
-      if (useBrowserSender) {
-        await window.googleCastSender.loadEpisode(this.currentEpisode, pos);
-      } else {
-        await api.castPlay(
-          resolvedDeviceId,
-          this.currentEpisode.audioUrl,
-          pos,
-          this.currentEpisode.guid,
-          localStorage.getItem('podwaffle_guid'),
-          this.currentEpisode.title,
-          this.currentEpisode.podcastTitle,
-          this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
-          this.currentEpisode.duration || this.duration || 0
-        );
-      }
+      await window.googleCastSender.loadEpisode(this.currentEpisode, pos);
       this.isPlaying = true;
       this._notifyStateChange();
       console.log('[player] Cast started on device:', resolvedDeviceId);
@@ -1349,9 +1346,8 @@ const player = {
         await window.googleCastSender.stop();
       }
 
-      // Always force backend cast teardown and mirrored state cleanup as a safety net
+      // Always clear mirrored backend cast state as a safety net
       await Promise.allSettled([
-        api.castStop(),
         (window.api && typeof window.api.clearCastState === 'function')
           ? window.api.clearCastState(localStorage.getItem('podwaffle_guid'))
           : Promise.resolve(),

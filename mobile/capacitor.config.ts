@@ -10,14 +10,16 @@ const serverConfig: Record<string, string> = existsSync(serverConfigPath)
   ? JSON.parse(readFileSync(serverConfigPath, 'utf-8'))
   : {};
 
-const serverUrl: string = serverConfig.serverUrl || '';
+const defaultLiveUrl = 'https://invertee.github.io/PodWaffle';
+const serverUrl: string = serverConfig.serverUrl || defaultLiveUrl;
 const isHttp = serverUrl.startsWith('http://') && !serverUrl.startsWith('https://');
 
 let allowNavigation: string[] = [];
 if (serverUrl) {
   try {
     const u = new URL(serverUrl);
-    allowNavigation = [`${u.hostname}:${u.port || (isHttp ? '80' : '443')}`];
+    const hostWithPort = `${u.hostname}:${u.port || (isHttp ? '80' : '443')}`;
+    allowNavigation = u.port ? [u.hostname, hostWithPort] : [u.hostname];
   } catch (_) { /* invalid URL — leave empty */ }
 }
 

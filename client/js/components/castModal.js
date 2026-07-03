@@ -141,10 +141,15 @@ const castModal = {
     const currentName = device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
     
     if (!supported) {
+      const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+      const reason = isNative
+        ? 'Google Cast is not yet available inside this Android app runtime without a native Cast bridge plugin.'
+        : 'Google Cast is unavailable in this browser context.';
+
       listEl.innerHTML = `
         <div class="cast-error">
           <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-          <p>Google Cast is unavailable in this browser context.<br>Desktop Edge/Chrome works; the Android app will still need a native Cast bridge.</p>
+          <p>${reason}<br>Desktop Edge/Chrome casting remains available.</p>
         </div>
       `;
       return;

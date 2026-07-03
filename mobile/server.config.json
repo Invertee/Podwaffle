@@ -1,6 +1,6 @@
 {
   "_comment": "Edit serverUrl to point at your running PodWaffle server. Use https:// if you have a reverse proxy with SSL.",
-  "serverUrl": "https://podwaffle.pecker.party:8484",
+  "serverUrl": "https://invertee.github.io/Podwaffle/#/podcasts",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
 }
