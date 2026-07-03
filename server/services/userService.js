@@ -65,7 +65,7 @@ function ensureProfileShape(profile) {
     skipForward: 45,
     ...incomingSettings
   };
-  profile.subscriptions = Array.isArray(profile.subscriptions) ? profile.subscriptions : [];
+  profile.subscriptions = normalizeSubscriptions(profile.subscriptions);
   profile.seenEpisodes = profile.seenEpisodes && typeof profile.seenEpisodes === 'object' ? profile.seenEpisodes : {};
   profile.progress = profile.progress && typeof profile.progress === 'object' ? profile.progress : {};
   profile.queue = Array.isArray(profile.queue) ? normalizeQueue(profile.queue) : [];
@@ -98,6 +98,34 @@ function normalizeQueueItem(item) {
     feedId: item.feedId ? String(item.feedId) : '',
     duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
   };
+}
+
+function normalizeSubscriptionValue(entry) {
+  if (!entry) return '';
+  if (typeof entry === 'string') {
+    const value = entry.trim();
+    return value && value !== '[object Object]' ? value : '';
+  }
+  if (typeof entry === 'object') {
+    const feedUrl = typeof entry.feedUrl === 'string' ? entry.feedUrl.trim() : '';
+    if (feedUrl) return feedUrl;
+    const url = typeof entry.url === 'string' ? entry.url.trim() : '';
+    if (url) return url;
+  }
+  return '';
+}
+
+function normalizeSubscriptions(subscriptions) {
+  if (!Array.isArray(subscriptions)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of subscriptions) {
+    const value = normalizeSubscriptionValue(entry);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(value);
+  }
+  return normalized;
 }
 
 function normalizeQueue(items) {
@@ -224,8 +252,7 @@ async function ensureUser(guid) {
  */
 async function updateSettings(guid, settings) {
   console.log(`[userService] updateSettings(${guid})`, settings);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
   profile.settings = { ...profile.settings, ...settings };
   await saveUser(profile);
   console.log(`[userService] updateSettings(${guid}) → done`);
@@ -237,8 +264,7 @@ async function updateSettings(guid, settings) {
  */
 async function addSubscription(guid, feedUrl) {
   console.log(`[userService] addSubscription(${guid}, ${feedUrl})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
   if (!profile.subscriptions.includes(feedUrl)) {
     profile.subscriptions.push(feedUrl);
     await saveUser(profile);
@@ -255,8 +281,7 @@ async function addSubscription(guid, feedUrl) {
 async function removeSubscription(guid, feedIdOrUrl) {
   console.log(`[userService] removeSubscription(${guid}, ${feedIdOrUrl})`);
   const crypto = require('crypto');
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const before = profile.subscriptions.length;
   profile.subscriptions = profile.subscriptions.filter(url => {
@@ -277,8 +302,7 @@ async function removeSubscription(guid, feedIdOrUrl) {
 async function reorderSubscriptions(guid, orderedFeedIds) {
   console.log(`[userService] reorderSubscriptions(${guid}) → ${orderedFeedIds.length} entries`);
   const crypto = require('crypto');
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   // Build feedId → feedUrl map from current subscriptions
   const urlByFeedId = {};
@@ -321,8 +345,7 @@ async function getSubscriptions(guid) {
  */
 async function updateProgress(guid, episodeGuid, progressData) {
   console.log(`[userService] updateProgress(${guid}, ${episodeGuid})`, progressData);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const existing = profile.progress[episodeGuid];
 
@@ -386,8 +409,7 @@ async function getPlaybackSession(guid) {
  */
 async function updatePlaybackSession(guid, sessionData) {
   console.log(`[userService] updatePlaybackSession(${guid})`, sessionData);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const existing = profile.playbackSession;
   if (existing && sessionData.updatedAt && existing.updatedAt) {
@@ -435,8 +457,7 @@ async function updatePlaybackSession(guid, sessionData) {
  */
 async function clearPlaybackSession(guid, episodeGuid) {
   console.log(`[userService] clearPlaybackSession(${guid}, ${episodeGuid || '*'})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   if (!profile.playbackSession) {
     return null;
@@ -487,8 +508,7 @@ async function getQueue(guid) {
 
 async function updateQueue(guid, queueItems, metadata = {}) {
   console.log(`[userService] updateQueue(${guid}) → ${Array.isArray(queueItems) ? queueItems.length : 0} items`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const normalizedQueue = normalizeQueue(queueItems);
   const now = new Date().toISOString();
@@ -566,8 +586,7 @@ async function getHistory(guid, limit = 50, offset = 0) {
  */
 async function addHistoryEntry(guid, entry) {
   console.log(`[userService] addHistoryEntry(${guid})`, entry);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   profile.history = profile.history || [];
   profile.history.unshift({
@@ -592,8 +611,7 @@ async function addHistoryEntry(guid, entry) {
  */
 async function updateStats(guid, listenedDelta, skippedDelta) {
   console.log(`[userService] updateStats(${guid}, listened+${listenedDelta}, skipped+${skippedDelta})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
   if (typeof listenedDelta === 'number' && listenedDelta > 0) {
@@ -631,8 +649,7 @@ async function getAllUserGuids() {
  */
 async function markEpisodesSeen(guid, feedId, episodeGuids) {
   console.log(`[userService] markEpisodesSeen(${guid}, feedId=${feedId}, count=${episodeGuids.length})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   profile.seenEpisodes = profile.seenEpisodes || {};
   profile.seenEpisodes[feedId] = profile.seenEpisodes[feedId] || [];
@@ -674,8 +691,7 @@ async function getSyncSnapshot(guid) {
 
 async function mergeAndSaveSyncState(guid, incomingState) {
   console.log(`[userService] mergeAndSaveSyncState(${guid})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const syncResult = syncService.buildSyncResult(profile, incomingState || {});
   const merged = syncResult.mergedState;
@@ -728,8 +744,7 @@ async function mergeAndSaveSyncState(guid, incomingState) {
 
 async function getBootstrapSyncState(guid) {
   console.log(`[userService] getBootstrapSyncState(${guid})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
+  const profile = await ensureUser(guid);
 
   const snapshot = syncService.buildSnapshot(profile);
   const queueState = await getQueue(guid);

@@ -39,8 +39,13 @@ function normalizeSubscriptions(subscriptions) {
   if (!Array.isArray(subscriptions)) return [];
   const seen = new Set();
   const merged = [];
-  for (const url of subscriptions) {
-    const value = String(url || '').trim();
+  for (const entry of subscriptions) {
+    const value = typeof entry === 'string'
+      ? entry.trim()
+      : (entry && typeof entry === 'object'
+        ? String(entry.feedUrl || entry.url || '').trim()
+        : '');
+    if (value === '[object Object]') continue;
     if (!value) continue;
     if (seen.has(value)) continue;
     seen.add(value);

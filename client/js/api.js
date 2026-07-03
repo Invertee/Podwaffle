@@ -317,32 +317,46 @@ const api = {
   async _fetch(url, options = {}) {
     const cfg = this.getServerConnectionConfig();
     const isApiCall = url.startsWith('/api/');
+    const allowAutoEnsure = options.__allowAutoEnsure !== false;
+    const fetchOptions = { ...options };
+    delete fetchOptions.__allowAutoEnsure;
 
     // No backend configured — always use local
     if ((!cfg.enabled || !cfg.host) && isApiCall) {
-      return this._handleLocalRequest(url, options);
+      return this._handleLocalRequest(url, fetchOptions);
     }
 
     // Backend configured — try it, but fall back to local on any failure
     if (isApiCall) {
       try {
+        const userRouteMatch = url.match(/^\/api\/users\/([^/]+)(?:\/|$)/i);
+        const userGuid = userRouteMatch ? decodeURIComponent(userRouteMatch[1]) : null;
         const fullUrl = this._buildUrl(url);
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         const res = await fetch(fullUrl, {
           signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-          ...options,
+          headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
+          ...fetchOptions,
         }).finally(() => clearTimeout(timeout));
         if (!res.ok) {
           const errText = await res.text().catch(() => res.statusText);
+          if (
+            allowAutoEnsure
+            && res.status === 404
+            && userGuid
+            && /user not found/i.test(errText)
+          ) {
+            await this.ensureUserOnBackend(userGuid);
+            return this._fetch(url, { ...fetchOptions, __allowAutoEnsure: false });
+          }
           throw new Error(`API error ${res.status}: ${errText}`);
         }
         const text = await res.text();
         try { return text ? JSON.parse(text) : null; } catch (_) { return text; }
       } catch (err) {
         console.warn(`[API] Backend unavailable (${err.message}) — falling back to local mode for ${url}`);
-        return this._handleLocalRequest(url, options);
+        return this._handleLocalRequest(url, fetchOptions);
       }
     }
 
@@ -681,6 +695,23 @@ const api = {
     };
   },
 
+  _normalizeSubscriptionsForSync(subscriptions) {
+    if (!Array.isArray(subscriptions)) return [];
+    const seen = new Set();
+    const normalized = [];
+    for (const entry of subscriptions) {
+      const value = typeof entry === 'string'
+        ? entry.trim()
+        : (entry && typeof entry === 'object'
+          ? String(entry.feedUrl || entry.url || '').trim()
+          : '');
+      if (!value || value === '[object Object]' || seen.has(value)) continue;
+      seen.add(value);
+      normalized.push(value);
+    }
+    return normalized;
+  },
+
   async _handleLocalRequest(url, options = {}) {
     const method = String(options.method || 'GET').toUpperCase();
     const body = options.body ? JSON.parse(options.body) : null;
@@ -947,7 +978,7 @@ const api = {
           guid,
           updatedAt: new Date().toISOString(),
           settings: profile.settings,
-          subscriptions: profile.subscriptions,
+          subscriptions: this._normalizeSubscriptionsForSync(profile.subscriptions),
           progress: profile.progress,
           stats: profile.stats,
           queue: profile.queue,
