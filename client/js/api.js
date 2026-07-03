@@ -1,6 +1,6 @@
 /* ============================================================
    Podwaffle — api.js
-   API client module. All methods are async, throw on non-OK.
+   API client module. All methods are async, throw on non-OK
    ============================================================ */
 
 // ── Utility: format seconds → "37 mins" or "1h 8m"
