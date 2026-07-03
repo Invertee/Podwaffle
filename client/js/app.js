@@ -449,6 +449,12 @@ async function initApp() {
       console.log('[app] Created new local profile:', window.appState.guid);
     }
 
+    // Register this client's GUID with the backend (idempotent — creates profile if missing).
+    // Non-fatal: if the backend is unreachable the app continues in local mode.
+    if (window.api && window.appState.guid) {
+      window.api.ensureUserOnBackend(window.appState.guid).catch(() => {});
+    }
+
     window.appState.user = user;
     window.appState.subscriptions = user.subscriptions || [];
     window.appState.progress = user.progress || {};

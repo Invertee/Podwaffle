@@ -297,8 +297,17 @@ const api = {
       return await res.text();
     }
 
-    // 3. No third-party CORS proxy fallback
-    throw new Error('Feed fetch blocked by CORS. Connect to a Podwaffle backend or run the local client proxy to refresh this feed.');
+    // 3. Static hosting (GitHub Pages, etc.) — corsproxy.io is free for github.io origins
+    try {
+      const corsProxy = `https://corsproxy.io/?url=${encodeURIComponent(feedUrl)}`;
+      const res = await fetch(corsProxy, {
+        headers: { Accept: 'application/xml, text/xml, application/rss+xml' },
+      });
+      if (res.ok) return await res.text();
+      throw new Error(`CORS proxy responded with HTTP ${res.status}`);
+    } catch (proxyErr) {
+      throw new Error(`Feed fetch blocked by CORS and proxy failed (${proxyErr.message}). Connect to a Podwaffle backend or run the local client proxy to refresh this feed.`);
+    }
   },
 
   _getGuid() {
@@ -1018,6 +1027,33 @@ const api = {
 
   async getUser(guid) {
     return this._fetch(`/api/users/${guid}`);
+  },
+
+  /**
+   * Ensure the backend has a profile for this client's GUID.
+   * Called at startup when a backend is configured so the locally-generated
+   * GUID gets a server-side profile created on first connection.
+   * Idempotent — safe to call any time.
+   */
+  async ensureUserOnBackend(guid) {
+    const cfg = this.getServerConnectionConfig();
+    if (!cfg.enabled || !cfg.host) return; // no backend configured — nothing to do
+    try {
+      const url = this._buildUrl(`/api/users/${guid}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, {
+        method: 'PUT',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+      }).finally(() => clearTimeout(timeout));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => null);
+      console.log(`[API] ensureUserOnBackend(${guid}) → ok`, data?.guid);
+    } catch (err) {
+      // Non-fatal — app continues in local mode
+      console.warn(`[API] ensureUserOnBackend(${guid}) failed (non-fatal):`, err.message);
+    }
   },
 
   async updateSettings(guid, settings) {
