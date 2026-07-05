@@ -28,7 +28,7 @@ const nav = {
       html += `
         <div class="sidebar-logo">
           <img src="icons/icon-t.png" alt="Podwaffle Logo" class="sidebar-logo-img" width="52" height="52">
-          <span style="font-family: 'Playwrite HR', cursive;font-weight: 700; font-size: 1.2rem; color: var(--text-primary);">Podwaffle</span>
+          <span style="font-family: Playwrite HR;font-size: 1.3rem;" playwrite="" hr",="" cursive;="" font-weight:="" 700;="" font-size:="" 1.2rem;="" color:="" var(--text-primary);"="">Podwaffle</span>
         </div>
         <ul class="sidebar-nav">
       `;
