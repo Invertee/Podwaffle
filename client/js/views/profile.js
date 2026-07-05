@@ -128,6 +128,14 @@ async function renderProfile(container) {
         <h2 class="profile-section-title has-text-light">Server Connection</h2>
         <form id="form-server-connection" class="profile-card">
           <div class="field">
+            <label class="checkbox has-text-light">
+              <input id="setting-server-enabled" type="checkbox">
+              Enable backend sync
+            </label>
+          </div>
+          <div id="server-connection-fields" style="display: none; margin-top: 16px;">
+        
+          <div class="field">
             <label class="label has-text-light">Server URL or IP</label>
             <input id="setting-server-host" class="input" value="${window.api.getServerConnectionConfig().host || ''}" placeholder="e.g. 192.168.1.50 or podwaffle.local">
           </div>
@@ -148,6 +156,7 @@ async function renderProfile(container) {
           </div>
           <div id="server-connection-msg" class="success-banner" style="display: none; margin: 12px 0 0;"></div>
           <div id="server-connection-err" class="error-banner" style="display: none; margin: 12px 0 0;"></div>
+          </div>
         </form>
       </div>
 
@@ -225,39 +234,6 @@ async function renderProfile(container) {
         </form>
       </div>
 
-      <div class="profile-section">
-        <h2 class="profile-section-title has-text-light">Backend Server</h2>
-        <form id="form-server-settings" class="profile-card">
-          <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 13px;">
-            PodWaffle works offline by default. Optionally configure a backend server to enable cross-device sync.
-          </p>
-          <div class="field">
-            <label class="label has-text-light">
-              <input type="checkbox" id="setting-server-enabled" style="margin-right: 8px;">
-              Enable backend sync
-            </label>
-          </div>
-          <div id="server-config-fields" style="display: none; margin-top: 16px;">
-            <div class="field">
-              <label class="label has-text-light">Server host or URL</label>
-              <input id="setting-server-host" class="input" type="text" placeholder="localhost or https://example.com">
-            </div>
-            <div class="field">
-              <label class="label has-text-light">Port (optional)</label>
-              <input id="setting-server-port" class="input" type="text" placeholder="3000">
-            </div>
-            <div class="field">
-              <label class="label has-text-light">
-                <input type="checkbox" id="setting-server-secure" style="margin-right: 8px;">
-                Use HTTPS/WSS
-              </label>
-            </div>
-          </div>
-          <button type="submit" class="button is-success btn btn-primary" style="margin-top: 8px;">Save Server Settings</button>
-          <div id="server-save-msg" class="success-banner" style="opacity: 0; margin: 8px 0 0;">Saved</div>
-        </form>
-      </div>
-
     `;
 
     document.getElementById('btn-copy-guid').addEventListener('click', async (e) => {
@@ -325,6 +301,18 @@ async function renderProfile(container) {
 
     document.getElementById('form-server-connection').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!serverEnabledCheckbox.checked) {
+        window.api.clearServerConnectionConfig();
+        document.getElementById('sync-data-section').style.display = 'none';
+        if (window.castClient) {
+          window.castClient.disconnect();
+          window.castClient.connect();
+        }
+        showConnectionMessage('Backend sync is disabled. Enable it to connect to a server.');
+        updateHealthCards({ ok: true, checkedAt: new Date().toISOString() }, { lastCheckAt: new Date().toISOString() });
+        return;
+      }
+
       const host = document.getElementById('setting-server-host').value.trim();
       const port = document.getElementById('setting-server-port').value.trim();
       const secure = document.getElementById('setting-server-secure').checked;
@@ -515,7 +503,7 @@ async function renderProfile(container) {
 
     // Save Server settings
     const serverEnabledCheckbox = document.getElementById('setting-server-enabled');
-    const serverConfigFields = document.getElementById('server-config-fields');
+    const serverConfigFields = document.getElementById('server-connection-fields');
     const serverHostInput = document.getElementById('setting-server-host');
     const serverPortInput = document.getElementById('setting-server-port');
     const serverSecureCheckbox = document.getElementById('setting-server-secure');
@@ -530,29 +518,13 @@ async function renderProfile(container) {
       serverSecureCheckbox.checked = currentServerConfig.secure || false;
     }
 
+    if (!currentServerConfig || !currentServerConfig.enabled) {
+      serverConfigFields.style.display = 'none';
+    }
+
     // Toggle fields when checkbox changes
     serverEnabledCheckbox.addEventListener('change', (e) => {
       serverConfigFields.style.display = e.target.checked ? 'block' : 'none';
-    });
-
-    // Save server config
-    document.getElementById('form-server-settings').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      try {
-        const newConfig = {
-          enabled: serverEnabledCheckbox.checked,
-          host: serverHostInput.value.trim(),
-          port: serverPortInput.value.trim(),
-          secure: serverSecureCheckbox.checked,
-        };
-        
-        window.api.saveServerConnectionConfig(newConfig);
-        const msg = document.getElementById('server-save-msg');
-        msg.style.opacity = 1;
-        setTimeout(() => msg.style.opacity = 0, 2000);
-      } catch (err) {
-        alert('Failed to save server settings: ' + err.message);
-      }
     });
 
   } catch (err) {
