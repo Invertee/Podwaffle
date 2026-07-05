@@ -134,10 +134,10 @@ function createEpisodeRow(episode, progress, options = {}) {
       <div class="episode-progress-slot"></div>
     </div>
     <div class="episode-actions">
-      ${getDownloadButtonHtml(currentCacheStatus)}
       <button class="btn-icon btn-action play-btn" title="Play">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
       </button>
+      ${getDownloadButtonHtml(currentCacheStatus)}
       <button class="btn-icon btn-action play-next-btn" title="Play Next">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
       </button>
