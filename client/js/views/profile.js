@@ -188,9 +188,7 @@ async function renderProfile(container) {
             <div class="stat-label">Target Server</div>
           </div>
         </div>
-      </div>
-
-      <div class="profile-section" id="sync-data-section" style="display: ${window.api.getServerConnectionConfig().enabled ? 'block' : 'none'};">
+        
         <h2 class="profile-section-title has-text-light">Sync & Data</h2>
         <div class="profile-card">
           <div class="field">
@@ -216,7 +214,11 @@ async function renderProfile(container) {
             </div>
           </div>
         </div>
+
+        
       </div>
+
+
 
       <div class="profile-section">
         <h2 class="profile-section-title has-text-light">Playback Settings</h2>
