@@ -157,6 +157,33 @@ async function renderProfile(container) {
           <div id="server-connection-msg" class="success-banner" style="display: none; margin: 12px 0 0;"></div>
           <div id="server-connection-err" class="error-banner" style="display: none; margin: 12px 0 0;"></div>
           </div>
+          <div class="profile-section" id="sync-data-section" style="display: ${window.api.getServerConnectionConfig().enabled ? 'block' : 'none'};">
+            <h2 class="profile-section-title has-text-light">Sync & Data</h2>
+            <div class="profile-card">
+              <div class="field">
+                <p class="text-secondary mb-4">Sync your subscriptions, listening progress, and stats with the connected server.</p>
+                <div class="profile-guid-row" style="gap: 8px; flex-wrap: wrap;">
+                  <button id="btn-sync-now" class="button is-success btn btn-primary">Sync Now</button>
+                  <button type="button" id="btn-clear-local-data" class="button btn btn-outline">Clear Local Data</button>
+                </div>
+                <div id="sync-progress" style="display: none; margin-top: 12px;">
+                  <div class="spinner spin" style="display: inline-block; margin-right: 8px;"></div>
+                  <span id="sync-progress-text">Syncing...</span>
+                </div>
+                <div id="sync-result-msg" class="success-banner" style="display: none; margin: 12px 0 0;"></div>
+                <div id="sync-result-err" class="error-banner" style="display: none; margin: 12px 0 0;"></div>
+              </div>
+              <div id="sync-details" style="display: none; margin-top: 16px;">
+                <h3 class="text-secondary" style="font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 8px;">Sync Summary</h3>
+                <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
+                  <div>✓ Subscriptions: <span id="sync-subs-added">0</span> added</div>
+                  <div>✓ Progress: <span id="sync-progress-merged">0</span> entries merged</div>
+                  <div>✓ Stats: merged</div>
+                  <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Completed in <span id="sync-duration-ms">0</span>ms</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
 
@@ -187,38 +214,8 @@ async function renderProfile(container) {
             <div class="stat-value" id="conn-target">${window.api.getServerConnectionConfig().enabled && window.api.getServerConnectionConfig().host ? `${window.api.getServerConnectionConfig().host}${window.api.getServerConnectionConfig().port ? ':' + window.api.getServerConnectionConfig().port : ''}` : '—'}</div>
             <div class="stat-label">Target Server</div>
           </div>
-        </div>
-        
-        <h2 class="profile-section-title has-text-light">Sync & Data</h2>
-        <div class="profile-card">
-          <div class="field">
-            <p class="text-secondary mb-4">Sync your subscriptions, listening progress, and stats with the connected server.</p>
-            <div class="profile-guid-row" style="gap: 8px; flex-wrap: wrap;">
-              <button id="btn-sync-now" class="button is-success btn btn-primary">Sync Now</button>
-              <button type="button" id="btn-clear-local-data" class="button btn btn-outline">Clear Local Data</button>
-            </div>
-            <div id="sync-progress" style="display: none; margin-top: 12px;">
-              <div class="spinner spin" style="display: inline-block; margin-right: 8px;"></div>
-              <span id="sync-progress-text">Syncing...</span>
-            </div>
-            <div id="sync-result-msg" class="success-banner" style="display: none; margin: 12px 0 0;"></div>
-            <div id="sync-result-err" class="error-banner" style="display: none; margin: 12px 0 0;"></div>
-          </div>
-          <div id="sync-details" style="display: none; margin-top: 16px;">
-            <h3 class="text-secondary" style="font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 8px;">Sync Summary</h3>
-            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
-              <div>✓ Subscriptions: <span id="sync-subs-added">0</span> added</div>
-              <div>✓ Progress: <span id="sync-progress-merged">0</span> entries merged</div>
-              <div>✓ Stats: merged</div>
-              <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Completed in <span id="sync-duration-ms">0</span>ms</div>
-            </div>
-          </div>
-        </div>
-
-        
+        </div>        
       </div>
-
-
 
       <div class="profile-section">
         <h2 class="profile-section-title has-text-light">Playback Settings</h2>
@@ -235,7 +232,6 @@ async function renderProfile(container) {
           <div id="playback-save-msg" class="success-banner" style="opacity: 0; margin: 8px 0 0;">Saved</div>
         </form>
       </div>
-
     `;
 
     document.getElementById('btn-copy-guid').addEventListener('click', async (e) => {
