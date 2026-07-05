@@ -27,7 +27,7 @@ const nav = {
     if (isSidebar) {
       html += `
         <div class="sidebar-logo">
-          <svg viewBox="0 0 24 24" width="32" height="32" stroke="var(--accent-red)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 12px;"><path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10 10 10 0 0 1-10-10A10 10 0 0 1 12 2z"></path><path d="M12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6 6 6 0 0 1-6-6 6 6 0 0 1 6-6z"></path><path d="M12 10a2 2 0 0 1 2 2 2 2 0 0 1-2 2 2 2 0 0 1-2-2 2 2 0 0 1 2-2z"></path></svg>
+          <img src="icons/icon-t.png" alt="Podwaffle Logo" class="sidebar-logo-img">
           <span style="font-weight: 700; font-size: 1.2rem; color: var(--text-primary);">Podwaffle</span>
         </div>
         <ul class="sidebar-nav">
