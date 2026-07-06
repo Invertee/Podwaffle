@@ -15,23 +15,38 @@ const castModal = {
     const infoEl = document.getElementById('cast-modal-info');
     if (!infoEl) return;
 
-    if (!window.player) {
+    if (!window.player && !window.googleCastSender) {
       infoEl.style.display = 'none';
       return;
     }
 
-    const queueLen = Array.isArray(window.player.queue) ? window.player.queue.length : 0;
-    const ownerMode = window.player._queueStateMode === 'cast' ? 'Cast owns state' : 'Local owns state';
-    const source = window.player._queueStateSource === 'server' ? 'Server sync' : 'Local mirror';
-    const updatedAt = this._formatLastUpdated(window.player._queueStateUpdatedAt);
-    const currentEpisodeGuid = window.player.currentEpisode?.guid || '(none)';
+    // Get real-time cast state from sender (which has ownership info from WebSocket)
+    const sender = window.googleCastSender;
+    const castSession = sender?._currentSession;
+    const userGuid = sender?._userGuid || localStorage.getItem('podwaffle_guid') || 'unknown';
+    
+    // Determine ownership
+    let ownerStatus = 'No cast session';
+    let isOwner = false;
+    let deviceInfo = '(none)';
+    let episodeInfo = '(none)';
+    
+    if (castSession && castSession.activeDeviceId && castSession.ownerGuid) {
+      isOwner = castSession.ownerGuid === userGuid;
+      ownerStatus = isOwner ? '✓ You own cast' : '✗ Someone else owns cast';
+      deviceInfo = castSession.deviceName || castSession.activeDeviceId;
+      episodeInfo = castSession.title || '(none)';
+    }
+    
+    const queueLen = Array.isArray(window.player?.queue) ? window.player.queue.length : 0;
+    const currentEpisodeGuid = window.player?.currentEpisode?.guid || '(none)';
 
     infoEl.innerHTML = `
       <div class="cast-state-grid">
-        <div class="cast-state-row"><span class="cast-state-key">Owner</span><span class="cast-state-val">${ownerMode}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Cast State</span><span class="cast-state-val">${ownerStatus}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Device</span><span class="cast-state-val">${deviceInfo}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">Playing</span><span class="cast-state-val">${episodeInfo}</span></div>
         <div class="cast-state-row"><span class="cast-state-key">Queue</span><span class="cast-state-val">${queueLen} items</span></div>
-        <div class="cast-state-row"><span class="cast-state-key">Current</span><span class="cast-state-val">${currentEpisodeGuid}</span></div>
-        <div class="cast-state-row"><span class="cast-state-key">Updated</span><span class="cast-state-val">${updatedAt} (${source})</span></div>
       </div>
     `;
     infoEl.style.display = 'block';
@@ -47,6 +62,7 @@ const castModal = {
 
     if (window.castClient) {
       this._castStateHandler = () => this._renderHeaderState();
+      window.castClient.on('cast:status', this._castStateHandler);
       window.castClient.on('cast:state', this._castStateHandler);
       window.castClient.on('user:queue', this._castStateHandler);
     }
@@ -57,6 +73,7 @@ const castModal = {
       window.player.offStateChange(this._stateHandler);
     }
     if (window.castClient && this._castStateHandler) {
+      window.castClient.off('cast:status', this._castStateHandler);
       window.castClient.off('cast:state', this._castStateHandler);
       window.castClient.off('user:queue', this._castStateHandler);
     }

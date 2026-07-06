@@ -18,6 +18,8 @@ const castClient = {
     position: 0,
     duration: 0,
     activeDeviceId: null,
+    deviceName: null,
+    ownerGuid: null,
     episodeGuid: null,
     title: null,
     podcastTitle: null,
@@ -105,41 +107,10 @@ const castClient = {
   },
 
   _startStatePolling() {
+    // Poll disabled: relying on WebSocket cast:status broadcasts from server
+    // Server sends cast:status every 1s when device is active, which is more reliable
+    // than HTTP polling and includes critical ownership metadata (ownerGuid)
     this._stopStatePolling();
-    this._statePollTimer = setInterval(async () => {
-      try {
-        if (!window.api) return;
-
-        const shouldPoll = !!(
-          this._castState.activeDeviceId
-          || this._castState.status === 'playing'
-          || this._castState.status === 'paused'
-          || (window.player && window.player.mode === 'cast')
-        );
-        if (!shouldPoll) return;
-
-        const castState = await window.api.getCastState();
-        if (!castState) return;
-
-        this._handleMessage({
-          type: 'cast:state',
-          data: {
-            deviceId: castState.activeDeviceId || null,
-            mediaUrl: castState.mediaUrl || null,
-            episodeGuid: castState.episodeGuid || null,
-            title: castState.title || null,
-            podcastTitle: castState.podcastTitle || null,
-            imageUrl: castState.imageUrl || null,
-            position: castState.position,
-            duration: castState.duration,
-            status: castState.status || 'idle',
-            volume: castState.volume,
-          }
-        });
-      } catch (err) {
-        console.warn('[castClient] cast state poll failed:', err.message || err);
-      }
-    }, 5000);
   },
 
   _stopStatePolling() {
@@ -310,6 +281,8 @@ const castClient = {
             position: data.data.position != null ? data.data.position : this._castState.position,
             duration: data.data.duration != null ? data.data.duration : this._castState.duration,
             activeDeviceId: data.data.activeDeviceId !== undefined ? data.data.activeDeviceId : this._castState.activeDeviceId,
+            deviceName: data.data.deviceName != null ? data.data.deviceName : this._castState.deviceName,
+            ownerGuid: data.data.ownerGuid != null ? data.data.ownerGuid : this._castState.ownerGuid,
             episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
             title: data.data.title != null ? data.data.title : this._castState.title,
             podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
