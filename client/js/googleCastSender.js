@@ -77,6 +77,12 @@ const googleCastSender = {
       this._dispatch('device_lost', data);
     });
 
+    window.castClient.on('cast:devices', (devices) => {
+      const list = Array.isArray(devices) ? devices : [];
+      this._availableDevices = list;
+      this._dispatch('devices', list);
+    });
+
     window.castClient.on('cast:status', (status) => {
       console.log('[googleCastSender] Status update:', status);
       // Preserve ownerGuid from previous session if new message doesn't have it
@@ -107,6 +113,10 @@ const googleCastSender = {
         });
       }
     });
+
+    if (typeof window.castClient.send === 'function') {
+      window.castClient.send('cast:get_devices');
+    }
 
     console.log('[googleCastSender] WS listeners registered');
   },
