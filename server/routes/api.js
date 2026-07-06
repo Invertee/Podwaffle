@@ -866,12 +866,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         userGuid,
         mediaUrl,
         startPosition || 0,
-        (statusUpdate) => {
-          broadcastWs({
-            type: 'cast:status',
-            data: statusUpdate
-          });
-        },
+        null,
         { episodeGuid, title, podcastTitle, imageUrl, duration }
       );
       res.json({ ok: true, message: 'Cast started' });
@@ -884,10 +879,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   router.post('/cast/pause', async (req, res) => {
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/pause user=${userGuid}`);
-
-    if (!castService.canControl(userGuid)) {
-      return sendError(res, 403, 'Not authorized to control this cast session');
-    }
 
     try {
       const result = await castService.pause();
@@ -902,10 +893,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/resume user=${userGuid}`);
 
-    if (!castService.canControl(userGuid)) {
-      return sendError(res, 403, 'Not authorized to control this cast session');
-    }
-
     try {
       const result = await castService.resume();
       res.json(result);
@@ -918,10 +905,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   router.post('/cast/seek', async (req, res) => {
     const { userGuid, position } = req.body || {};
     console.log(`[api] POST /cast/seek user=${userGuid} position=${position}`);
-
-    if (!castService.canControl(userGuid)) {
-      return sendError(res, 403, 'Not authorized to control this cast session');
-    }
 
     if (!Number.isFinite(position)) {
       return sendError(res, 400, 'Missing or invalid position');
@@ -940,10 +923,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { userGuid, level } = req.body || {};
     console.log(`[api] POST /cast/setVolume user=${userGuid} level=${level}`);
 
-    if (!castService.canControl(userGuid)) {
-      return sendError(res, 403, 'Not authorized to control this cast session');
-    }
-
     if (!Number.isFinite(level) || level < 0 || level > 1) {
       return sendError(res, 400, 'Invalid volume level (must be 0-1)');
     }
@@ -960,10 +939,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   router.post('/cast/stop', async (req, res) => {
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/stop user=${userGuid}`);
-
-    if (!castService.canControl(userGuid)) {
-      return sendError(res, 403, 'Not authorized to control this cast session');
-    }
 
     try {
       const result = await castService.stop();

@@ -133,6 +133,34 @@ wss.on('connection', (ws, req) => {
   // Send welcome ping
   ws.send(JSON.stringify({ type: 'ping', data: { message: 'Welcome to Podwaffle' } }));
 
+  // Send initial cast device snapshot so newly-connected clients can render immediately
+  try {
+    const devices = castService.getDevices();
+    ws.send(JSON.stringify({ type: 'cast:devices', data: devices }));
+
+    const session = castService.getSession();
+    if (session && (session.deviceId || session.activeDeviceId)) {
+      ws.send(JSON.stringify({
+        type: 'cast:status',
+        data: {
+          activeDeviceId: session.activeDeviceId || session.deviceId || null,
+          deviceName: session.deviceName || null,
+          ownerGuid: session.ownerGuid || null,
+          episodeGuid: session.episodeGuid || null,
+          title: session.title || null,
+          podcastTitle: session.podcastTitle || null,
+          imageUrl: session.imageUrl || null,
+          position: session.position || 0,
+          duration: session.duration || 0,
+          volume: session.volume != null ? session.volume : 1,
+          status: session.status || 'idle'
+        }
+      }));
+    }
+  } catch (err) {
+    console.error('[ws] Failed to send initial cast snapshot:', err.message);
+  }
+
   // Ping/pong keepalive
   ws.isAlive = true;
   ws.on('pong', () => {
@@ -148,42 +176,34 @@ wss.on('connection', (ws, req) => {
 
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
-      } else if (msg.type === 'cast:play' && msg.userGuid) {
-        if (castService.canControl(msg.userGuid)) {
-          castService.resume().catch(err => {
-            console.error('[ws] cast:play failed:', err.message);
-            broadcastWs({ type: 'cast:error', data: { error: err.message } });
-          });
-        } else {
-          console.warn('[ws] cast:play denied: user does not own session');
-        }
-      } else if (msg.type === 'cast:pause' && msg.userGuid) {
-        if (castService.canControl(msg.userGuid)) {
-          castService.pause().catch(err => {
-            console.error('[ws] cast:pause failed:', err.message);
-            broadcastWs({ type: 'cast:error', data: { error: err.message } });
-          });
-        } else {
-          console.warn('[ws] cast:pause denied: user does not own session');
-        }
-      } else if (msg.type === 'cast:seek' && msg.userGuid) {
-        if (castService.canControl(msg.userGuid)) {
-          castService.seek(msg.position || 0).catch(err => {
-            console.error('[ws] cast:seek failed:', err.message);
-            broadcastWs({ type: 'cast:error', data: { error: err.message } });
-          });
-        } else {
-          console.warn('[ws] cast:seek denied: user does not own session');
-        }
-      } else if (msg.type === 'cast:setVolume' && msg.userGuid) {
-        if (castService.canControl(msg.userGuid)) {
-          castService.setVolume(msg.level || 0).catch(err => {
-            console.error('[ws] cast:setVolume failed:', err.message);
-            broadcastWs({ type: 'cast:error', data: { error: err.message } });
-          });
-        } else {
-          console.warn('[ws] cast:setVolume denied: user does not own session');
-        }
+      } else if (msg.type === 'cast:get_devices') {
+        const devices = castService.getDevices();
+        ws.send(JSON.stringify({ type: 'cast:devices', data: devices }));
+      } else if (msg.type === 'cast:play') {
+        castService.resume().catch(err => {
+          console.error('[ws] cast:play failed:', err.message);
+          broadcastWs({ type: 'cast:error', data: { error: err.message } });
+        });
+      } else if (msg.type === 'cast:pause') {
+        castService.pause().catch(err => {
+          console.error('[ws] cast:pause failed:', err.message);
+          broadcastWs({ type: 'cast:error', data: { error: err.message } });
+        });
+      } else if (msg.type === 'cast:seek') {
+        castService.seek(msg.position || 0).catch(err => {
+          console.error('[ws] cast:seek failed:', err.message);
+          broadcastWs({ type: 'cast:error', data: { error: err.message } });
+        });
+      } else if (msg.type === 'cast:setVolume') {
+        castService.setVolume(msg.level || 0).catch(err => {
+          console.error('[ws] cast:setVolume failed:', err.message);
+          broadcastWs({ type: 'cast:error', data: { error: err.message } });
+        });
+      } else if (msg.type === 'cast:stop') {
+        castService.stop().catch(err => {
+          console.error('[ws] cast:stop failed:', err.message);
+          broadcastWs({ type: 'cast:error', data: { error: err.message } });
+        });
       }
     } catch (err) {
       console.error(`[ws] Failed to parse message from ${clientIp}:`, err.message);
