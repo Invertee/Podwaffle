@@ -1,4 +1,4 @@
-const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v1';
+const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v2';
 const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 

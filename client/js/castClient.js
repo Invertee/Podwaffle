@@ -295,6 +295,32 @@ const castClient = {
         this._dispatch('cast:state', data.data);
         break;
 
+      case 'cast:device_found':
+        this._dispatch('cast:device_found', data.data);
+        break;
+
+      case 'cast:device_lost':
+        this._dispatch('cast:device_lost', data.data);
+        break;
+
+      case 'cast:status':
+        if (data.data) {
+          this._castState = {
+            status: data.data.status || this._castState.status,
+            position: data.data.position != null ? data.data.position : this._castState.position,
+            duration: data.data.duration != null ? data.data.duration : this._castState.duration,
+            activeDeviceId: data.data.activeDeviceId !== undefined ? data.data.activeDeviceId : this._castState.activeDeviceId,
+            episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
+            title: data.data.title != null ? data.data.title : this._castState.title,
+            podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
+            imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
+            mediaUrl: data.data.mediaUrl != null ? data.data.mediaUrl : this._castState.mediaUrl,
+            volume: data.data.volume != null ? data.data.volume : this._castState.volume,
+          };
+        }
+        this._dispatch('cast:status', data.data);
+        break;
+
       case 'feeds:updated':
         this._dispatch('feeds:updated', data.data);
         break;

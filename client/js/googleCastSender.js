@@ -164,8 +164,64 @@ const googleCastSender = {
     return null;
   },
 
+  async _refreshDevicesFromServer() {
+    this._resolveApiBaseUrl();
+    if (!this._apiBaseUrl) return [];
+
+    try {
+      let devices = [];
+      if (window.api && typeof window.api.getCastDevices === 'function') {
+        devices = await window.api.getCastDevices();
+      } else {
+        const response = await fetch(`${this._apiBaseUrl}/api/cast/devices`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        devices = await response.json();
+      }
+
+      const normalized = Array.isArray(devices) ? devices : [];
+      this._availableDevices = normalized;
+      console.log('[googleCastSender] Refreshed cast devices from API:', normalized.length);
+      return normalized;
+    } catch (err) {
+      console.warn('[googleCastSender] Failed to refresh cast devices from API:', err);
+      return this._availableDevices;
+    }
+  },
+
+  async syncFromServerState() {
+    this._resolveApiBaseUrl();
+    if (!this._apiBaseUrl) {
+      return null;
+    }
+
+    try {
+      const status = (window.api && typeof window.api.getCastState === 'function')
+        ? await window.api.getCastState()
+        : await fetch(`${this._apiBaseUrl}/api/cast/state`).then((res) => (res.ok ? res.json() : null));
+
+      if (status && status.activeDeviceId) {
+        this._currentSession = {
+          ...status,
+          ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
+        };
+      } else {
+        this._currentSession = null;
+      }
+
+      return this._currentSession;
+    } catch (err) {
+      console.warn('[googleCastSender] Failed to sync cast state from API:', err);
+      return null;
+    }
+  },
+
   async requestSession() {
     // In server mode, show a device picker modal or just use the first available device
+    if (this._availableDevices.length === 0) {
+      await this._refreshDevicesFromServer();
+    }
     console.log('[googleCastSender] requestSession() - available devices:', this._availableDevices.length);
     console.log('[googleCastSender] Device list:', this._availableDevices);
     
@@ -181,8 +237,12 @@ const googleCastSender = {
   },
 
   async ensureSession() {
+    await this.syncFromServerState();
     if (this.isConnected()) {
       return this.getCurrentDevice();
+    }
+    if (this._availableDevices.length === 0) {
+      await this._refreshDevicesFromServer();
     }
     return this.requestSession();
   },
