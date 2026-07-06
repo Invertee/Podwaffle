@@ -18,7 +18,7 @@ const googleCastSender = {
     console.log('[googleCastSender] init()');
     this._userGuid = localStorage.getItem('podwaffle_guid') || null;
     console.log('[googleCastSender] User GUID:', this._userGuid || '(none)');
-    this._detectApiBaseUrl();
+    this._resolveApiBaseUrl();
     console.log('[googleCastSender] API base URL:', this._apiBaseUrl || '(empty)');
     this._setupWsListener();
     this._initialized = true;
@@ -26,13 +26,24 @@ const googleCastSender = {
     console.log('[googleCastSender] initialization complete. Available:', this._available);
   },
 
-  _detectApiBaseUrl() {
-    try {
-      const url = new URL(window.location.href);
-      this._apiBaseUrl = `${url.protocol}//${url.host}`;
-    } catch (_) {
-      this._apiBaseUrl = '';
+  _resolveApiBaseUrl() {
+    if (window.api && typeof window.api._getRemoteBaseOrigin === 'function') {
+      const remoteOrigin = window.api._getRemoteBaseOrigin();
+      this._apiBaseUrl = remoteOrigin || '';
+      return;
     }
+
+    if (window.api && typeof window.api.getServerConnectionConfig === 'function') {
+      const cfg = window.api.getServerConnectionConfig();
+      if (cfg && cfg.enabled && cfg.host) {
+        const protocol = cfg.secure ? 'https' : 'http';
+        const hostPort = cfg.port ? `${cfg.host}:${cfg.port}` : cfg.host;
+        this._apiBaseUrl = `${protocol}://${hostPort}`;
+        return;
+      }
+    }
+
+    this._apiBaseUrl = '';
   },
 
   _setupWsListener() {
@@ -110,6 +121,8 @@ const googleCastSender = {
   },
 
   isSupported() {
+    this._resolveApiBaseUrl();
+    this._available = !!this._apiBaseUrl;
     const supported = this._initialized && this._available && !!this._apiBaseUrl;
     if (!supported) {
       console.warn('[googleCastSender] isSupported() = false. initialized:', this._initialized, 'available:', this._available, 'apiBaseUrl:', this._apiBaseUrl);
@@ -175,6 +188,7 @@ const googleCastSender = {
   },
 
   async loadEpisode(episode, startPosition = 0) {
+    this._resolveApiBaseUrl();
     if (!episode || !episode.audioUrl) {
       throw new Error('Cannot cast episode without audioUrl');
     }
@@ -222,6 +236,7 @@ const googleCastSender = {
   },
 
   async play() {
+    this._resolveApiBaseUrl();
     if (!this.isConnected()) {
       throw new Error('Not connected to a cast session');
     }
@@ -241,6 +256,7 @@ const googleCastSender = {
   },
 
   async pause() {
+    this._resolveApiBaseUrl();
     if (!this.isConnected()) {
       throw new Error('Not connected to a cast session');
     }
@@ -260,6 +276,7 @@ const googleCastSender = {
   },
 
   async seek(position) {
+    this._resolveApiBaseUrl();
     if (!this.isConnected()) {
       throw new Error('Not connected to a cast session');
     }
@@ -281,6 +298,7 @@ const googleCastSender = {
   },
 
   async setVolume(level) {
+    this._resolveApiBaseUrl();
     if (!this.isConnected()) {
       throw new Error('Not connected to a cast session');
     }
@@ -302,6 +320,7 @@ const googleCastSender = {
   },
 
   async stop() {
+    this._resolveApiBaseUrl();
     if (!this._currentSession) {
       return { status: 'idle' };
     }
