@@ -31,9 +31,13 @@ const castModal = {
     let deviceInfo = '(none)';
     let episodeInfo = '(none)';
     
-    if (castSession && castSession.activeDeviceId && castSession.ownerGuid) {
-      isOwner = castSession.ownerGuid === userGuid;
-      ownerStatus = isOwner ? '✓ You own cast' : '✗ Someone else owns cast';
+    if (castSession && castSession.activeDeviceId) {
+      if (castSession.ownerGuid) {
+        isOwner = castSession.ownerGuid === userGuid;
+        ownerStatus = isOwner ? '✓ You own cast' : '✗ Someone else owns cast';
+      } else {
+        ownerStatus = 'Cast active (owner unknown)';
+      }
       deviceInfo = castSession.deviceName || castSession.activeDeviceId;
       episodeInfo = castSession.title || '(none)';
     }
@@ -63,7 +67,6 @@ const castModal = {
     if (window.castClient) {
       this._castStateHandler = () => this._renderHeaderState();
       window.castClient.on('cast:status', this._castStateHandler);
-      window.castClient.on('cast:state', this._castStateHandler);
       window.castClient.on('user:queue', this._castStateHandler);
     }
   },
@@ -74,7 +77,6 @@ const castModal = {
     }
     if (window.castClient && this._castStateHandler) {
       window.castClient.off('cast:status', this._castStateHandler);
-      window.castClient.off('cast:state', this._castStateHandler);
       window.castClient.off('user:queue', this._castStateHandler);
     }
     this._stateHandler = null;
@@ -159,7 +161,9 @@ const castModal = {
     const supported = !!availability?.supported;
     const connected = !!availability?.connected;
     const device = availability?.device || null;
+    const session = availability?.session || window.googleCastSender?._currentSession || null;
     const devices = Array.isArray(availability?.devices) ? availability.devices : [];
+    const hasActiveSession = !!(session && (session.activeDeviceId || session.deviceId));
     const currentName = device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
     
     if (!supported) {
@@ -199,7 +203,7 @@ const castModal = {
 
     listEl.innerHTML = `
       ${deviceRows}
-      ${connected ? `
+      ${(connected || hasActiveSession) ? `
         <div class="cast-device-item" data-action="stop">
           <div class="cast-device-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>

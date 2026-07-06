@@ -150,12 +150,13 @@ const googleCastSender = {
   },
 
   getCurrentDevice() {
-    if (!this._currentSession || !this._currentSession.activeDeviceId) {
+    const activeDeviceId = this._currentSession?.activeDeviceId || this._currentSession?.deviceId || null;
+    if (!this._currentSession || !activeDeviceId) {
       return null;
     }
-    const device = this._availableDevices.find(d => d.id === this._currentSession.activeDeviceId);
+    const device = this._availableDevices.find(d => d.id === activeDeviceId);
     return device || {
-      id: this._currentSession.activeDeviceId,
+      id: activeDeviceId,
       name: this._currentSession.deviceName || 'Cast Device',
       modelName: '',
     };
@@ -216,13 +217,18 @@ const googleCastSender = {
 
     this._stateSyncPromise = (async () => {
       try {
-        const status = (window.api && typeof window.api.getCastState === 'function')
-          ? await window.api.getCastState()
-          : await fetch(`${this._apiBaseUrl}/api/cast/state`).then((res) => (res.ok ? res.json() : null));
+        const session = (window.api && typeof window.api.getCastSession === 'function')
+          ? await window.api.getCastSession()
+          : await fetch(`${this._apiBaseUrl}/api/cast/session`).then((res) => (res.ok ? res.json() : null));
 
-        if (status && status.activeDeviceId) {
+        const status = session?.session || session || null;
+        const activeDeviceId = status?.activeDeviceId || status?.deviceId || null;
+
+        if (status && activeDeviceId) {
           this._currentSession = {
             ...status,
+            activeDeviceId,
+            deviceId: status.deviceId || activeDeviceId,
             ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
           };
         } else {
@@ -434,6 +440,7 @@ const googleCastSender = {
     }
 
     this._currentSession = null;
+    this._dispatch('statechange', { status: 'idle', activeDeviceId: null, ownerGuid: null });
     return { status: 'idle' };
   },
 

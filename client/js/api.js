@@ -1301,6 +1301,10 @@ const api = {
     });
   },
 
+  async getCastSession() {
+    return this._fetch('/api/cast/session');
+  },
+
   async getCastState() {
     return this._fetch('/api/cast/state');
   },

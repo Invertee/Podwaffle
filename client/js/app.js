@@ -476,8 +476,13 @@ async function initApp() {
     if (window.castClient) {
       window.castClient.connect();
       try {
-        const castState = await window.api.getCastState();
-        if (castState && castState.activeDeviceId) {
+        const castSessionResponse = (window.api && typeof window.api.getCastSession === 'function')
+          ? await window.api.getCastSession()
+          : null;
+        const castState = castSessionResponse?.session || castSessionResponse || null;
+
+        if (castState && (castState.activeDeviceId || castState.deviceId)) {
+          const activeDeviceId = castState.activeDeviceId || castState.deviceId;
           hasActiveCastSession = true;
 
           if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
@@ -491,7 +496,7 @@ async function initApp() {
             window.player.audio.removeAttribute('src');
             window.player.audio.load();
             window.player.mode = 'cast';
-            window.player._activeCastDeviceId = castState.activeDeviceId;
+            window.player._activeCastDeviceId = activeDeviceId;
             window.player.position = castState.position || 0;
             window.player.duration = castState.duration || 0;
             window.player.isPlaying = castState.status === 'playing';
