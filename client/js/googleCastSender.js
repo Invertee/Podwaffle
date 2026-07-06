@@ -85,15 +85,25 @@ const googleCastSender = {
 
     window.castClient.on('cast:status', (status) => {
       console.log('[googleCastSender] Status update:', status);
-      // Preserve ownerGuid from previous session if new message doesn't have it
-      if (status?.activeDeviceId) {
+      const hasActiveDevice = !!(status && (status.activeDeviceId || status.deviceId));
+      const isExplicitIdle = String(status?.status || '').toLowerCase() === 'idle';
+
+      // Keep session alive for partial updates (e.g. position-only status packets)
+      if (hasActiveDevice) {
         this._currentSession = {
           ...this._currentSession,  // preserve old values like ownerGuid
           ...status,                // overlay new values from server
+          activeDeviceId: status.activeDeviceId || status.deviceId,
           ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
         };
-      } else {
+      } else if (isExplicitIdle) {
         this._currentSession = null;
+      } else if (this._currentSession) {
+        this._currentSession = {
+          ...this._currentSession,
+          ...status,
+          ownerGuid: status?.ownerGuid || this._currentSession?.ownerGuid || null,
+        };
       }
       this._dispatch('statechange', status);
 
@@ -320,15 +330,15 @@ const googleCastSender = {
 
   async play() {
     this._resolveApiBaseUrl();
-    if (!this.isConnected()) {
-      throw new Error('Not connected to a cast session');
-    }
-
     if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
       const sent = window.castClient.send('cast:play', {});
       if (sent) {
         return { ok: true, via: 'ws' };
       }
+    }
+
+    if (!this.isConnected()) {
+      throw new Error('Not connected to a cast session');
     }
 
     const response = await fetch(`${this._apiBaseUrl}/api/cast/resume`, {
@@ -347,15 +357,15 @@ const googleCastSender = {
 
   async pause() {
     this._resolveApiBaseUrl();
-    if (!this.isConnected()) {
-      throw new Error('Not connected to a cast session');
-    }
-
     if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
       const sent = window.castClient.send('cast:pause', {});
       if (sent) {
         return { ok: true, via: 'ws' };
       }
+    }
+
+    if (!this.isConnected()) {
+      throw new Error('Not connected to a cast session');
     }
 
     const response = await fetch(`${this._apiBaseUrl}/api/cast/pause`, {
@@ -374,10 +384,6 @@ const googleCastSender = {
 
   async seek(position) {
     this._resolveApiBaseUrl();
-    if (!this.isConnected()) {
-      throw new Error('Not connected to a cast session');
-    }
-
     const targetPosition = Math.max(0, Number(position) || 0);
 
     if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
@@ -385,6 +391,10 @@ const googleCastSender = {
       if (sent) {
         return { ok: true, via: 'ws', position: targetPosition };
       }
+    }
+
+    if (!this.isConnected()) {
+      throw new Error('Not connected to a cast session');
     }
 
     const response = await fetch(`${this._apiBaseUrl}/api/cast/seek`, {
@@ -403,10 +413,6 @@ const googleCastSender = {
 
   async setVolume(level) {
     this._resolveApiBaseUrl();
-    if (!this.isConnected()) {
-      throw new Error('Not connected to a cast session');
-    }
-
     const targetLevel = Math.max(0, Math.min(1, Number(level) || 0));
 
     if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
@@ -414,6 +420,10 @@ const googleCastSender = {
       if (sent) {
         return { ok: true, via: 'ws', volume: targetLevel };
       }
+    }
+
+    if (!this.isConnected()) {
+      throw new Error('Not connected to a cast session');
     }
 
     const response = await fetch(`${this._apiBaseUrl}/api/cast/setVolume`, {

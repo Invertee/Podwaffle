@@ -550,13 +550,12 @@ const player = {
       if (this._castStartInFlight) {
         return;
       }
-      if (!this.currentEpisode || !this.currentEpisode.audioUrl) {
-        console.warn('[player] play ignored in cast mode: no episode loaded yet');
-        return;
-      }
       if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
         console.warn('[player] play ignored in cast mode: no active Cast session');
         return;
+      }
+      if (!this.currentEpisode || !this.currentEpisode.audioUrl) {
+        console.warn('[player] play in cast mode with partial episode metadata; sending control command anyway');
       }
       this.audio.pause();
       Promise.resolve(window.googleCastSender.play()).catch(err => console.error('[player] cast play error:', err));
