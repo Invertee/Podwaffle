@@ -17,10 +17,13 @@ const googleCastSender = {
   init() {
     console.log('[googleCastSender] init()');
     this._userGuid = localStorage.getItem('podwaffle_guid') || null;
+    console.log('[googleCastSender] User GUID:', this._userGuid || '(none)');
     this._detectApiBaseUrl();
+    console.log('[googleCastSender] API base URL:', this._apiBaseUrl || '(empty)');
     this._setupWsListener();
     this._initialized = true;
     this._available = !!this._apiBaseUrl;
+    console.log('[googleCastSender] initialization complete. Available:', this._available);
   },
 
   _detectApiBaseUrl() {
@@ -34,43 +37,56 @@ const googleCastSender = {
 
   _setupWsListener() {
     // Listen for cast state updates pushed from the server via WebSocket
-    if (window.castClient && typeof window.castClient.on === 'function') {
-      window.castClient.on('cast:device_found', (device) => {
-        console.log('[googleCastSender] Device found:', device.name);
-        if (!this._availableDevices.find(d => d.id === device.id)) {
-          this._availableDevices.push(device);
-        }
-        this._dispatch('device_found', device);
-      });
-
-      window.castClient.on('cast:device_lost', (data) => {
-        console.log('[googleCastSender] Device lost:', data.deviceId);
-        this._availableDevices = this._availableDevices.filter(d => d.id !== data.deviceId);
-        this._dispatch('device_lost', data);
-      });
-
-      window.castClient.on('cast:status', (status) => {
-        console.log('[googleCastSender] Status update:', status);
-        this._currentSession = status.activeDeviceId ? status : null;
-        this._dispatch('statechange', status);
-
-        // Notify player of state changes
-        if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
-          window.player.applyCastState({
-            deviceId: status.activeDeviceId,
-            deviceName: status.deviceName,
-            episodeGuid: status.episodeGuid,
-            title: status.title,
-            podcastTitle: status.podcastTitle,
-            imageUrl: status.imageUrl,
-            position: status.position,
-            duration: status.duration,
-            status: status.status,
-            volume: status.volume,
-          });
-        }
-      });
+    if (!window.castClient) {
+      console.warn('[googleCastSender] castClient not available yet, skipping WS listener setup');
+      return;
     }
+    
+    if (typeof window.castClient.on !== 'function') {
+      console.warn('[googleCastSender] castClient.on is not a function');
+      return;
+    }
+
+    console.log('[googleCastSender] Setting up WS listener for cast events');
+    
+    window.castClient.on('cast:device_found', (device) => {
+      console.log('[googleCastSender] Device found:', device.name || device.id);
+      if (!this._availableDevices.find(d => d.id === device.id)) {
+        this._availableDevices.push(device);
+        console.log('[googleCastSender] Added device. Total devices:', this._availableDevices.length);
+      }
+      this._dispatch('device_found', device);
+    });
+
+    window.castClient.on('cast:device_lost', (data) => {
+      console.log('[googleCastSender] Device lost:', data.deviceId);
+      this._availableDevices = this._availableDevices.filter(d => d.id !== data.deviceId);
+      this._dispatch('device_lost', data);
+    });
+
+    window.castClient.on('cast:status', (status) => {
+      console.log('[googleCastSender] Status update:', status);
+      this._currentSession = status.activeDeviceId ? status : null;
+      this._dispatch('statechange', status);
+
+      // Notify player of state changes
+      if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
+        window.player.applyCastState({
+          deviceId: status.activeDeviceId,
+          deviceName: status.deviceName,
+          episodeGuid: status.episodeGuid,
+          title: status.title,
+          podcastTitle: status.podcastTitle,
+          imageUrl: status.imageUrl,
+          position: status.position,
+          duration: status.duration,
+          status: status.status,
+          volume: status.volume,
+        });
+      }
+    });
+
+    console.log('[googleCastSender] WS listeners registered');
   },
 
   on(event, handler) {
@@ -94,7 +110,11 @@ const googleCastSender = {
   },
 
   isSupported() {
-    return this._initialized && this._available && !!this._apiBaseUrl;
+    const supported = this._initialized && this._available && !!this._apiBaseUrl;
+    if (!supported) {
+      console.warn('[googleCastSender] isSupported() = false. initialized:', this._initialized, 'available:', this._available, 'apiBaseUrl:', this._apiBaseUrl);
+    }
+    return supported;
   },
 
   isConnected() {
@@ -133,6 +153,9 @@ const googleCastSender = {
 
   async requestSession() {
     // In server mode, show a device picker modal or just use the first available device
+    console.log('[googleCastSender] requestSession() - available devices:', this._availableDevices.length);
+    console.log('[googleCastSender] Device list:', this._availableDevices);
+    
     if (this._availableDevices.length === 0) {
       throw new Error('No cast devices available. Ensure at least one cast device is on the network.');
     }

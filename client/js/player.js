@@ -1297,14 +1297,19 @@ const player = {
 
     this._flushPlaybackSnapshot();
 
+    console.log('[player] Checking if cast sender is supported...');
     const useBrowserSender = !!(window.googleCastSender && window.googleCastSender.isSupported());
+    console.log('[player] useBrowserSender:', useBrowserSender);
+    
     if (!useBrowserSender) {
       throw new Error('Google Cast is not available in this app runtime. Android WebView requires a native Cast bridge.');
     }
 
+    console.log('[player] Calling ensureSession()...');
     let resolvedDeviceId = deviceId || null;
     const sessionDevice = await window.googleCastSender.ensureSession();
     resolvedDeviceId = sessionDevice?.id || resolvedDeviceId || 'google-cast';
+    console.log('[player] Session device obtained:', sessionDevice);
 
     this.audio.pause();
 
@@ -1330,11 +1335,12 @@ const player = {
       this._notifyStateChange();
       console.log('[player] Cast started on device:', resolvedDeviceId);
     } catch (err) {
-      console.error('[player] switchToCast error:', err);
+      console.error('[player] switchToCast inner error:', err);
       this.mode = 'local';
       this._activeCastDeviceId = null;
       if (wasPlaying) this.audio.play().catch(() => {});
       this._notifyStateChange();
+      throw err;
     }
   },
 
