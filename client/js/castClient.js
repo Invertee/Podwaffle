@@ -294,6 +294,15 @@ const castClient = {
         this._dispatch('cast:device_lost', data.data);
         break;
 
+      case 'cast:devices': {
+        const devices = Array.isArray(data.data) ? data.data : [];
+        this._dispatch('cast:devices', devices);
+        devices.forEach((device) => {
+          this._dispatch('cast:device_found', device);
+        });
+        break;
+      }
+
       case 'cast:status':
         if (data.data) {
           this._castState = {
