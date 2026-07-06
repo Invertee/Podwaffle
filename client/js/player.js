@@ -538,15 +538,8 @@ const player = {
         console.warn('[player] play ignored in cast mode: no episode loaded yet');
         return;
       }
-      // For the native Cast path the plugin handles session errors directly;
-      // only gate on isConnected() for the browser WebSender path.
-      const isNative = !!(window.googleCastSender && window.googleCastSender._usingNativeCast);
-      if (!isNative && !(window.googleCastSender && window.googleCastSender.isConnected())) {
-        console.warn('[player] play ignored in cast mode: no active Google Cast session');
-        return;
-      }
-      if (!isNative && !window.googleCastSender) {
-        console.warn('[player] play ignored in cast mode: googleCastSender unavailable');
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] play ignored in cast mode: no active Cast session');
         return;
       }
       this.audio.pause();
@@ -568,9 +561,8 @@ const player = {
 
   pause() {
     if (this.mode === 'cast') {
-      const isNative = !!(window.googleCastSender && window.googleCastSender._usingNativeCast);
-      if (!isNative && !(window.googleCastSender && window.googleCastSender.isConnected())) {
-        console.warn('[player] pause ignored in cast mode: no active Google Cast session');
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] pause ignored in cast mode: no active Cast session');
         return;
       }
       Promise.resolve(window.googleCastSender.pause()).catch(err => console.error('[player] cast pause error:', err));
@@ -607,9 +599,8 @@ const player = {
     position = Math.max(0, Math.floor(position));
     console.log('[player] Seek to:', position);
     if (this.mode === 'cast') {
-      const isNative = !!(window.googleCastSender && window.googleCastSender._usingNativeCast);
-      if (!isNative && !(window.googleCastSender && window.googleCastSender.isConnected())) {
-        console.warn('[player] seek ignored in cast mode: no active Google Cast session');
+      if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
+        console.warn('[player] seek ignored in cast mode: no active Cast session');
         return;
       }
       Promise.resolve(window.googleCastSender.seek(position)).catch(err => console.error('[player] cast seek error:', err));

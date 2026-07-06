@@ -148,6 +148,42 @@ wss.on('connection', (ws, req) => {
 
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
+      } else if (msg.type === 'cast:play' && msg.userGuid) {
+        if (castService.canControl(msg.userGuid)) {
+          castService.resume().catch(err => {
+            console.error('[ws] cast:play failed:', err.message);
+            broadcastWs({ type: 'cast:error', data: { error: err.message } });
+          });
+        } else {
+          console.warn('[ws] cast:play denied: user does not own session');
+        }
+      } else if (msg.type === 'cast:pause' && msg.userGuid) {
+        if (castService.canControl(msg.userGuid)) {
+          castService.pause().catch(err => {
+            console.error('[ws] cast:pause failed:', err.message);
+            broadcastWs({ type: 'cast:error', data: { error: err.message } });
+          });
+        } else {
+          console.warn('[ws] cast:pause denied: user does not own session');
+        }
+      } else if (msg.type === 'cast:seek' && msg.userGuid) {
+        if (castService.canControl(msg.userGuid)) {
+          castService.seek(msg.position || 0).catch(err => {
+            console.error('[ws] cast:seek failed:', err.message);
+            broadcastWs({ type: 'cast:error', data: { error: err.message } });
+          });
+        } else {
+          console.warn('[ws] cast:seek denied: user does not own session');
+        }
+      } else if (msg.type === 'cast:setVolume' && msg.userGuid) {
+        if (castService.canControl(msg.userGuid)) {
+          castService.setVolume(msg.level || 0).catch(err => {
+            console.error('[ws] cast:setVolume failed:', err.message);
+            broadcastWs({ type: 'cast:error', data: { error: err.message } });
+          });
+        } else {
+          console.warn('[ws] cast:setVolume denied: user does not own session');
+        }
       }
     } catch (err) {
       console.error(`[ws] Failed to parse message from ${clientIp}:`, err.message);
@@ -252,6 +288,10 @@ async function start() {
   // 2. Start the feed refresh scheduler
   console.log('[server] Starting feed refresh scheduler...');
   scheduler.startScheduler(feedService, userService, broadcastWs);
+
+  // 2.5. Initialize cast discovery
+  console.log('[server] Initializing Cast service discovery...');
+  castService.init(broadcastWs);
 
   // 3. Run an initial feed refresh after a 5-second delay (let the server settle)
   setTimeout(async () => {

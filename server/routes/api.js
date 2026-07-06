@@ -824,57 +824,152 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   });
 
   // =========================================================================
-  // CAST — Lightweight state mirroring only
+  // CAST — Server-driven device discovery and playback control
   // =========================================================================
-  // Server-side device discovery and media playback control have been removed.
-  // All cast control is now client-side via the Google Cast sender SDK.
-  // These endpoints manage browser-driven state mirroring only.
+  // All cast control is now server-side. Devices are discovered via mDNS.
+  // Only the user who initiates a cast session can control it.
 
-  // GET /cast/state
-  router.get('/cast/state', (req, res) => {
-    console.log('[api] GET /cast/state');
+  // GET /cast/devices — list all available cast devices on the network
+  router.get('/cast/devices', (req, res) => {
+    console.log('[api] GET /cast/devices');
     try {
-      const state = castService.getState();
-      res.json(state);
+      const devices = castService.getDevices();
+      res.json({ devices });
     } catch (err) {
-      sendError(res, 500, 'Failed to get cast state', err.message);
+      sendError(res, 500, 'Failed to list cast devices', err.message);
     }
   });
 
-  // PUT /cast/state — mirror browser-driven Google Cast sender state
-  router.put('/cast/state', (req, res) => {
-    console.log('[api] PUT /cast/state', req.body);
+  // GET /cast/session — get current active cast session (if any)
+  router.get('/cast/session', (req, res) => {
+    console.log('[api] GET /cast/session');
     try {
-      const mirrored = castService.setExternalState(req.body || {});
-      broadcastWs({
-        type: 'cast:state',
-        data: {
-          ...mirrored,
-          deviceId: mirrored.activeDeviceId,
-        }
-      });
-      res.json({ ok: true, state: mirrored });
+      const session = castService.getSession();
+      res.json({ session });
     } catch (err) {
-      sendError(res, 500, 'Failed to update cast state', err.message);
+      sendError(res, 500, 'Failed to get cast session', err.message);
     }
   });
 
-  // DELETE /cast/state — clear browser-driven mirror state
-  router.delete('/cast/state', (req, res) => {
-    const ownerGuid = typeof req.query.ownerGuid === 'string' ? req.query.ownerGuid : null;
-    console.log(`[api] DELETE /cast/state?ownerGuid=${ownerGuid || ''}`);
+  // POST /cast/play — start casting an episode to a device
+  router.post('/cast/play', async (req, res) => {
+    const { userGuid, deviceId, mediaUrl, episodeGuid, title, podcastTitle, imageUrl, duration, startPosition } = req.body || {};
+    console.log(`[api] POST /cast/play user=${userGuid} device=${deviceId}`);
+
+    if (!userGuid || !deviceId || !mediaUrl) {
+      return sendError(res, 400, 'Missing required fields: userGuid, deviceId, mediaUrl');
+    }
+
     try {
-      const cleared = castService.clearExternalState(ownerGuid);
-      broadcastWs({
-        type: 'cast:state',
-        data: {
-          ...cleared,
-          deviceId: cleared.activeDeviceId,
-        }
-      });
-      res.json({ ok: true, state: cleared });
+      await castService.castTo(
+        deviceId,
+        userGuid,
+        mediaUrl,
+        startPosition || 0,
+        (statusUpdate) => {
+          broadcastWs({
+            type: 'cast:status',
+            data: statusUpdate
+          });
+        },
+        { episodeGuid, title, podcastTitle, imageUrl, duration }
+      );
+      res.json({ ok: true, message: 'Cast started' });
     } catch (err) {
-      sendError(res, 500, 'Failed to clear cast state', err.message);
+      sendError(res, 500, 'Failed to start cast', err.message);
+    }
+  });
+
+  // POST /cast/pause — pause the current cast session
+  router.post('/cast/pause', async (req, res) => {
+    const { userGuid } = req.body || {};
+    console.log(`[api] POST /cast/pause user=${userGuid}`);
+
+    if (!castService.canControl(userGuid)) {
+      return sendError(res, 403, 'Not authorized to control this cast session');
+    }
+
+    try {
+      const result = await castService.pause();
+      res.json(result);
+    } catch (err) {
+      sendError(res, 500, 'Failed to pause cast', err.message);
+    }
+  });
+
+  // POST /cast/resume — resume the current cast session
+  router.post('/cast/resume', async (req, res) => {
+    const { userGuid } = req.body || {};
+    console.log(`[api] POST /cast/resume user=${userGuid}`);
+
+    if (!castService.canControl(userGuid)) {
+      return sendError(res, 403, 'Not authorized to control this cast session');
+    }
+
+    try {
+      const result = await castService.resume();
+      res.json(result);
+    } catch (err) {
+      sendError(res, 500, 'Failed to resume cast', err.message);
+    }
+  });
+
+  // POST /cast/seek — seek to a position
+  router.post('/cast/seek', async (req, res) => {
+    const { userGuid, position } = req.body || {};
+    console.log(`[api] POST /cast/seek user=${userGuid} position=${position}`);
+
+    if (!castService.canControl(userGuid)) {
+      return sendError(res, 403, 'Not authorized to control this cast session');
+    }
+
+    if (!Number.isFinite(position)) {
+      return sendError(res, 400, 'Missing or invalid position');
+    }
+
+    try {
+      const result = await castService.seek(position);
+      res.json(result);
+    } catch (err) {
+      sendError(res, 500, 'Failed to seek cast', err.message);
+    }
+  });
+
+  // POST /cast/setVolume — set cast device volume (0-1)
+  router.post('/cast/setVolume', async (req, res) => {
+    const { userGuid, level } = req.body || {};
+    console.log(`[api] POST /cast/setVolume user=${userGuid} level=${level}`);
+
+    if (!castService.canControl(userGuid)) {
+      return sendError(res, 403, 'Not authorized to control this cast session');
+    }
+
+    if (!Number.isFinite(level) || level < 0 || level > 1) {
+      return sendError(res, 400, 'Invalid volume level (must be 0-1)');
+    }
+
+    try {
+      const result = await castService.setVolume(level);
+      res.json(result);
+    } catch (err) {
+      sendError(res, 500, 'Failed to set cast volume', err.message);
+    }
+  });
+
+  // POST /cast/stop — stop and disconnect the current cast session
+  router.post('/cast/stop', async (req, res) => {
+    const { userGuid } = req.body || {};
+    console.log(`[api] POST /cast/stop user=${userGuid}`);
+
+    if (!castService.canControl(userGuid)) {
+      return sendError(res, 403, 'Not authorized to control this cast session');
+    }
+
+    try {
+      const result = await castService.stop();
+      res.json(result);
+    } catch (err) {
+      sendError(res, 500, 'Failed to stop cast', err.message);
     }
   });
 
