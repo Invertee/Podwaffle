@@ -187,7 +187,9 @@ const googleCastSender = {
           devices = await response.json();
         }
 
-        const normalized = Array.isArray(devices) ? devices : [];
+        const normalized = Array.isArray(devices)
+          ? devices
+          : (Array.isArray(devices?.devices) ? devices.devices : []);
         this._availableDevices = normalized;
         console.log('[googleCastSender] Refreshed cast devices from API:', normalized.length);
         return normalized;
