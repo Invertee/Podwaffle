@@ -2,6 +2,7 @@ const castModal = {
   container: null,
   _stateHandler: null,
   _castStateHandler: null,
+  _actionInProgress: false,
 
   _formatLastUpdated(value) {
     if (!value) return 'Unknown';
@@ -104,6 +105,7 @@ const castModal = {
   },
   
   hide() {
+    this._actionInProgress = false;
     this._unbindHeaderStateUpdates();
     if (this.container) this.container.style.display = 'none';
   },
@@ -118,9 +120,11 @@ const castModal = {
     `;
     
     try {
-      const availability = window.googleCastSender && typeof window.googleCastSender.getAvailability === 'function'
-        ? window.googleCastSender.getAvailability()
-        : { supported: false, connected: false, device: null };
+      const availability = window.googleCastSender && typeof window.googleCastSender.refreshAvailability === 'function'
+        ? await window.googleCastSender.refreshAvailability()
+        : (window.googleCastSender && typeof window.googleCastSender.getAvailability === 'function'
+          ? window.googleCastSender.getAvailability()
+          : { supported: false, connected: false, device: null, devices: [] });
       this.renderDeviceList(availability);
     } catch (err) {
       console.error('Failed to fetch cast devices:', err);
@@ -138,6 +142,7 @@ const castModal = {
     const supported = !!availability?.supported;
     const connected = !!availability?.connected;
     const device = availability?.device || null;
+    const devices = Array.isArray(availability?.devices) ? availability.devices : [];
     const currentName = device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
     
     if (!supported) {
@@ -155,14 +160,28 @@ const castModal = {
       return;
     }
 
-    listEl.innerHTML = `
-      <div class="cast-device-item ${connected ? 'active' : ''}" data-action="choose">
-        <div class="cast-device-icon">
-          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
+    const deviceRows = devices.length > 0
+      ? devices.map((item) => {
+        const isCurrent = connected && device && item.id === device.id;
+        return `
+          <div class="cast-device-item ${isCurrent ? 'active' : ''}" data-action="choose" data-device-id="${item.id}">
+            <div class="cast-device-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
+            </div>
+            <div class="cast-device-name">${isCurrent ? `Connected: ${item.name}` : item.name}</div>
+            ${isCurrent ? '<div class="cast-active-dot"></div>' : ''}
+          </div>
+        `;
+      }).join('')
+      : `
+        <div class="cast-error">
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <p>No cast devices found right now.<br>Ensure the backend can discover devices on the same network.</p>
         </div>
-        <div class="cast-device-name">${connected ? `Connected: ${currentName}` : 'Choose a Google Cast device'}</div>
-        ${connected ? '<div class="cast-active-dot"></div>' : ''}
-      </div>
+      `;
+
+    listEl.innerHTML = `
+      ${deviceRows}
       ${connected ? `
         <div class="cast-device-item" data-action="stop">
           <div class="cast-device-icon">
@@ -173,23 +192,36 @@ const castModal = {
       ` : ''}
     `;
 
-    listEl.querySelector('[data-action="choose"]')?.addEventListener('click', async () => {
-      try {
-        if (window.player) await window.player.switchToCast();
-        this.hide();
-      } catch (err) {
-        console.error('Failed to start Google Cast session:', err);
-        alert('Failed to start Google Cast. See console.');
-      }
+    listEl.querySelectorAll('[data-action="choose"]').forEach((item) => {
+      item.addEventListener('click', async () => {
+        if (this._actionInProgress) return;
+        this._actionInProgress = true;
+        listEl.style.pointerEvents = 'none';
+        try {
+          const selectedDeviceId = item.getAttribute('data-device-id') || null;
+          if (window.player) await window.player.switchToCast(selectedDeviceId);
+          this.hide();
+        } catch (err) {
+          console.error('Failed to start Google Cast session:', err);
+          alert('Failed to start Google Cast. See console.');
+          this._actionInProgress = false;
+          listEl.style.pointerEvents = '';
+        }
+      });
     });
 
     listEl.querySelector('[data-action="stop"]')?.addEventListener('click', async () => {
+      if (this._actionInProgress) return;
+      this._actionInProgress = true;
+      listEl.style.pointerEvents = 'none';
       try {
         if (window.player) await window.player.switchToLocal();
         this.hide();
       } catch (err) {
         console.error('Failed to stop casting:', err);
         alert('Failed to stop casting. See console.');
+        this._actionInProgress = false;
+        listEl.style.pointerEvents = '';
       }
     });
   }

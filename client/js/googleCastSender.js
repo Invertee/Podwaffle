@@ -13,6 +13,8 @@ const googleCastSender = {
   _currentSession: null,
   _userGuid: null,
   _apiBaseUrl: null,
+  _stateSyncPromise: null,
+  _deviceRefreshPromise: null,
 
   init() {
     console.log('[googleCastSender] init()');
@@ -165,61 +167,92 @@ const googleCastSender = {
   },
 
   async _refreshDevicesFromServer() {
+    if (this._deviceRefreshPromise) {
+      return this._deviceRefreshPromise;
+    }
+
     this._resolveApiBaseUrl();
     if (!this._apiBaseUrl) return [];
 
-    try {
-      let devices = [];
-      if (window.api && typeof window.api.getCastDevices === 'function') {
-        devices = await window.api.getCastDevices();
-      } else {
-        const response = await fetch(`${this._apiBaseUrl}/api/cast/devices`);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+    this._deviceRefreshPromise = (async () => {
+      try {
+        let devices = [];
+        if (window.api && typeof window.api.getCastDevices === 'function') {
+          devices = await window.api.getCastDevices();
+        } else {
+          const response = await fetch(`${this._apiBaseUrl}/api/cast/devices`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          devices = await response.json();
         }
-        devices = await response.json();
-      }
 
-      const normalized = Array.isArray(devices) ? devices : [];
-      this._availableDevices = normalized;
-      console.log('[googleCastSender] Refreshed cast devices from API:', normalized.length);
-      return normalized;
-    } catch (err) {
-      console.warn('[googleCastSender] Failed to refresh cast devices from API:', err);
-      return this._availableDevices;
-    }
+        const normalized = Array.isArray(devices) ? devices : [];
+        this._availableDevices = normalized;
+        console.log('[googleCastSender] Refreshed cast devices from API:', normalized.length);
+        return normalized;
+      } catch (err) {
+        console.warn('[googleCastSender] Failed to refresh cast devices from API:', err);
+        return this._availableDevices;
+      } finally {
+        this._deviceRefreshPromise = null;
+      }
+    })();
+
+    return this._deviceRefreshPromise;
   },
 
   async syncFromServerState() {
+    if (this._stateSyncPromise) {
+      return this._stateSyncPromise;
+    }
+
     this._resolveApiBaseUrl();
     if (!this._apiBaseUrl) {
       return null;
     }
 
-    try {
-      const status = (window.api && typeof window.api.getCastState === 'function')
-        ? await window.api.getCastState()
-        : await fetch(`${this._apiBaseUrl}/api/cast/state`).then((res) => (res.ok ? res.json() : null));
+    this._stateSyncPromise = (async () => {
+      try {
+        const status = (window.api && typeof window.api.getCastState === 'function')
+          ? await window.api.getCastState()
+          : await fetch(`${this._apiBaseUrl}/api/cast/state`).then((res) => (res.ok ? res.json() : null));
 
-      if (status && status.activeDeviceId) {
-        this._currentSession = {
-          ...status,
-          ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
-        };
-      } else {
-        this._currentSession = null;
+        if (status && status.activeDeviceId) {
+          this._currentSession = {
+            ...status,
+            ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
+          };
+        } else {
+          this._currentSession = null;
+        }
+
+        return this._currentSession;
+      } catch (err) {
+        console.warn('[googleCastSender] Failed to sync cast state from API:', err);
+        return null;
+      } finally {
+        this._stateSyncPromise = null;
       }
+    })();
 
-      return this._currentSession;
-    } catch (err) {
-      console.warn('[googleCastSender] Failed to sync cast state from API:', err);
-      return null;
-    }
+    return this._stateSyncPromise;
   },
 
-  async requestSession() {
+  async refreshAvailability() {
+    await Promise.all([
+      this.syncFromServerState(),
+      this._refreshDevicesFromServer(),
+    ]);
+
+    return this.getAvailability();
+  },
+
+  async requestSession(options = {}) {
+    const skipRefresh = !!options.skipRefresh;
+    const preferredDeviceId = options.preferredDeviceId || null;
     // In server mode, show a device picker modal or just use the first available device
-    if (this._availableDevices.length === 0) {
+    if (!skipRefresh && this._availableDevices.length === 0) {
       await this._refreshDevicesFromServer();
     }
     console.log('[googleCastSender] requestSession() - available devices:', this._availableDevices.length);
@@ -228,23 +261,26 @@ const googleCastSender = {
     if (this._availableDevices.length === 0) {
       throw new Error('No cast devices available. Ensure at least one cast device is on the network.');
     }
+
+    const chosenDevice = preferredDeviceId
+      ? (this._availableDevices.find((item) => item.id === preferredDeviceId) || this._availableDevices[0])
+      : this._availableDevices[0];
+
     // Return first device for now; in future could show UI to choose
     return {
-      id: this._availableDevices[0].id,
-      name: this._availableDevices[0].name,
+      id: chosenDevice.id,
+      name: chosenDevice.name,
       modelName: '',
     };
   },
 
-  async ensureSession() {
-    await this.syncFromServerState();
+  async ensureSession(options = {}) {
+    const preferredDeviceId = options.preferredDeviceId || null;
+    await this.refreshAvailability();
     if (this.isConnected()) {
       return this.getCurrentDevice();
     }
-    if (this._availableDevices.length === 0) {
-      await this._refreshDevicesFromServer();
-    }
-    return this.requestSession();
+    return this.requestSession({ skipRefresh: true, preferredDeviceId });
   },
 
   async loadEpisode(episode, startPosition = 0) {

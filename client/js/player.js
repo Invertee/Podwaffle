@@ -1307,7 +1307,7 @@ const player = {
 
     console.log('[player] Calling ensureSession()...');
     let resolvedDeviceId = deviceId || null;
-    const sessionDevice = await window.googleCastSender.ensureSession();
+    const sessionDevice = await window.googleCastSender.ensureSession(deviceId ? { preferredDeviceId: deviceId } : undefined);
     resolvedDeviceId = sessionDevice?.id || resolvedDeviceId || 'google-cast';
     console.log('[player] Session device obtained:', sessionDevice);
 
