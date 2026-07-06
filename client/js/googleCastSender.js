@@ -176,42 +176,10 @@ const googleCastSender = {
     return null;
   },
 
-  async _refreshDevicesFromServer() {
-    if (this._deviceRefreshPromise) {
-      return this._deviceRefreshPromise;
-    }
-
-    this._resolveApiBaseUrl();
-    if (!this._apiBaseUrl) return [];
-
-    this._deviceRefreshPromise = (async () => {
-      try {
-        let devices = [];
-        if (window.api && typeof window.api.getCastDevices === 'function') {
-          devices = await window.api.getCastDevices();
-        } else {
-          const response = await fetch(`${this._apiBaseUrl}/api/cast/devices`);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          devices = await response.json();
-        }
-
-        const normalized = Array.isArray(devices)
-          ? devices
-          : (Array.isArray(devices?.devices) ? devices.devices : []);
-        this._availableDevices = normalized;
-        console.log('[googleCastSender] Refreshed cast devices from API:', normalized.length);
-        return normalized;
-      } catch (err) {
-        console.warn('[googleCastSender] Failed to refresh cast devices from API:', err);
-        return this._availableDevices;
-      } finally {
-        this._deviceRefreshPromise = null;
-      }
-    })();
-
-    return this._deviceRefreshPromise;
+  // Device list is maintained via WebSocket (cast:device_found / cast:device_lost)
+  // No HTTP polling needed — WebSocket provides real-time updates
+  _getDevicesFromCache() {
+    return this._availableDevices;
   },
 
   async syncFromServerState() {
@@ -257,21 +225,14 @@ const googleCastSender = {
   },
 
   async refreshAvailability() {
-    await Promise.all([
-      this.syncFromServerState(),
-      this._refreshDevicesFromServer(),
-    ]);
-
+    // Sync session state from server (devices come via WebSocket)
+    await this.syncFromServerState();
     return this.getAvailability();
   },
 
   async requestSession(options = {}) {
-    const skipRefresh = !!options.skipRefresh;
     const preferredDeviceId = options.preferredDeviceId || null;
-    // In server mode, show a device picker modal or just use the first available device
-    if (!skipRefresh && this._availableDevices.length === 0) {
-      await this._refreshDevicesFromServer();
-    }
+    // Devices are maintained via WebSocket; no HTTP polling needed
     console.log('[googleCastSender] requestSession() - available devices:', this._availableDevices.length);
     console.log('[googleCastSender] Device list:', this._availableDevices);
     

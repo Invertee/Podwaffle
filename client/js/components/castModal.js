@@ -2,6 +2,8 @@ const castModal = {
   container: null,
   _stateHandler: null,
   _castStateHandler: null,
+  _deviceFoundHandler: null,
+  _deviceLostHandler: null,
   _actionInProgress: false,
 
   _formatLastUpdated(value) {
@@ -85,6 +87,50 @@ const castModal = {
     this._stateHandler = null;
     this._castStateHandler = null;
   },
+
+  _bindDeviceUpdates() {
+    this._unbindDeviceUpdates();
+
+    if (!window.castClient) return;
+
+    this._deviceFoundHandler = (device) => {
+      console.log('[castModal] Device found via WebSocket:', device.name);
+      this.renderDeviceList(window.googleCastSender?.getAvailability() || { devices: [] });
+    };
+
+    this._deviceLostHandler = (data) => {
+      console.log('[castModal] Device lost via WebSocket:', data.deviceId);
+      this.renderDeviceList(window.googleCastSender?.getAvailability() || { devices: [] });
+    };
+
+    window.castClient.on('cast:device_found', this._deviceFoundHandler);
+    window.castClient.on('cast:device_lost', this._deviceLostHandler);
+  },
+
+  _unbindDeviceUpdates() {
+    if (window.castClient) {
+      if (this._deviceFoundHandler) {
+        window.castClient.off('cast:device_found', this._deviceFoundHandler);
+      }
+      if (this._deviceLostHandler) {
+        window.castClient.off('cast:device_lost', this._deviceLostHandler);
+      }
+    }
+    this._deviceFoundHandler = null;
+    this._deviceLostHandler = null;
+  },
+
+  _unbindHeaderStateUpdates() {
+    if (window.player && this._stateHandler) {
+      window.player.offStateChange(this._stateHandler);
+    }
+    if (window.castClient && this._castStateHandler) {
+      window.castClient.off('cast:status', this._castStateHandler);
+      window.castClient.off('user:queue', this._castStateHandler);
+    }
+    this._stateHandler = null;
+    this._castStateHandler = null;
+  },
   
   render(containerId) {
     this.container = document.getElementById(containerId);
@@ -122,42 +168,24 @@ const castModal = {
     
     this._renderHeaderState();
     this._bindHeaderStateUpdates();
+    this._bindDeviceUpdates();
     
-    await this.fetchDevices();
+    // Sync current session state only (devices come via WebSocket)
+    if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
+      await window.googleCastSender.syncFromServerState();
+    }
+    
+    // Render with currently cached device list from WebSocket
+    this.renderDeviceList(window.googleCastSender?.getAvailability() || { devices: [] });
   },
   
   hide() {
     this._actionInProgress = false;
     this._unbindHeaderStateUpdates();
+    this._unbindDeviceUpdates();
     if (this.container) this.container.style.display = 'none';
   },
-  
-  async fetchDevices() {
-    const listEl = document.getElementById('cast-device-list');
-    listEl.innerHTML = `
-      <div class="cast-loading">
-        <div class="spinner spin"></div>
-        Preparing Google Cast...
-      </div>
-    `;
-    
-    try {
-      const availability = window.googleCastSender && typeof window.googleCastSender.refreshAvailability === 'function'
-        ? await window.googleCastSender.refreshAvailability()
-        : (window.googleCastSender && typeof window.googleCastSender.getAvailability === 'function'
-          ? window.googleCastSender.getAvailability()
-          : { supported: false, connected: false, device: null, devices: [] });
-      this.renderDeviceList(availability);
-    } catch (err) {
-      console.error('Failed to fetch cast devices:', err);
-      listEl.innerHTML = `
-        <div class="cast-error">
-          <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-          <p>Google Cast is not available here.<br>Use Edge or Chrome on desktop with Cast support enabled.</p>
-        </div>
-      `;
-    }
-  },
+
   
   renderDeviceList(availability) {
     const listEl = document.getElementById('cast-device-list');
