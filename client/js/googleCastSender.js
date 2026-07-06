@@ -11,6 +11,7 @@ const googleCastSender = {
   _usingNativeCast: false,
   _nativeCast: null,
   _nativeCastStatePollTimer: null,
+  _nativeSessionActive: false,  // true whenever a native Cast session is considered live
   _castContext: null,
   _remotePlayer: null,
   _remotePlayerController: null,
@@ -84,8 +85,29 @@ const googleCastSender = {
       const session = sessionResult?.session || null;
       const media = mediaResult?.mediaStatus || null;
 
-      const deviceId = session?.deviceId || session?.deviceName || castState?.deviceId || null;
-      const deviceName = session?.deviceName || session?.friendlyName || castState?.deviceName || null;
+      // Try every plausible field name the Strasberry plugin might use for device identity
+      const deviceId =
+        session?.deviceId ||
+        session?.deviceName ||
+        session?.friendlyName ||
+        session?.castDeviceName ||
+        session?.routeId ||
+        session?.sessionId ||
+        castState?.deviceId ||
+        castState?.deviceName ||
+        castState?.friendlyName ||
+        castState?.castDeviceName ||
+        null;
+      const deviceName =
+        session?.deviceName ||
+        session?.friendlyName ||
+        session?.castDeviceName ||
+        castState?.deviceName ||
+        castState?.friendlyName ||
+        castState?.castDeviceName ||
+        (deviceId && String(deviceId)) ||
+        null;
+
       const status = String(media?.playerState || media?.status || '').toUpperCase();
       const normalizedStatus = status === 'PLAYING'
         ? 'playing'
@@ -93,6 +115,16 @@ const googleCastSender = {
 
       if (normalizedStatus) {
         this._lastKnownStatus = normalizedStatus;
+      }
+
+      // Keep _nativeSessionActive in sync: active when session object exists and
+      // media is not idle (or when we have an explicit device ID).
+      const sessionExists = !!(session && (sessionResult?.session !== null));
+      const mediaActive = normalizedStatus === 'playing' || normalizedStatus === 'paused';
+      if (sessionExists && (mediaActive || deviceId)) {
+        this._nativeSessionActive = true;
+      } else if (!sessionExists && normalizedStatus === 'idle') {
+        this._nativeSessionActive = false;
       }
 
       const payload = {
@@ -115,6 +147,7 @@ const googleCastSender = {
       };
 
       this._lastMirroredState = payload;
+      this._updateCastActiveFlag(!!payload.activeDeviceId);
       this._dispatch('statechange', payload);
 
       if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function' && payload.activeDeviceId) {
@@ -234,7 +267,12 @@ const googleCastSender = {
 
   isConnected() {
     if (this._usingNativeCast) {
-      return !!(this._lastMirroredState && this._lastMirroredState.activeDeviceId);
+      // _nativeSessionActive is the authoritative flag set when loadMedia/play succeeds
+      // or when the poll confirms a non-idle player state.  We also accept a non-idle
+      // _lastKnownStatus so that controls continue to work in the moments between polls.
+      return this._nativeSessionActive
+        || this._lastKnownStatus === 'playing'
+        || this._lastKnownStatus === 'paused';
     }
     return !!(this._remotePlayer && this._remotePlayer.isConnected);
   },
@@ -347,6 +385,7 @@ const googleCastSender = {
         currentTime: Math.max(0, Number(startPosition) || 0),
       });
       this._lastKnownStatus = 'playing';
+      this._nativeSessionActive = true;
       await this._pollNativeCastState();
       await this._mirrorNow({ force: true });
       return this.getCurrentDevice();
@@ -394,6 +433,7 @@ const googleCastSender = {
     if (this._usingNativeCast && this._nativeCast) {
       await this._nativeCast.play();
       this._lastKnownStatus = 'playing';
+      this._nativeSessionActive = true;
       await this._pollNativeCastState();
       await this._mirrorSoon(true);
       return { status: 'playing' };
@@ -412,6 +452,7 @@ const googleCastSender = {
     if (this._usingNativeCast && this._nativeCast) {
       await this._nativeCast.pause();
       this._lastKnownStatus = 'paused';
+      this._nativeSessionActive = true;
       await this._pollNativeCastState();
       await this._mirrorSoon(true);
       return { status: 'paused' };
@@ -469,6 +510,7 @@ const googleCastSender = {
         await this._nativeCast.endSession({ stopCasting: true });
       } catch (_) {}
       this._lastKnownStatus = 'idle';
+      this._nativeSessionActive = false;
       this._stopNativeCastStatePolling();
       await this._clearMirroredState();
       await this._startNativeCastStatePolling();
@@ -579,6 +621,7 @@ const googleCastSender = {
       });
     }
 
+    this._updateCastActiveFlag(!!payload.activeDeviceId);
     this._dispatch('statechange', payload);
     this._mirrorSoon(!!options.forceMirror);
   },
@@ -676,6 +719,16 @@ const googleCastSender = {
     });
   },
 
+  _updateCastActiveFlag(active) {
+    window.__castActive = !!active;
+    const cap = window.Capacitor;
+    if (cap && cap.Plugins && cap.Plugins.MediaSession && typeof cap.Plugins.MediaSession.setCastActive === 'function') {
+      cap.Plugins.MediaSession.setCastActive({ active: !!active }).catch((err) => {
+        console.warn('[googleCastSender] setCastActive failed:', err);
+      });
+    }
+  },
+
   async _clearMirroredState() {
     clearTimeout(this._mirrorTimer);
     this._mirrorTimer = null;
@@ -685,6 +738,9 @@ const googleCastSender = {
     this._lastKnownStatus = 'idle';
     this._mediaMeta = null;
     this._lastMirroredState = null;
+
+    this._nativeSessionActive = false;
+    this._updateCastActiveFlag(false);
 
     if (window.api && typeof window.api.clearCastState === 'function') {
       await window.api.clearCastState(ownerGuid).catch((err) => {
@@ -705,4 +761,11 @@ const googleCastSender = {
 };
 
 window.googleCastSender = googleCastSender;
+window.__castActive = false;
+window.__adjustCastVolume = function(delta) {
+  if (window.player && typeof window.player.setVolume === 'function') {
+    const nextVol = Math.max(0, Math.min(1, (window.player.volume || 0) + delta));
+    window.player.setVolume(nextVol);
+  }
+};
 googleCastSender.init();

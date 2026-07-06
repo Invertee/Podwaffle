@@ -11,8 +11,5 @@ project(':capacitor-splash-screen').projectDir = new File('../node_modules/@capa
 include ':capacitor-status-bar'
 project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacitor/status-bar/android')
 
-include ':jofr-capacitor-media-session'
-project(':jofr-capacitor-media-session').projectDir = new File('../node_modules/@jofr/capacitor-media-session/android')
-
 include ':strasberry-capacitor-cast'
 project(':strasberry-capacitor-cast').projectDir = new File('../node_modules/@strasberry/capacitor-cast/android')
