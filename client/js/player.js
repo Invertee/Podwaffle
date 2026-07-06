@@ -1346,7 +1346,23 @@ const player = {
     }
 
     try {
-      await window.googleCastSender.loadEpisode(this.currentEpisode, pos);
+      await window.googleCastSender.loadEpisode(this.currentEpisode, pos, resolvedDeviceId);
+      
+      // Immediately establish ownership in the session so controls work before WebSocket broadcast arrives
+      if (window.googleCastSender && window.googleCastSender._userGuid) {
+        window.googleCastSender._currentSession = {
+          activeDeviceId: resolvedDeviceId,
+          deviceId: resolvedDeviceId,
+          deviceName: sessionDevice?.name || 'Cast Device',
+          ownerGuid: window.googleCastSender._userGuid,
+          episodeGuid: this.currentEpisode.guid,
+          title: this.currentEpisode.title,
+          podcastTitle: this.currentEpisode.podcastTitle,
+          imageUrl: this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
+          status: 'connecting',
+        };
+      }
+      
       this.isPlaying = true;
       this._notifyStateChange();
       console.log('[player] Cast started on device:', resolvedDeviceId);

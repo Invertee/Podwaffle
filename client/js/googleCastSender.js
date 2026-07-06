@@ -300,7 +300,7 @@ const googleCastSender = {
     return this.requestSession({ skipRefresh: true, preferredDeviceId });
   },
 
-  async loadEpisode(episode, startPosition = 0) {
+  async loadEpisode(episode, startPosition = 0, preferredDeviceId = null) {
     this._resolveApiBaseUrl();
     if (!episode || !episode.audioUrl) {
       throw new Error('Cannot cast episode without audioUrl');
@@ -310,8 +310,8 @@ const googleCastSender = {
       throw new Error('Cast service unavailable. Check that the server is running.');
     }
 
-    // Use current device or find the first available
-    let targetDeviceId = this._currentSession?.activeDeviceId;
+    // Use preferred device, current session device, or first available
+    let targetDeviceId = preferredDeviceId || this._currentSession?.activeDeviceId;
     if (!targetDeviceId && this._availableDevices.length > 0) {
       targetDeviceId = this._availableDevices[0].id;
     }
