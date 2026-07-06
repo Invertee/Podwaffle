@@ -79,7 +79,16 @@ const googleCastSender = {
 
     window.castClient.on('cast:status', (status) => {
       console.log('[googleCastSender] Status update:', status);
-      this._currentSession = status.activeDeviceId ? status : null;
+      // Preserve ownerGuid from previous session if new message doesn't have it
+      if (status?.activeDeviceId) {
+        this._currentSession = {
+          ...this._currentSession,  // preserve old values like ownerGuid
+          ...status,                // overlay new values from server
+          ownerGuid: status.ownerGuid || this._currentSession?.ownerGuid || null,
+        };
+      } else {
+        this._currentSession = null;
+      }
       this._dispatch('statechange', status);
 
       // Notify player of state changes

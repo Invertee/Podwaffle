@@ -65,7 +65,10 @@ const castModal = {
     }
 
     if (window.castClient) {
-      this._castStateHandler = () => this._renderHeaderState();
+      this._castStateHandler = () => {
+        this._renderHeaderState();
+        this._updateStopButtonVisibility();
+      };
       window.castClient.on('cast:status', this._castStateHandler);
       window.castClient.on('user:queue', this._castStateHandler);
     }
@@ -203,14 +206,6 @@ const castModal = {
 
     listEl.innerHTML = `
       ${deviceRows}
-      ${(connected || hasActiveSession) ? `
-        <div class="cast-device-item" data-action="stop">
-          <div class="cast-device-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
-          </div>
-          <div class="cast-device-name">Stop casting and return to local playback</div>
-        </div>
-      ` : ''}
     `;
 
     listEl.querySelectorAll('[data-action="choose"]').forEach((item) => {
@@ -229,21 +224,6 @@ const castModal = {
           listEl.style.pointerEvents = '';
         }
       });
-    });
-
-    listEl.querySelector('[data-action="stop"]')?.addEventListener('click', async () => {
-      if (this._actionInProgress) return;
-      this._actionInProgress = true;
-      listEl.style.pointerEvents = 'none';
-      try {
-        if (window.player) await window.player.switchToLocal();
-        this.hide();
-      } catch (err) {
-        console.error('Failed to stop casting:', err);
-        alert('Failed to stop casting. See console.');
-        this._actionInProgress = false;
-        listEl.style.pointerEvents = '';
-      }
     });
   }
 };
