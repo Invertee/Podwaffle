@@ -150,6 +150,26 @@ const castClient = {
     this.listeners[event] = this.listeners[event].filter(h => h !== handler);
   },
 
+  isConnected() {
+    return !!(this.ws && this.ws.readyState === WebSocket.OPEN);
+  },
+
+  send(type, payload = {}) {
+    if (!type) return false;
+    if (!this.isConnected()) {
+      console.warn('[castClient] Cannot send message while disconnected:', type);
+      return false;
+    }
+
+    try {
+      this.ws.send(JSON.stringify({ type, ...(payload || {}) }));
+      return true;
+    } catch (err) {
+      console.error('[castClient] Failed to send message:', type, err);
+      return false;
+    }
+  },
+
   _dispatch(event, data) {
     const handlers = this.listeners[event] || [];
     handlers.forEach(h => {

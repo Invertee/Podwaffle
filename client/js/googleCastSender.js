@@ -144,8 +144,7 @@ const googleCastSender = {
   isConnected() {
     return !!(
       this._currentSession &&
-      this._currentSession.activeDeviceId &&
-      this._currentSession.ownerGuid === this._userGuid
+      this._currentSession.activeDeviceId
     );
   },
 
@@ -315,6 +314,13 @@ const googleCastSender = {
       throw new Error('Not connected to a cast session');
     }
 
+    if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      const sent = window.castClient.send('cast:play', {});
+      if (sent) {
+        return { ok: true, via: 'ws' };
+      }
+    }
+
     const response = await fetch(`${this._apiBaseUrl}/api/cast/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -333,6 +339,13 @@ const googleCastSender = {
     this._resolveApiBaseUrl();
     if (!this.isConnected()) {
       throw new Error('Not connected to a cast session');
+    }
+
+    if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      const sent = window.castClient.send('cast:pause', {});
+      if (sent) {
+        return { ok: true, via: 'ws' };
+      }
     }
 
     const response = await fetch(`${this._apiBaseUrl}/api/cast/pause`, {
@@ -357,6 +370,13 @@ const googleCastSender = {
 
     const targetPosition = Math.max(0, Number(position) || 0);
 
+    if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      const sent = window.castClient.send('cast:seek', { position: targetPosition });
+      if (sent) {
+        return { ok: true, via: 'ws', position: targetPosition };
+      }
+    }
+
     const response = await fetch(`${this._apiBaseUrl}/api/cast/seek`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -379,6 +399,13 @@ const googleCastSender = {
 
     const targetLevel = Math.max(0, Math.min(1, Number(level) || 0));
 
+    if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      const sent = window.castClient.send('cast:setVolume', { level: targetLevel });
+      if (sent) {
+        return { ok: true, via: 'ws', volume: targetLevel };
+      }
+    }
+
     const response = await fetch(`${this._apiBaseUrl}/api/cast/setVolume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -400,6 +427,15 @@ const googleCastSender = {
     }
 
     try {
+      if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+        const sent = window.castClient.send('cast:stop', {});
+        if (sent) {
+          this._currentSession = null;
+          this._dispatch('statechange', { status: 'idle', activeDeviceId: null, ownerGuid: null });
+          return { status: 'idle', via: 'ws' };
+        }
+      }
+
       const response = await fetch(`${this._apiBaseUrl}/api/cast/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
