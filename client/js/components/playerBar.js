@@ -13,7 +13,7 @@ const playerBar = {
       <div class="player-now-playing" id="pb-now-playing">
         <img id="pb-art" class="player-art" src="icons/icon-192.png" alt="Podcast artwork">
         <div class="pb-info">
-          <div id="pb-title" class="pb-title">Nothing playing</div>
+          <div id="pb-title" title="Nothing playing" class="pb-title">Nothing playing</div>
           <div id="pb-podcast" class="pb-podcast">Select a podcast to start</div>
         </div>
       </div>
@@ -480,7 +480,8 @@ const playerBar = {
     // Update episode info
     if (state.currentEpisode) {
       if (titleEl) titleEl.textContent = state.currentEpisode.title || 'Unknown Episode';
-      if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
+      if (titleEl) titleEl.title = state.currentEpisode.title || 'Unknown Episode';
+      if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || ' ';
       if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
       const episodeInfoText = this._getEpisodeInfoText(state.currentEpisode);
       if (mobileEpisodeInfo) mobileEpisodeInfo.textContent = episodeInfoText;
@@ -501,6 +502,7 @@ const playerBar = {
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
       if (mobileArt) mobileArt.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
       if (mobileTitle) mobileTitle.textContent = state.currentEpisode.title || 'Unknown Episode';
+      if (mobileTitle) mobileTitle.title = state.currentEpisode.title || 'Unknown Episode';
       if (mobilePodcast) mobilePodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
     } else {
       if (titleEl) titleEl.textContent = 'Nothing playing';
