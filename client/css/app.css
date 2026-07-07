@@ -746,6 +746,12 @@ body {
   display: inline-block;
 }
 
+@media (max-width: 768px) {
+  .view-mode-toggle {
+    bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-area-bottom) + 20px);
+  }
+}
+
 .touch-drag-ghost {
   border-radius: 8px !important;
   overflow: hidden;
@@ -2603,6 +2609,11 @@ input[type=range]::-moz-range-thumb {
   .episode-info {
     min-width: 0;
     width: 100%;
+  }
+
+  .episode-thumb {
+    width: 52px;
+    height: 52px;
   }
 
   .episode-title {

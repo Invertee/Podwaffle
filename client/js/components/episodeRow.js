@@ -1,6 +1,7 @@
 function createEpisodeRow(episode, progress, options = {}) {
   const {
     showCheckbox = false,
+    showArtwork = false,
     onPlay = () => {},
     onPlayNext = () => {},
     onPlayLast = () => {},
@@ -29,6 +30,18 @@ function createEpisodeRow(episode, progress, options = {}) {
       </label>
     `;
   }
+
+  const artworkUrl = episode.podcastImageUrl || 'icons/icon-192.png';
+  const artworkHtml = showArtwork
+    ? `
+      <img
+        class="episode-thumb"
+        src="${artworkUrl}"
+        alt="${episode.podcastTitle || 'Podcast'} artwork"
+        onerror="this.src='icons/icon-192.png'"
+      >
+    `
+    : '';
 
   let dateStr = 'Unknown date';
   const dateSource = episode.pubDate || episode.publishedAt || null;
@@ -128,6 +141,7 @@ function createEpisodeRow(episode, progress, options = {}) {
 
   row.innerHTML = `
     ${checkboxHtml}
+    ${artworkHtml}
     <div class="episode-info">
       <div class="episode-title"></div>
       <div class="episode-meta"></div>
@@ -167,8 +181,8 @@ function createEpisodeRow(episode, progress, options = {}) {
     metaEl.innerHTML = renderMetaHtml();
     progressSlotEl.innerHTML = renderProgressHtml();
     if (markPlayedBtn) {
-      markPlayedBtn.disabled = !!currentProgress?.played;
-      markPlayedBtn.title = currentProgress?.played ? 'Already played' : 'Mark Played';
+      markPlayedBtn.classList.toggle('is-active', !!currentProgress?.played);
+      markPlayedBtn.title = currentProgress?.played ? 'Remove played status' : 'Mark Played';
       markPlayedBtn.setAttribute('aria-label', markPlayedBtn.title);
     }
   };
@@ -207,8 +221,7 @@ function createEpisodeRow(episode, progress, options = {}) {
   if (playLastBtn) playLastBtn.addEventListener('click', (e) => { e.stopPropagation(); onPlayLast(episode); });
   if (markPlayedBtn) markPlayedBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (currentProgress?.played) return;
-    onMarkPlayed(episode);
+    onMarkPlayed(episode, !!currentProgress?.played);
   });
   bindDownload();
 

@@ -1,9 +1,6 @@
 async function renderPodcastDetail(container, feedId) {
   container.innerHTML = `
     <div class="view-header with-back">
-      <button class="btn-icon back-btn" onclick="window.history.back()">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-      </button>
     </div>
     <div id="pd-content">
       <div class="loading-state">
@@ -151,20 +148,33 @@ async function renderPodcastDetail(container, feedId) {
             if (window.player) window.player.addToQueue(episode);
           },
           onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
-          onMarkPlayed: async (episode) => {
+          onMarkPlayed: async (episode, isCurrentlyPlayed) => {
             try {
-              const nextProgress = {
-                position: episode.duration || 0,
-                duration: episode.duration || 0,
-                played: true,
-                skipStats: true,
-                feedId: feedId,
-                updatedAt: new Date().toISOString(),
-              };
+              const nextProgress = isCurrentlyPlayed
+                ? {
+                    position: 0,
+                    duration: episode.duration || 0,
+                    played: false,
+                    skipStats: true,
+                    feedId: feedId,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : {
+                    position: episode.duration || 0,
+                    duration: episode.duration || 0,
+                    played: true,
+                    skipStats: true,
+                    feedId: feedId,
+                    updatedAt: new Date().toISOString(),
+                  };
               await window.api.updateProgress(guid, episode.guid, nextProgress);
               window.setEpisodeProgressState(episode.guid, nextProgress);
-              if (window.cacheManager) {
+              if (!isCurrentlyPlayed && window.cacheManager) {
                 await window.cacheManager.deleteEpisode(episode);
+              }
+              if (window.player?.currentEpisode?.guid === episode.guid && isCurrentlyPlayed) {
+                window.player.currentEpisode._markedPlayed = false;
+                window.player.currentEpisode._markingPlayed = false;
               }
             } catch(e) { console.error(e); }
           }

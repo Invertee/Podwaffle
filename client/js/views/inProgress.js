@@ -88,6 +88,7 @@ async function renderInProgress(container) {
 
       const row = window.createEpisodeRow(ep, item, {
         showCheckbox: false,
+        showArtwork: true,
         cacheStatus: cacheStatuses[ep.guid] || 'uncached',
         onPlay: (episode) => {
           if (window.player) {
