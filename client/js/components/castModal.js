@@ -219,7 +219,7 @@ const castModal = {
     const session = availability?.session || window.googleCastSender?._currentSession || null;
     const devices = Array.isArray(availability?.devices) ? availability.devices : [];
     const hasActiveSession = !!(session && (session.activeDeviceId || session.deviceId));
-    const currentName = device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
+    const currentName = session?.deviceName || device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
     
     if (!supported) {
       const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
@@ -231,6 +231,19 @@ const castModal = {
         <div class="cast-error">
           <svg viewBox="0 0 24 24" width="24" height="24" stroke="var(--accent-red)" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           <p>${reason}<br>Desktop Edge/Chrome casting remains available.</p>
+        </div>
+      `;
+      return;
+    }
+
+    if (hasActiveSession) {
+      listEl.innerHTML = `
+        <div class="cast-device-item active" aria-disabled="true">
+          <div class="cast-device-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
+          </div>
+          <div class="cast-device-name">Casting to ${currentName}</div>
+          <div class="cast-active-dot"></div>
         </div>
       `;
       return;

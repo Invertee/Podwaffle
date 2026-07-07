@@ -146,6 +146,7 @@ wss.on('connection', (ws, req) => {
           activeDeviceId: session.activeDeviceId || session.deviceId || null,
           deviceName: session.deviceName || null,
           ownerGuid: session.ownerGuid || null,
+          mediaUrl: session.mediaUrl || null,
           episodeGuid: session.episodeGuid || null,
           title: session.title || null,
           podcastTitle: session.podcastTitle || null,

@@ -112,6 +112,7 @@ const googleCastSender = {
         window.player.applyCastState({
           deviceId: status.activeDeviceId,
           deviceName: status.deviceName,
+          mediaUrl: status.mediaUrl,
           episodeGuid: status.episodeGuid,
           title: status.title,
           podcastTitle: status.podcastTitle,

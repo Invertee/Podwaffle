@@ -30,6 +30,7 @@ const player = {
   _queueSyncInFlight: false,
   _lastQueueSyncAt: 0,
   _lastCastStatus: 'idle',
+  _castStopInProgress: false,
   _queueStateUpdatedAt: null,
   _queueStateMode: 'local',
   _queueStateSource: 'local',
@@ -306,6 +307,10 @@ const player = {
     const becameIdle = nextStatus === 'idle' && wasPlaying;
     this._lastCastStatus = nextStatus || this._lastCastStatus;
 
+    if (this._castStopInProgress && nextStatus === 'idle') {
+      return;
+    }
+
     if (becameIdle) {
       this._advanceQueueAfterCompletion();
     }
@@ -330,18 +335,21 @@ const player = {
       return;
     }
 
-    this._activeCastDeviceId = statusObj.deviceId || this._activeCastDeviceId;
+    if (statusObj.deviceId !== undefined) {
+      this._activeCastDeviceId = statusObj.deviceId || null;
+    }
     if (statusObj.position != null) this.position = statusObj.position;
     if (statusObj.duration != null) this.duration = statusObj.duration;
     if (statusObj.status) this.isPlaying = statusObj.status === 'playing';
     if (statusObj.volume != null) this.volume = statusObj.volume;
 
-    if (statusObj.episodeGuid || statusObj.title) {
+    if (statusObj.episodeGuid || statusObj.title || statusObj.mediaUrl) {
       this.currentEpisode = {
         ...(this.currentEpisode || {}),
         guid: statusObj.episodeGuid || this.currentEpisode?.guid || '',
         title: statusObj.title || this.currentEpisode?.title || '',
         podcastTitle: statusObj.podcastTitle || this.currentEpisode?.podcastTitle || '',
+        audioUrl: statusObj.mediaUrl || this.currentEpisode?.audioUrl || '',
         podcastImageUrl: statusObj.imageUrl || this.currentEpisode?.podcastImageUrl || '',
         imageUrl: statusObj.imageUrl || this.currentEpisode?.imageUrl || '',
       };
@@ -1379,6 +1387,10 @@ const player = {
     console.log('[player] Switching to local playback.');
     const pos = this.position;
     const isCurrentlyInCastMode = this.mode === 'cast';
+    const resumeEpisode = this.currentEpisode ? { ...this.currentEpisode } : null;
+    const resumeAudioUrl = resumeEpisode?.audioUrl || '';
+
+    this._castStopInProgress = true;
 
     try {
       // Stop the cast session on the server/device before resuming local playback.
@@ -1416,6 +1428,12 @@ const player = {
     this.mode = 'local';
     this._activeCastDeviceId = null;
     this._lastCastStatus = 'idle';
+    if (resumeEpisode) {
+      this.currentEpisode = {
+        ...resumeEpisode,
+        audioUrl: resumeAudioUrl,
+      };
+    }
     this._persistQueueStateLocal({
       mode: 'local',
       currentEpisodeGuid: this.currentEpisode?.guid || '',
@@ -1427,8 +1445,11 @@ const player = {
       const resumePos = Math.max(0, Math.floor(pos || 0));
       this._setAudioSource(this.currentEpisode.audioUrl, resumePos);
       this.play();
+    } else if (isCurrentlyInCastMode) {
+      console.warn('[player] Unable to resume local playback after cast stop: missing audioUrl');
     }
     
+    this._castStopInProgress = false;
     this._notifyStateChange();
   },
 };

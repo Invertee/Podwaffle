@@ -271,6 +271,7 @@ const castClient = {
           if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
             window.player.applyCastState({
               deviceId: this._castState.activeDeviceId,
+              mediaUrl: this._castState.mediaUrl,
               episodeGuid: this._castState.episodeGuid,
               title: this._castState.title,
               podcastTitle: this._castState.podcastTitle,
