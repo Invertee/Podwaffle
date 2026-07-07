@@ -573,7 +573,7 @@ const playerBar = {
     
     // Update cast icon color if casting
     if (castBtn && state.mode === 'cast') {
-      castBtn.style.color = 'var(--accent-blue)';
+      castBtn.style.color = 'var(--accent-red)';
     } else if (castBtn) {
       castBtn.style.color = '';
     }
