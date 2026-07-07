@@ -25,7 +25,6 @@ const createApiRouter = require('./routes/api');
 // Configuration
 // ---------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-const CLIENT_DIR = path.join(__dirname, '..', 'client');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const USERS_DIR = path.join(DATA_DIR, 'users');
 const PODCASTS_DIR = path.join(DATA_DIR, 'podcasts');
@@ -47,7 +46,6 @@ function printBanner() {
   console.log('  🎙️  Podwaffle Server — Self-hosted podcast app');
   console.log(`  📡  Port      : ${PORT}`);
   console.log(`  📂  Data dir  : ${DATA_DIR}`);
-  console.log(`  🌐  Client dir: ${CLIENT_DIR}`);
   console.log(`  🔐  New user sessions disabled: ${DISABLE_NEW_USER_SESSIONS ? 'yes' : 'no'}`);
   console.log('');
 }
@@ -92,9 +90,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// Static files from client directory (if it exists)
-app.use(express.static(CLIENT_DIR));
 
 // ---------------------------------------------------------------------------
 // HTTP server & WebSocket server
@@ -246,26 +241,6 @@ app.use('/api', createApiRouter(feedService, userService, castService, broadcast
 }));
 
 // ---------------------------------------------------------------------------
-// SPA catch-all — serve index.html for all non-API routes
-// ---------------------------------------------------------------------------
-app.get('*', (req, res) => {
-  const indexPath = path.join(CLIENT_DIR, 'index.html');
-  console.log(`[http] SPA catch-all → serving ${indexPath}`);
-  fs.access(indexPath, fs.constants.F_OK, (err) => {
-    if (err) {
-      res.status(200).json({
-        service: 'Podwaffle Server',
-        version: '1.0.0',
-        status: 'running',
-        message: 'Client files not found. Place your client build in the ../client/ directory.'
-      });
-    } else {
-      res.sendFile(indexPath);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Uncaught exception / rejection handlers
 // ---------------------------------------------------------------------------
 process.on('uncaughtException', (err) => {
@@ -326,7 +301,6 @@ async function start() {
 
   // 5. Start listening
   server.listen(PORT, () => {
-    console.log(`\n[server] ✅ Podwaffle is running at http://localhost:${PORT}`);
     console.log(`[server] 🔌 WebSocket available at ws://localhost:${PORT}`);
     console.log(`[server] 📡 API available at http://localhost:${PORT}/api`);
     console.log('');

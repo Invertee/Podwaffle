@@ -1375,6 +1375,7 @@ const player = {
       if (Number.isFinite(castVolume)) {
         this.volume = Math.max(0, Math.min(1, castVolume));
       }
+      const sessionVolume = Number.isFinite(castVolume) ? Math.max(0, Math.min(1, castVolume)) : this.volume;
       
       // Immediately establish ownership in the session so controls work before WebSocket broadcast arrives
       if (window.googleCastSender && window.googleCastSender._userGuid) {
@@ -1387,7 +1388,7 @@ const player = {
           title: this.currentEpisode.title,
           podcastTitle: this.currentEpisode.podcastTitle,
           imageUrl: this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
-          volume: this.volume,
+          volume: sessionVolume,
           status: 'connecting',
         };
       }

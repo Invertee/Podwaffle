@@ -154,6 +154,37 @@ function _clearIdleTimeoutTimer() {
   }
 }
 
+function _normalizeVolume(rawVolume) {
+  if (rawVolume == null) return null;
+  if (typeof rawVolume === 'number' && Number.isFinite(rawVolume)) {
+    return Math.max(0, Math.min(1, rawVolume));
+  }
+  if (typeof rawVolume === 'object') {
+    if (rawVolume.level != null) return _normalizeVolume(rawVolume.level);
+    if (rawVolume.volume != null) return _normalizeVolume(rawVolume.volume);
+  }
+  const parsed = Number(rawVolume);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : null;
+}
+
+function _syncClientVolume() {
+  if (!state.client || typeof state.client.getVolume !== 'function') return;
+
+  state.client.getVolume((err, volumeState) => {
+    if (err) {
+      console.warn('[castService] getVolume() → failed:', err.message);
+      return;
+    }
+
+    const nextVolume = _normalizeVolume(volumeState);
+    if (nextVolume == null) return;
+
+    state.volume = nextVolume;
+    broadcastState();
+    console.log(`[castService] getVolume() → ${nextVolume}`);
+  });
+}
+
 function _armIdleTimeout(reason = 'idle') {
   _clearIdleTimeoutTimer();
   if (!state.activeDeviceId) return;
@@ -319,6 +350,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           const newPosition = playerStatus.currentTime || 0;
           const newDuration = (playerStatus.media && playerStatus.media.duration) || state.duration || 0;
           const playerState = playerStatus.playerState || 'IDLE';
+          const statusVolume = _normalizeVolume(playerStatus.volume);
 
           let mappedStatus;
           switch (playerState) {
@@ -332,6 +364,9 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           state.position = newPosition;
           state.duration = newDuration;
           state.status = mappedStatus;
+          if (statusVolume != null) {
+            state.volume = statusVolume;
+          }
           device.status = mappedStatus;
           devices.set(deviceId, device);
           if (mappedStatus === 'playing') {
@@ -424,6 +459,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           devices.set(deviceId, device);
           _clearIdleTimeoutTimer();
           broadcastState();
+          _syncClientVolume();
           console.log(`[castService] castTo() → media loaded and playing on ${device.name}`);
           resolve({ status: 'playing', deviceId, mediaUrl });
         });
