@@ -1422,6 +1422,8 @@ const player = {
       }
     } catch (err) {
       console.warn('[player] switchToLocal error (continuing anyway):', err);
+    } finally {
+      this._castStopInProgress = false;
     }
 
     // Always transition to local mode, even if stop failed

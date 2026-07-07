@@ -188,6 +188,7 @@ const castModal = {
   async show() {
     if (!this.container) return;
     this.container.style.display = 'block';
+    this._actionInProgress = false;
     
     this._renderHeaderState();
     this._bindHeaderStateUpdates();
@@ -196,6 +197,10 @@ const castModal = {
     // Sync current session state only (devices come via WebSocket)
     if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
       await window.googleCastSender.syncFromServerState();
+    }
+
+    if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      window.castClient.send('cast:get_devices');
     }
     
     // Render with currently cached device list from WebSocket
@@ -220,6 +225,10 @@ const castModal = {
     const devices = Array.isArray(availability?.devices) ? availability.devices : [];
     const hasActiveSession = !!(session && (session.activeDeviceId || session.deviceId));
     const currentName = session?.deviceName || device?.name || (window.player && window.player._activeCastDeviceId) || 'Google Cast device';
+
+    if (listEl) {
+      listEl.style.pointerEvents = '';
+    }
     
     if (!supported) {
       const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
@@ -288,6 +297,7 @@ const castModal = {
           alert('Failed to start Google Cast. See console.');
           this._actionInProgress = false;
           listEl.style.pointerEvents = '';
+          this._updateStopButtonVisibility();
         }
       });
     });
