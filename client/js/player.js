@@ -13,6 +13,7 @@ const player = {
   position: 0,
   duration: 0,
   volume: 1.0,
+  _localVolume: 1.0,
   skipBackSecs: 15,
   skipForwardSecs: 45,
   progressSyncInterval: null,
@@ -384,6 +385,7 @@ const player = {
     // Load saved volume
     const savedVolume = parseFloat(localStorage.getItem('podwaffle_volume') || '1');
     this.volume = isNaN(savedVolume) ? 1.0 : savedVolume;
+    this._localVolume = this.volume;
     this.audio.volume = this.volume;
 
     // Load saved skip settings
@@ -639,7 +641,10 @@ const player = {
   setVolume(level) {
     this.volume = Math.max(0, Math.min(1, level));
     this.audio.volume = this.volume;
-    localStorage.setItem('podwaffle_volume', String(this.volume));
+    if (this.mode !== 'cast') {
+      this._localVolume = this.volume;
+      localStorage.setItem('podwaffle_volume', String(this.volume));
+    }
     if (this.mode === 'cast' && window.googleCastSender && window.googleCastSender.isConnected()) {
       Promise.resolve(window.googleCastSender.setVolume(this.volume)).catch(err => console.error('[player] setCastVolume error:', err));
     }
@@ -1338,6 +1343,7 @@ const player = {
 
     this.mode = 'cast';
     this._activeCastDeviceId = resolvedDeviceId;
+    this._localVolume = this.volume;
     this._clearPersistedPlaybackSession({
       episodeGuid: this.currentEpisode?.guid,
       keepalive: true,
@@ -1430,6 +1436,11 @@ const player = {
     this.mode = 'local';
     this._activeCastDeviceId = null;
     this._lastCastStatus = 'idle';
+    if (Number.isFinite(this._localVolume)) {
+      this.volume = Math.max(0, Math.min(1, this._localVolume));
+      this.audio.volume = this.volume;
+      localStorage.setItem('podwaffle_volume', String(this.volume));
+    }
     if (resumeEpisode) {
       this.currentEpisode = {
         ...resumeEpisode,
