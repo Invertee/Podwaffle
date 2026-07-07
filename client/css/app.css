@@ -720,7 +720,7 @@ body {
 .view-mode-toggle {
   position: fixed;
   right: 20px;
-  bottom: calc(var(--player-height) + 20px);
+  bottom: calc(var(--player-height) + 50px);
   z-index: 220;
   width: 40px;
   height: 40px;
