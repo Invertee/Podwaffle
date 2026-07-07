@@ -149,6 +149,14 @@ function _clearStatusPoller() {
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
   _clearStatusPoller();
+  const previousActiveDeviceId = state.activeDeviceId;
+  if (previousActiveDeviceId && devices.has(previousActiveDeviceId)) {
+    const device = devices.get(previousActiveDeviceId);
+    if (device) {
+      device.status = 'idle';
+      devices.set(previousActiveDeviceId, device);
+    }
+  }
   state.activeDeviceId = null;
   state.mediaUrl = null;
   state.episodeGuid = null;
@@ -161,6 +169,7 @@ function _resetState() {
   state.status = 'idle';
   state.client = null;
   state.player = null;
+  state.ownerGuid = null;
 }
 
 function _disconnectClient() {

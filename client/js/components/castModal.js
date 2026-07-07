@@ -6,6 +6,16 @@ const castModal = {
   _deviceLostHandler: null,
   _actionInProgress: false,
 
+  _getSessionContext() {
+    const sender = window.googleCastSender;
+    const castSession = sender?._currentSession || null;
+    const userGuid = sender?._userGuid || localStorage.getItem('podwaffle_guid') || 'unknown';
+    const activeDeviceId = castSession?.activeDeviceId || castSession?.deviceId || null;
+    const hasActiveSession = !!activeDeviceId;
+    const isOwner = !!(hasActiveSession && castSession?.ownerGuid && castSession.ownerGuid === userGuid);
+    return { sender, castSession, userGuid, hasActiveSession, isOwner, activeDeviceId };
+  },
+
   _formatLastUpdated(value) {
     if (!value) return 'Unknown';
     const dt = new Date(value);
@@ -22,25 +32,21 @@ const castModal = {
       return;
     }
 
-    // Get real-time cast state from sender (which has ownership info from WebSocket)
-    const sender = window.googleCastSender;
-    const castSession = sender?._currentSession;
-    const userGuid = sender?._userGuid || localStorage.getItem('podwaffle_guid') || 'unknown';
+    const { castSession, userGuid, hasActiveSession } = this._getSessionContext();
     
     // Determine ownership
     let ownerStatus = 'No cast session';
-    let isOwner = false;
     let deviceInfo = '(none)';
     let episodeInfo = '(none)';
     
-    if (castSession && castSession.activeDeviceId) {
+    if (hasActiveSession) {
+      const isOwner = !!(castSession?.ownerGuid && castSession.ownerGuid === userGuid);
       if (castSession.ownerGuid) {
-        isOwner = castSession.ownerGuid === userGuid;
         ownerStatus = isOwner ? '✓ You own cast' : '✗ Someone else owns cast';
       } else {
         ownerStatus = 'Cast active (owner unknown)';
       }
-      deviceInfo = castSession.deviceName || castSession.activeDeviceId;
+      deviceInfo = castSession.deviceName || castSession.activeDeviceId || castSession.deviceId;
       episodeInfo = castSession.title || '(none)';
     }
     
@@ -56,6 +62,16 @@ const castModal = {
       </div>
     `;
     infoEl.style.display = 'block';
+    this._updateStopButtonVisibility();
+  },
+
+  _updateStopButtonVisibility() {
+    const stopBtn = document.getElementById('cast-modal-stop');
+    if (!stopBtn) return;
+
+    const { hasActiveSession, isOwner } = this._getSessionContext();
+    stopBtn.style.display = hasActiveSession && isOwner ? 'inline-flex' : 'none';
+    stopBtn.disabled = this._actionInProgress;
   },
 
   _bindHeaderStateUpdates() {
@@ -120,18 +136,6 @@ const castModal = {
     this._deviceLostHandler = null;
   },
 
-  _unbindHeaderStateUpdates() {
-    if (window.player && this._stateHandler) {
-      window.player.offStateChange(this._stateHandler);
-    }
-    if (window.castClient && this._castStateHandler) {
-      window.castClient.off('cast:status', this._castStateHandler);
-      window.castClient.off('user:queue', this._castStateHandler);
-    }
-    this._stateHandler = null;
-    this._castStateHandler = null;
-  },
-  
   render(containerId) {
     this.container = document.getElementById(containerId);
     if (!this.container) return;
@@ -146,6 +150,9 @@ const castModal = {
             <button id="cast-modal-close" class="btn-icon"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
           <h3 class="cast-modal-title">Cast to a device</h3>
+          <div class="cast-modal-actions">
+            <button id="cast-modal-stop" class="btn btn-outline" style="display:none;">Stop casting</button>
+          </div>
           <div id="cast-device-list" class="cast-device-list">
             <div class="cast-loading">
               <div class="spinner spin"></div>
@@ -160,6 +167,22 @@ const castModal = {
       if (e.target === e.currentTarget) this.hide();
     });
     document.getElementById('cast-modal-close').addEventListener('click', () => this.hide());
+    document.getElementById('cast-modal-stop').addEventListener('click', async () => {
+      if (this._actionInProgress) return;
+      this._actionInProgress = true;
+      this._updateStopButtonVisibility();
+      try {
+        if (window.player && typeof window.player.switchToLocal === 'function') {
+          await window.player.switchToLocal();
+        }
+        this.hide();
+      } catch (err) {
+        console.error('[castModal] Failed to stop casting:', err);
+        alert('Failed to stop casting. See console.');
+        this._actionInProgress = false;
+        this._updateStopButtonVisibility();
+      }
+    });
   },
   
   async show() {
@@ -177,6 +200,7 @@ const castModal = {
     
     // Render with currently cached device list from WebSocket
     this.renderDeviceList(window.googleCastSender?.getAvailability() || { devices: [] });
+    this._updateStopButtonVisibility();
   },
   
   hide() {
@@ -240,6 +264,7 @@ const castModal = {
       item.addEventListener('click', async () => {
         if (this._actionInProgress) return;
         this._actionInProgress = true;
+        this._updateStopButtonVisibility();
         listEl.style.pointerEvents = 'none';
         try {
           const selectedDeviceId = item.getAttribute('data-device-id') || null;

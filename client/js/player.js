@@ -1381,31 +1381,32 @@ const player = {
     const isCurrentlyInCastMode = this.mode === 'cast';
 
     try {
-      // Stop the cast session on the server
+      // Stop the cast session on the server/device before resuming local playback.
       if (window.googleCastSender && window.googleCastSender.isConnected()) {
         const stopResult = await window.googleCastSender.stop();
         console.log('[player] Cast session stopped:', stopResult);
       }
 
-      // Explicitly clear any residual cast state from client and server
+      // Clear any residual client-side cast state immediately.
       if (window.castClient && window.castClient.getCastState) {
         const castState = window.castClient.getCastState();
         if (castState.activeDeviceId) {
           console.log('[player] Clearing residual cast state from client');
-          // Call dispatch to clear it from listener state
           if (window.castClient._castState) {
+            window.castClient._castState.status = 'idle';
+            window.castClient._castState.position = 0;
+            window.castClient._castState.duration = 0;
             window.castClient._castState.activeDeviceId = null;
+            window.castClient._castState.episodeGuid = null;
+            window.castClient._castState.title = null;
+            window.castClient._castState.podcastTitle = null;
+            window.castClient._castState.imageUrl = null;
             window.castClient._castState.ownerGuid = null;
             window.castClient._castState.deviceName = null;
+            window.castClient._castState.mediaUrl = null;
+            window.castClient._castState.volume = this.volume;
           }
         }
-      }
-
-      // Always clear mirrored backend cast state as a safety net
-      if (window.api && typeof window.api.clearCastState === 'function') {
-        await window.api.clearCastState(localStorage.getItem('podwaffle_guid')).catch(err => {
-          console.warn('[player] Failed to clear server cast state:', err.message);
-        });
       }
     } catch (err) {
       console.warn('[player] switchToLocal error (continuing anyway):', err);
@@ -1414,8 +1415,14 @@ const player = {
     // Always transition to local mode, even if stop failed
     this.mode = 'local';
     this._activeCastDeviceId = null;
+    this._lastCastStatus = 'idle';
+    this._persistQueueStateLocal({
+      mode: 'local',
+      currentEpisodeGuid: this.currentEpisode?.guid || '',
+      updatedAt: new Date().toISOString(),
+    });
+    this._scheduleQueueSync({ immediate: true });
     
-    // Wait a brief moment to let server state settle, then resume
     if (isCurrentlyInCastMode && this.currentEpisode && this.currentEpisode.audioUrl) {
       const resumePos = Math.max(0, Math.floor(pos || 0));
       this._setAudioSource(this.currentEpisode.audioUrl, resumePos);

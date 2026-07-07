@@ -447,26 +447,44 @@ const googleCastSender = {
     }
 
     try {
-      if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
+      if (this._apiBaseUrl) {
+        const response = await fetch(`${this._apiBaseUrl}/api/cast/stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userGuid: this._userGuid }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        await response.json().catch(() => null);
+      } else if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
         const sent = window.castClient.send('cast:stop', {});
-        if (sent) {
-          this._currentSession = null;
-          this._dispatch('statechange', { status: 'idle', activeDeviceId: null, ownerGuid: null });
-          return { status: 'idle', via: 'ws' };
+        if (!sent) {
+          throw new Error('Failed to send cast:stop over WebSocket');
         }
       }
-
-      const response = await fetch(`${this._apiBaseUrl}/api/cast/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userGuid: this._userGuid }),
-      });
-    } catch (_) {
-      // Ignore errors on stop
+    } catch (err) {
+      console.warn('[googleCastSender] Failed to stop cast session cleanly:', err?.message || err);
+      throw err;
     }
 
     this._currentSession = null;
-    this._dispatch('statechange', { status: 'idle', activeDeviceId: null, ownerGuid: null });
+    this._dispatch('statechange', {
+      status: 'idle',
+      activeDeviceId: null,
+      deviceName: null,
+      ownerGuid: null,
+      episodeGuid: null,
+      title: null,
+      podcastTitle: null,
+      imageUrl: null,
+      position: 0,
+      duration: 0,
+      volume: 1,
+    });
     return { status: 'idle' };
   },
 
