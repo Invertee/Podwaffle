@@ -120,6 +120,7 @@ const googleCastSender = {
           position: status.position,
           duration: status.duration,
           status: status.status,
+          reason: status.reason,
           volume: status.volume,
         });
       }

@@ -279,6 +279,7 @@ const castClient = {
               position: this._castState.position,
               duration: this._castState.duration,
               status: this._castState.status,
+              reason: data.data.reason,
               volume: this._castState.volume,
             });
           }

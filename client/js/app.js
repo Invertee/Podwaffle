@@ -500,6 +500,9 @@ async function initApp() {
             window.player.position = castState.position || 0;
             window.player.duration = castState.duration || 0;
             window.player.isPlaying = castState.status === 'playing';
+            if (Number.isFinite(Number(castState.volume))) {
+              window.player.volume = Math.max(0, Math.min(1, Number(castState.volume)));
+            }
             
             // Restore episode metadata from cast state if available
             window.player.currentEpisode = {

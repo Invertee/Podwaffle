@@ -32,30 +32,15 @@ const castModal = {
       return;
     }
 
-    const { castSession, userGuid, hasActiveSession } = this._getSessionContext();
-    
-    // Determine ownership
-    let ownerStatus = 'No cast session';
-    let deviceInfo = '(none)';
-    let episodeInfo = '(none)';
-    
-    if (hasActiveSession) {
-      const isOwner = !!(castSession?.ownerGuid && castSession.ownerGuid === userGuid);
-      if (castSession.ownerGuid) {
-        ownerStatus = isOwner ? '✓ You own cast' : '✗ Someone else owns cast';
-      } else {
-        ownerStatus = 'Cast active (owner unknown)';
-      }
-      deviceInfo = castSession.deviceName || castSession.activeDeviceId || castSession.deviceId;
-      episodeInfo = castSession.title || '(none)';
-    }
-    
+    const { castSession, hasActiveSession } = this._getSessionContext();
+    const castState = hasActiveSession ? 'casting' : 'local';
+    const deviceInfo = hasActiveSession ? (castSession.deviceName || castSession.activeDeviceId || castSession.deviceId || 'Unknown device') : 'Local playback';
+    const episodeInfo = hasActiveSession ? (castSession.title || '(none)') : 'Local playback';
     const queueLen = Array.isArray(window.player?.queue) ? window.player.queue.length : 0;
-    const currentEpisodeGuid = window.player?.currentEpisode?.guid || '(none)';
 
     infoEl.innerHTML = `
       <div class="cast-state-grid">
-        <div class="cast-state-row"><span class="cast-state-key">Cast State</span><span class="cast-state-val">${ownerStatus}</span></div>
+        <div class="cast-state-row"><span class="cast-state-key">State</span><span class="cast-state-val">${castState}</span></div>
         <div class="cast-state-row"><span class="cast-state-key">Device</span><span class="cast-state-val">${deviceInfo}</span></div>
         <div class="cast-state-row"><span class="cast-state-key">Playing</span><span class="cast-state-val">${episodeInfo}</span></div>
         <div class="cast-state-row"><span class="cast-state-key">Queue</span><span class="cast-state-val">${queueLen} items</span></div>
@@ -66,11 +51,11 @@ const castModal = {
   },
 
   _updateStopButtonVisibility() {
-    const stopBtn = document.getElementById('cast-modal-stop');
+    const stopBtn = document.getElementById('cast-active-stop');
     if (!stopBtn) return;
 
-    const { hasActiveSession, isOwner } = this._getSessionContext();
-    stopBtn.style.display = hasActiveSession && isOwner ? 'inline-flex' : 'none';
+    const { hasActiveSession } = this._getSessionContext();
+    stopBtn.style.display = hasActiveSession ? 'inline-flex' : 'none';
     stopBtn.disabled = this._actionInProgress;
   },
 
@@ -147,12 +132,9 @@ const castModal = {
             <div id="cast-modal-info" class="cast-modal-info">
               <!-- Populated dynamically -->
             </div>
-            <button id="cast-modal-close" class="btn-icon"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+            <button id="cast-modal-close" class="btn-icon cast-modal-close" aria-label="Close cast modal"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
           </div>
           <h3 class="cast-modal-title">Cast to a device</h3>
-          <div class="cast-modal-actions">
-            <button id="cast-modal-stop" class="btn btn-outline" style="display:none;">Stop casting</button>
-          </div>
           <div id="cast-device-list" class="cast-device-list">
             <div class="cast-loading">
               <div class="spinner spin"></div>
@@ -167,22 +149,6 @@ const castModal = {
       if (e.target === e.currentTarget) this.hide();
     });
     document.getElementById('cast-modal-close').addEventListener('click', () => this.hide());
-    document.getElementById('cast-modal-stop').addEventListener('click', async () => {
-      if (this._actionInProgress) return;
-      this._actionInProgress = true;
-      this._updateStopButtonVisibility();
-      try {
-        if (window.player && typeof window.player.switchToLocal === 'function') {
-          await window.player.switchToLocal();
-        }
-        this.hide();
-      } catch (err) {
-        console.error('[castModal] Failed to stop casting:', err);
-        alert('Failed to stop casting. See console.');
-        this._actionInProgress = false;
-        this._updateStopButtonVisibility();
-      }
-    });
   },
   
   async show() {
@@ -247,14 +213,35 @@ const castModal = {
 
     if (hasActiveSession) {
       listEl.innerHTML = `
-        <div class="cast-device-item active" aria-disabled="true">
+        <div class="cast-device-item active cast-device-item-active" aria-disabled="true">
           <div class="cast-device-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path><line x1="2" y1="20" x2="2.01" y2="20"></line></svg>
           </div>
           <div class="cast-device-name">Casting to ${currentName}</div>
+          <button id="cast-active-stop" class="btn btn-danger cast-active-stop">Stop casting</button>
           <div class="cast-active-dot"></div>
         </div>
       `;
+      const stopBtn = document.getElementById('cast-active-stop');
+      if (stopBtn) {
+        stopBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (this._actionInProgress) return;
+          this._actionInProgress = true;
+          this._updateStopButtonVisibility();
+          try {
+            if (window.player && typeof window.player.switchToLocal === 'function') {
+              await window.player.switchToLocal();
+            }
+            this.hide();
+          } catch (err) {
+            console.error('[castModal] Failed to stop casting:', err);
+            alert('Failed to stop casting. See console.');
+            this._actionInProgress = false;
+            this._updateStopButtonVisibility();
+          }
+        });
+      }
       return;
     }
 

@@ -25,6 +25,7 @@ const state = {
   client: null,
   player: null,
   statusPoller: null,
+  idleTimeoutTimer: null,
   ownerGuid: null, // The user GUID who initiated the cast session
   broadcastFn: null // Callback to broadcast state to WS clients
 };
@@ -146,9 +147,35 @@ function _clearStatusPoller() {
   }
 }
 
+function _clearIdleTimeoutTimer() {
+  if (state.idleTimeoutTimer) {
+    clearTimeout(state.idleTimeoutTimer);
+    state.idleTimeoutTimer = null;
+  }
+}
+
+function _armIdleTimeout(reason = 'idle') {
+  _clearIdleTimeoutTimer();
+  if (!state.activeDeviceId) return;
+  if (state.status === 'playing') return;
+
+  state.idleTimeoutTimer = setTimeout(() => {
+    state.idleTimeoutTimer = null;
+    if (!state.activeDeviceId || state.status === 'playing') {
+      return;
+    }
+    console.log('[castService] inactivity timeout reached, stopping cast session');
+    stop({ reason: 'timeout' }).catch((err) => {
+      console.error('[castService] idle timeout stop failed:', err.message);
+    });
+  }, 18 * 60 * 1000);
+  console.log(`[castService] idle timeout armed (${reason}) for 18 minutes`);
+}
+
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
   _clearStatusPoller();
+  _clearIdleTimeoutTimer();
   const previousActiveDeviceId = state.activeDeviceId;
   if (previousActiveDeviceId && devices.has(previousActiveDeviceId)) {
     const device = devices.get(previousActiveDeviceId);
@@ -221,6 +248,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
   state.position = startPosition;
   state.status = 'connecting';
   _clearStatusPoller();
+  _clearIdleTimeoutTimer();
   broadcastState();
 
   // Update device status
@@ -306,6 +334,11 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           state.status = mappedStatus;
           device.status = mappedStatus;
           devices.set(deviceId, device);
+          if (mappedStatus === 'playing') {
+            _clearIdleTimeoutTimer();
+          } else if (mappedStatus === 'paused' || mappedStatus === 'idle') {
+            _armIdleTimeout(mappedStatus);
+          }
 
           console.log(`[castService] player status → state=${playerState}, pos=${newPosition.toFixed(1)}s, dur=${newDuration.toFixed(1)}s`);
           
@@ -389,6 +422,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           state.status = 'playing';
           device.status = 'playing';
           devices.set(deviceId, device);
+          _clearIdleTimeoutTimer();
           broadcastState();
           console.log(`[castService] castTo() → media loaded and playing on ${device.name}`);
           resolve({ status: 'playing', deviceId, mediaUrl });
@@ -414,6 +448,7 @@ async function pause() {
         return;
       }
       state.status = 'paused';
+      _armIdleTimeout('paused');
       broadcastState();
       console.log('[castService] pause() → OK');
       resolve({ status: 'paused' });
@@ -449,6 +484,7 @@ async function resume() {
         return;
       }
       state.status = 'playing';
+      _clearIdleTimeoutTimer();
       broadcastState();
       console.log('[castService] resume() → OK');
       resolve({ status: 'playing' });
@@ -459,7 +495,7 @@ async function resume() {
 /**
  * Stop and fully disconnect the current cast session.
  */
-async function stop() {
+async function stop(options = {}) {
   console.log('[castService] stop()');
   if (!state.player && !state.client) {
     console.log('[castService] stop() → nothing to stop');
@@ -476,13 +512,13 @@ async function stop() {
         }
         _disconnectClient();
         _resetState();
-        broadcastState();
+        broadcastState(options.reason || 'stopped');
         resolve({ status: 'idle' });
       });
     } else {
       _disconnectClient();
       _resetState();
-      broadcastState();
+      broadcastState(options.reason || 'stopped');
       resolve({ status: 'idle' });
     }
   });
@@ -628,7 +664,7 @@ function canControl(userGuid) {
 /**
  * Broadcast current state to all connected WS clients.
  */
-function broadcastState() {
+function broadcastState(reason = null) {
   if (typeof state.broadcastFn !== 'function') {
     return;
   }
@@ -647,7 +683,8 @@ function broadcastState() {
       position: Math.round(state.position * 100) / 100,
       duration: Math.round(state.duration * 100) / 100,
       volume: Math.round(state.volume * 100) / 100,
-      status: state.status
+      status: state.status,
+      reason
     }
   });
 }

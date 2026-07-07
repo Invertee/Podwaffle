@@ -304,11 +304,19 @@ const player = {
     // Only process queue advancement if we're actively in cast mode
     if (!statusObj || this.mode !== 'cast') return;
     const nextStatus = String(statusObj.status || '').toLowerCase();
+    const reason = String(statusObj.reason || '').toLowerCase();
     const wasPlaying = this._lastCastStatus === 'playing';
     const becameIdle = nextStatus === 'idle' && wasPlaying;
     this._lastCastStatus = nextStatus || this._lastCastStatus;
 
     if (this._castStopInProgress && nextStatus === 'idle') {
+      return;
+    }
+
+    if (nextStatus === 'idle' && reason === 'timeout') {
+      this.switchToLocal().catch((err) => {
+        console.warn('[player] Failed to return to local playback after cast timeout:', err);
+      });
       return;
     }
 
@@ -1360,6 +1368,13 @@ const player = {
 
     try {
       await window.googleCastSender.loadEpisode(this.currentEpisode, pos, resolvedDeviceId);
+      if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
+        await window.googleCastSender.syncFromServerState().catch(() => null);
+      }
+      const castVolume = window.googleCastSender?._currentSession?.volume;
+      if (Number.isFinite(castVolume)) {
+        this.volume = Math.max(0, Math.min(1, castVolume));
+      }
       
       // Immediately establish ownership in the session so controls work before WebSocket broadcast arrives
       if (window.googleCastSender && window.googleCastSender._userGuid) {
@@ -1372,6 +1387,7 @@ const player = {
           title: this.currentEpisode.title,
           podcastTitle: this.currentEpisode.podcastTitle,
           imageUrl: this.currentEpisode.podcastImageUrl || this.currentEpisode.imageUrl,
+          volume: this.volume,
           status: 'connecting',
         };
       }

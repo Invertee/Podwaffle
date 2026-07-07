@@ -1527,6 +1527,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 .cast-modal-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1537,7 +1538,7 @@ input[type=range]::-moz-range-thumb {
 .cast-modal-info {
   flex: 1;
   min-width: 0;
-  margin-right: 12px;
+  padding-right: 44px;
 }
 
 .cast-state-grid {
@@ -1547,7 +1548,7 @@ input[type=range]::-moz-range-thumb {
 
 .cast-state-row {
   display: grid;
-  grid-template-columns: 62px 1fr;
+  grid-template-columns: 50px 1fr;
   gap: 8px;
   align-items: baseline;
 }
@@ -1573,26 +1574,12 @@ input[type=range]::-moz-range-thumb {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
-}
-
-.cast-now-playing {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.cast-now-art {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
+  padding: 12px 20px 0;
 }
 
 .cast-device-list {
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 10px 0 6px;
 }
 
 .cast-device-item {
@@ -1610,6 +1597,12 @@ input[type=range]::-moz-range-thumb {
 
 .cast-device-item.active {
   background-color: rgba(59,130,246,0.12);
+}
+
+.cast-device-item-active {
+  align-items: center;
+  gap: 12px;
+  cursor: default;
 }
 
 .cast-device-icon {
@@ -1630,6 +1623,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 .cast-device-name {
+  flex: 1;
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
@@ -1652,9 +1646,18 @@ input[type=range]::-moz-range-thumb {
   height: 8px;
   border-radius: 50%;
   background-color: var(--accent-green);
-  margin-left: auto;
   flex-shrink: 0;
   box-shadow: 0 0 6px var(--accent-green);
+}
+
+.cast-active-stop {
+  margin-left: auto;
+}
+
+.cast-modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 /* ----------------------------------------------------------
