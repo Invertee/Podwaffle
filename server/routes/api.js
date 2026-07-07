@@ -15,6 +15,7 @@ const fetch = require('node-fetch');
 function createApiRouter(feedService, userService, castService, broadcastWs, options = {}) {
   const router = express.Router();
   const disableNewUserSessions = !!options.disableNewUserSessions;
+  const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   // =========================================================================
   // UTILITY
@@ -23,6 +24,23 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   function sendError(res, statusCode, error, details = '') {
     console.error(`[api] HTTP ${statusCode}: ${error}${details ? ' — ' + details : ''}`);
     return res.status(statusCode).json({ error, details });
+  }
+
+  function normalizeGuid(value) {
+    const guid = String(value || '').trim();
+    if (!GUID_PATTERN.test(guid) || guid.includes('/') || guid.includes('\\') || guid.includes('..')) {
+      return null;
+    }
+    return guid;
+  }
+
+  function requireGuidParam(req, res, next, value) {
+    const guid = normalizeGuid(value);
+    if (!guid) {
+      return sendError(res, 400, 'Invalid GUID');
+    }
+    req.params.guid = guid;
+    next();
   }
 
   function mapPlaybackToHaState(status, isPlaying) {
@@ -77,6 +95,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       updated_at: (playbackSession && playbackSession.updatedAt) || new Date().toISOString(),
     };
   }
+
+  router.param('guid', requireGuidParam);
 
   // =========================================================================
   // HEALTH

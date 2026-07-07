@@ -720,7 +720,7 @@ body {
 .view-mode-toggle {
   position: fixed;
   right: 20px;
-  bottom: calc(var(--player-height) + 50px);
+  bottom: calc(var(--player-height) + 75px);
   z-index: 220;
   width: 40px;
   height: 40px;
@@ -749,6 +749,10 @@ body {
 @media (max-width: 768px) {
   .view-mode-toggle {
     bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-area-bottom) + 20px);
+  }
+
+  body.player-overlay-open .view-mode-toggle {
+    display: none;
   }
 }
 

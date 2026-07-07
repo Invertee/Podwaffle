@@ -8,6 +8,7 @@ const syncService = require('./syncService');
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const USERS_DIR = path.join(_dataRoot, 'users');
 const PROGRESS_DIR = path.join(_dataRoot, 'progress');
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const userWriteQueues = new Map();
 const progressWriteQueues = new Map();
 
@@ -35,8 +36,17 @@ const progressWriteQueues = new Map();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function assertSafeGuid(guid) {
+  const value = String(guid || '').trim();
+  if (!GUID_PATTERN.test(value) || value.includes('/') || value.includes('\\') || value.includes('..')) {
+    throw new Error(`Invalid GUID: ${guid}`);
+  }
+  return value;
+}
+
 function userFilePath(guid) {
-  return path.join(USERS_DIR, `${guid}.json`);
+  const safeGuid = assertSafeGuid(guid);
+  return path.join(USERS_DIR, `${safeGuid}.json`);
 }
 
 function defaultProfile(guid) {
@@ -183,7 +193,8 @@ async function queueUserWrite(guid, writeOperation) {
 }
 
 function progressFilePath(guid) {
-  return path.join(PROGRESS_DIR, `${guid}.json`);
+  const safeGuid = assertSafeGuid(guid);
+  return path.join(PROGRESS_DIR, `${safeGuid}.json`);
 }
 
 async function queueProgressWrite(guid, writeOperation) {
@@ -233,6 +244,7 @@ async function loadProgressForUser(guid) {
  * Read a user profile from disk. Returns null on any error.
  */
 async function getUser(guid) {
+  guid = assertSafeGuid(guid);
   const filePath = userFilePath(guid);
   console.log(`[userService] getUser(${guid}) → reading ${filePath}`);
   try {
@@ -255,6 +267,7 @@ async function getUser(guid) {
  * Progress is stored in a separate file and is stripped from the user file.
  */
 async function saveUser(profile) {
+  profile.guid = assertSafeGuid(profile.guid);
   ensureProfileShape(profile);
   profile.updatedAt = new Date().toISOString();
   // Strip progress — it lives in data/progress/{guid}.json, not the user file.
@@ -296,6 +309,7 @@ async function createUser() {
  * This is an idempotent upsert — safe to call at any time.
  */
 async function ensureUser(guid) {
+  guid = assertSafeGuid(guid);
   const existing = await getUser(guid);
   if (existing) return existing;
   console.log(`[userService] ensureUser(${guid}) → no profile found, creating default`);
@@ -309,6 +323,7 @@ async function ensureUser(guid) {
  * Merge-update user settings.
  */
 async function updateSettings(guid, settings) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] updateSettings(${guid})`, settings);
   const profile = await ensureUser(guid);
   profile.settings = { ...profile.settings, ...settings };
@@ -321,6 +336,7 @@ async function updateSettings(guid, settings) {
  * Add a feed URL to subscriptions if not already present.
  */
 async function addSubscription(guid, feedUrl) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] addSubscription(${guid}, ${feedUrl})`);
   const profile = await ensureUser(guid);
   if (!profile.subscriptions.includes(feedUrl)) {
@@ -337,6 +353,7 @@ async function addSubscription(guid, feedUrl) {
  * Remove a subscription by feedId (MD5 hash of URL) or feedUrl.
  */
 async function removeSubscription(guid, feedIdOrUrl) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] removeSubscription(${guid}, ${feedIdOrUrl})`);
   const crypto = require('crypto');
   const profile = await ensureUser(guid);
@@ -358,6 +375,7 @@ async function removeSubscription(guid, feedIdOrUrl) {
  * values in the desired order.
  */
 async function reorderSubscriptions(guid, orderedFeedIds) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] reorderSubscriptions(${guid}) → ${orderedFeedIds.length} entries`);
   const crypto = require('crypto');
   const profile = await ensureUser(guid);
@@ -387,6 +405,7 @@ async function reorderSubscriptions(guid, orderedFeedIds) {
  * Return the list of subscribed feed URLs for a user.
  */
 async function getSubscriptions(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getSubscriptions(${guid})`);
   const profile = await getUser(guid);
   if (!profile) {
@@ -407,6 +426,7 @@ async function getSubscriptions(guid) {
  * bulk operations (e.g. marking 30 episodes played at once) are fully serialised.
  */
 async function updateProgress(guid, episodeGuid, progressData) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] updateProgress(${guid}, ${episodeGuid})`, progressData);
   await ensureUser(guid);
 
@@ -464,6 +484,7 @@ async function updateProgress(guid, episodeGuid, progressData) {
  * Return the active playback session for a user.
  */
 async function getPlaybackSession(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getPlaybackSession(${guid})`);
   const profile = await getUser(guid);
   if (!profile) {
@@ -477,6 +498,7 @@ async function getPlaybackSession(guid) {
  * Persist the latest playback session snapshot for local playback recovery.
  */
 async function updatePlaybackSession(guid, sessionData) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] updatePlaybackSession(${guid})`, sessionData);
   const profile = await ensureUser(guid);
 
@@ -525,6 +547,7 @@ async function updatePlaybackSession(guid, sessionData) {
  * Clear the active playback session.
  */
 async function clearPlaybackSession(guid, episodeGuid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] clearPlaybackSession(${guid}, ${episodeGuid || '*'})`);
   const profile = await ensureUser(guid);
 
@@ -544,6 +567,7 @@ async function clearPlaybackSession(guid, episodeGuid) {
 }
 
 async function getQueue(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getQueue(${guid})`);
   const profile = await getUser(guid);
   if (!profile) {
@@ -576,6 +600,7 @@ async function getQueue(guid) {
 }
 
 async function updateQueue(guid, queueItems, metadata = {}) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] updateQueue(${guid}) → ${Array.isArray(queueItems) ? queueItems.length : 0} items`);
   const profile = await ensureUser(guid);
 
@@ -624,6 +649,7 @@ async function updateQueue(guid, queueItems, metadata = {}) {
  * Return all progress records for a user (from the dedicated progress file).
  */
 async function getProgress(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getProgress(${guid})`);
   const progressMap = await loadProgressForUser(guid);
   const count = Object.keys(progressMap).length;
@@ -635,6 +661,7 @@ async function getProgress(guid) {
  * Return paginated history entries.
  */
 async function getHistory(guid, limit = 50, offset = 0) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getHistory(${guid}, limit=${limit}, offset=${offset})`);
   const profile = await getUser(guid);
   if (!profile) {
@@ -650,6 +677,7 @@ async function getHistory(guid, limit = 50, offset = 0) {
  * Prepend an entry to history (max 1000 entries kept).
  */
 async function addHistoryEntry(guid, entry) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] addHistoryEntry(${guid})`, entry);
   const profile = await ensureUser(guid);
 
@@ -675,6 +703,7 @@ async function addHistoryEntry(guid, entry) {
  * Increment listened/skipped stats by the given deltas.
  */
 async function updateStats(guid, listenedDelta, skippedDelta) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] updateStats(${guid}, listened+${listenedDelta}, skipped+${skippedDelta})`);
   const profile = await ensureUser(guid);
 
@@ -713,6 +742,7 @@ async function getAllUserGuids() {
  * Mark episodes as seen for a given feed (adds guids to seenEpisodes[feedId]).
  */
 async function markEpisodesSeen(guid, feedId, episodeGuids) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] markEpisodesSeen(${guid}, feedId=${feedId}, count=${episodeGuids.length})`);
   const profile = await ensureUser(guid);
 
@@ -736,6 +766,7 @@ async function markEpisodesSeen(guid, feedId, episodeGuids) {
  * Return the array of seen episode GUIDs for a given feed.
  */
 async function getSeenEpisodes(guid, feedId) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getSeenEpisodes(${guid}, ${feedId})`);
   const profile = await getUser(guid);
   if (!profile) {
@@ -748,6 +779,7 @@ async function getSeenEpisodes(guid, feedId) {
 }
 
 async function getSyncSnapshot(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getSyncSnapshot(${guid})`);
   const profile = await getUser(guid);
   if (!profile) throw new Error(`User ${guid} not found`);
@@ -756,6 +788,7 @@ async function getSyncSnapshot(guid) {
 }
 
 async function mergeAndSaveSyncState(guid, incomingState) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] mergeAndSaveSyncState(${guid})`);
   const profile = await ensureUser(guid);
   const existingProgress = await loadProgressForUser(guid);
@@ -818,6 +851,7 @@ async function mergeAndSaveSyncState(guid, incomingState) {
 }
 
 async function getBootstrapSyncState(guid) {
+  guid = assertSafeGuid(guid);
   console.log(`[userService] getBootstrapSyncState(${guid})`);
   const profile = await ensureUser(guid);
   const progress = await loadProgressForUser(guid);

@@ -8,14 +8,14 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "ws": "^8.17.1",
-    "rss-parser": "^3.13.0",
-    "node-fetch": "^2.7.0",
-    "uuid": "^10.0.0",
     "bonjour-service": "^1.2.1",
     "castv2-client": "^1.2.0",
-    "node-cron": "^3.0.3",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-cron": "^4.6.0",
+    "node-fetch": "^2.7.0",
+    "rss-parser": "^3.13.0",
+    "uuid": "^14.0.1",
+    "ws": "^8.17.1"
   }
 }
