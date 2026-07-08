@@ -113,6 +113,14 @@ After running `npx cap add android`, open
 
 This lets the Android system sustain the MediaSession foreground service that keeps audio running when the screen is off.
 
+For PodWaffle we keep that service alive even while paused, so lockscreen controls still wake the session cleanly after the app has been backgrounded for a long time. That behavior is enabled in `capacitor.config.ts` with:
+
+```ts
+MediaSession: {
+  foregroundService: 'always',
+}
+```
+
 ---
 
 ## Native media controls integration

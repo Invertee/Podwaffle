@@ -25,7 +25,10 @@ const state = {
   client: null,
   player: null,
   statusPoller: null,
+  healthWatchdog: null,
   idleTimeoutTimer: null,
+  lastSessionActivityAt: 0,
+  lastProgressAt: 0,
   ownerGuid: null, // The user GUID who initiated the cast session
   broadcastFn: null // Callback to broadcast state to WS clients
 };
@@ -147,10 +150,24 @@ function _clearStatusPoller() {
   }
 }
 
+function _clearHealthWatchdog() {
+  if (state.healthWatchdog) {
+    clearInterval(state.healthWatchdog);
+    state.healthWatchdog = null;
+  }
+}
+
 function _clearIdleTimeoutTimer() {
   if (state.idleTimeoutTimer) {
     clearTimeout(state.idleTimeoutTimer);
     state.idleTimeoutTimer = null;
+  }
+}
+
+function _touchSessionActivity(progressChanged = false) {
+  state.lastSessionActivityAt = Date.now();
+  if (progressChanged) {
+    state.lastProgressAt = state.lastSessionActivityAt;
   }
 }
 
@@ -206,6 +223,7 @@ function _armIdleTimeout(reason = 'idle') {
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
   _clearStatusPoller();
+  _clearHealthWatchdog();
   _clearIdleTimeoutTimer();
   const previousActiveDeviceId = state.activeDeviceId;
   if (previousActiveDeviceId && devices.has(previousActiveDeviceId)) {
@@ -228,6 +246,8 @@ function _resetState() {
   state.client = null;
   state.player = null;
   state.ownerGuid = null;
+  state.lastSessionActivityAt = 0;
+  state.lastProgressAt = 0;
 }
 
 function _disconnectClient() {
@@ -351,6 +371,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           const newDuration = (playerStatus.media && playerStatus.media.duration) || state.duration || 0;
           const playerState = playerStatus.playerState || 'IDLE';
           const statusVolume = _normalizeVolume(playerStatus.volume);
+          const previousPosition = state.position;
 
           let mappedStatus;
           switch (playerState) {
@@ -364,6 +385,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           state.position = newPosition;
           state.duration = newDuration;
           state.status = mappedStatus;
+          _touchSessionActivity(newPosition > previousPosition || mappedStatus === 'playing');
           if (statusVolume != null) {
             state.volume = statusVolume;
           }
@@ -407,6 +429,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
               return;
             }
             applyPlayerStatus(latestStatus);
+            _touchSessionActivity(false);
           });
         };
 
@@ -458,6 +481,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           device.status = 'playing';
           devices.set(deviceId, device);
           _clearIdleTimeoutTimer();
+          _touchSessionActivity(true);
           broadcastState();
           _syncClientVolume();
           console.log(`[castService] castTo() → media loaded and playing on ${device.name}`);
@@ -484,6 +508,7 @@ async function pause() {
         return;
       }
       state.status = 'paused';
+      _touchSessionActivity(false);
       _armIdleTimeout('paused');
       broadcastState();
       console.log('[castService] pause() → OK');
@@ -520,6 +545,7 @@ async function resume() {
         return;
       }
       state.status = 'playing';
+      _touchSessionActivity(true);
       _clearIdleTimeoutTimer();
       broadcastState();
       console.log('[castService] resume() → OK');
@@ -576,6 +602,7 @@ async function seek(position) {
         return;
       }
       state.position = position;
+      _touchSessionActivity(true);
       broadcastState();
       console.log(`[castService] seek() → seeked to ${position}s`);
       resolve({ position });
@@ -602,6 +629,7 @@ async function setVolume(level) {
         return;
       }
       state.volume = clampedLevel;
+      _touchSessionActivity(false);
       broadcastState();
       console.log(`[castService] setVolume() → set to ${clampedLevel}`);
       resolve({ volume: clampedLevel });
@@ -659,6 +687,49 @@ function init(broadcastFn) {
       }
     }
   );
+
+  _clearHealthWatchdog();
+  state.healthWatchdog = setInterval(() => {
+    try {
+      const active = !!(state.activeDeviceId || state.player || state.client);
+      if (!active) return;
+
+      const currentStatus = String(state.status || 'idle');
+      const playerMissing = !state.player || !state.client;
+      const sessionLooksStuck = currentStatus === 'connecting' || currentStatus === 'error';
+      const noOwner = !state.ownerGuid;
+      const now = Date.now();
+      const lastActivityAge = state.lastSessionActivityAt ? now - state.lastSessionActivityAt : Number.POSITIVE_INFINITY;
+      const lastProgressAge = state.lastProgressAt ? now - state.lastProgressAt : Number.POSITIVE_INFINITY;
+      const stalePlayingSession = currentStatus === 'playing' && lastProgressAge > 2 * 60 * 1000;
+      const stalePausedSession = currentStatus === 'paused' && lastActivityAge > 30 * 60 * 1000;
+
+      if (playerMissing && currentStatus !== 'idle') {
+        console.warn('[castService] health watchdog → active session missing player/client; resetting');
+        stop({ reason: 'health-reset' }).catch((err) => {
+          console.error('[castService] health watchdog stop failed:', err.message);
+        });
+        return;
+      }
+
+      if (sessionLooksStuck && noOwner) {
+        console.warn('[castService] health watchdog → stuck session without owner; resetting');
+        stop({ reason: 'health-reset' }).catch((err) => {
+          console.error('[castService] health watchdog stop failed:', err.message);
+        });
+        return;
+      }
+
+      if (stalePlayingSession || stalePausedSession) {
+        console.warn('[castService] health watchdog → session stopped making progress; resetting');
+        stop({ reason: 'health-reset' }).catch((err) => {
+          console.error('[castService] health watchdog stop failed:', err.message);
+        });
+      }
+    } catch (err) {
+      console.warn('[castService] health watchdog error:', err.message);
+    }
+  }, 30000);
 }
 
 /**

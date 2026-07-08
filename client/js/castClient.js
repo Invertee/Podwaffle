@@ -11,8 +11,15 @@ const castClient = {
   _reconnectDelay: 5000,
   _intentionalClose: false,
   _statePollTimer: null,
+  _healthTimer: null,
+  _healthCheckTimer: null,
+  _pendingHealthPing: null,
+  _lastPongAt: 0,
+  _lastMessageAt: 0,
   _idleTimer: null,
   _IDLE_TIMEOUT_MS: 20 * 60 * 1000, // 20 minutes
+  _HEALTH_CHECK_INTERVAL_MS: 15000,
+  _HEALTH_PONG_TIMEOUT_MS: 10000,
   _castState: {
     status: 'idle',
     position: 0,
@@ -57,13 +64,17 @@ const castClient = {
     this.ws.addEventListener('open', () => {
       console.log('[castClient] WebSocket connected.');
       clearTimeout(this._reconnectTimer);
+      this._lastPongAt = Date.now();
+      this._lastMessageAt = Date.now();
       this._startStatePolling();
+      this._startHealthMonitoring();
       this._dispatch('connected', {});
     });
 
     this.ws.addEventListener('message', (event) => {
       try {
         const data = JSON.parse(event.data);
+        this._lastMessageAt = Date.now();
         this._handleMessage(data);
       } catch (err) {
         console.error('[castClient] Failed to parse WS message:', err, event.data);
@@ -74,6 +85,7 @@ const castClient = {
       console.warn(`[castClient] WebSocket closed (code=${event.code}). Intentional=${this._intentionalClose}`);
       this.ws = null;
       this._stopStatePolling();
+      this._stopHealthMonitoring();
       this._dispatch('disconnected', { code: event.code });
       if (!this._intentionalClose) {
         this._scheduleReconnect();
@@ -90,6 +102,7 @@ const castClient = {
     this._intentionalClose = true;
     clearTimeout(this._reconnectTimer);
     this._stopStatePolling();
+    this._stopHealthMonitoring();
     this._clearIdleTimer();
     if (this.ws) {
       this.ws.close(1000, 'Client disconnected');
@@ -111,6 +124,67 @@ const castClient = {
     // Server sends cast:status every 1s when device is active, which is more reliable
     // than HTTP polling and includes critical ownership metadata (ownerGuid)
     this._stopStatePolling();
+  },
+
+  _startHealthMonitoring() {
+    this._stopHealthMonitoring();
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const sendPing = () => {
+      if (!this.isConnected()) return;
+
+      const now = Date.now();
+      const lastPongAge = now - (this._lastPongAt || 0);
+      const pendingAge = this._pendingHealthPing ? now - this._pendingHealthPing : 0;
+
+      if (this._pendingHealthPing && pendingAge > this._HEALTH_PONG_TIMEOUT_MS) {
+        console.warn('[castClient] Health ping timed out; reconnecting websocket.');
+        this._forceReconnect();
+        return;
+      }
+
+      if (lastPongAge > this._HEALTH_CHECK_INTERVAL_MS * 2) {
+        console.warn('[castClient] No recent pong received; reconnecting websocket.');
+        this._forceReconnect();
+        return;
+      }
+
+      try {
+        this._pendingHealthPing = now;
+        this.ws.send(JSON.stringify({ type: 'ping', data: { client: 'castClient', ts: now } }));
+      } catch (err) {
+        console.warn('[castClient] Failed to send health ping; reconnecting websocket.', err);
+        this._forceReconnect();
+      }
+    };
+
+    this._healthTimer = setInterval(sendPing, this._HEALTH_CHECK_INTERVAL_MS);
+    this._healthCheckTimer = setTimeout(sendPing, this._HEALTH_CHECK_INTERVAL_MS);
+  },
+
+  _stopHealthMonitoring() {
+    if (this._healthTimer) {
+      clearInterval(this._healthTimer);
+      this._healthTimer = null;
+    }
+    if (this._healthCheckTimer) {
+      clearTimeout(this._healthCheckTimer);
+      this._healthCheckTimer = null;
+    }
+    this._pendingHealthPing = null;
+  },
+
+  _forceReconnect() {
+    if (this._intentionalClose) return;
+    try {
+      if (this.ws) {
+        this.ws.close(4000, 'Health check failed');
+      }
+    } catch (_) {}
+    this.ws = null;
+    this._stopHealthMonitoring();
+    this._stopStatePolling();
+    this._scheduleReconnect();
   },
 
   _stopStatePolling() {
@@ -245,6 +319,11 @@ const castClient = {
       console.log('[castClient] Message received:', data.type, data);
     }
     switch (data.type) {
+      case 'pong':
+        this._lastPongAt = Date.now();
+        this._pendingHealthPing = null;
+        break;
+
       case 'cast:state':
         if (data.data) {
           this._castState = {
@@ -286,6 +365,16 @@ const castClient = {
         }
 
         this._dispatch('cast:state', data.data);
+        break;
+
+      case 'ping':
+        this._lastPongAt = Date.now();
+        if (this.isConnected()) {
+          try {
+            this.ws.send(JSON.stringify({ type: 'pong' }));
+          } catch (_) {}
+        }
+        this._dispatch('ping', data.data);
         break;
 
       case 'cast:device_found':

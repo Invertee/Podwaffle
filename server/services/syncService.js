@@ -54,6 +54,20 @@ function normalizeSubscriptions(subscriptions) {
   return merged;
 }
 
+function safeUpdatedAt(value, fallback = toIsoNow()) {
+  const ts = Date.parse(value || '');
+  return Number.isNaN(ts) ? fallback : new Date(ts).toISOString();
+}
+
+function compareTimestamps(a, b) {
+  const aTs = Date.parse(a || '');
+  const bTs = Date.parse(b || '');
+  if (Number.isNaN(aTs) && Number.isNaN(bTs)) return 0;
+  if (Number.isNaN(aTs)) return -1;
+  if (Number.isNaN(bTs)) return 1;
+  return aTs - bTs;
+}
+
 function mergeSubscriptions(local, remote) {
   const normalizedRemote = normalizeSubscriptions(remote);
   const remoteSet = new Set(normalizedRemote);
@@ -115,9 +129,11 @@ function mergeStats(localStats, remoteStats) {
 
 function buildSnapshot(profile) {
   const source = profile && typeof profile === 'object' ? profile : {};
+  const subscriptionsUpdatedAt = safeUpdatedAt(source.subscriptionsUpdatedAt, safeIso(source.updatedAt, toIsoNow()));
   return {
     guid: source.guid || '',
     updatedAt: safeIso(source.updatedAt, toIsoNow()),
+    subscriptionsUpdatedAt,
     settings: sanitizeSettings(source.settings),
     subscriptions: normalizeSubscriptions(source.subscriptions),
     progress: normalizeProgressMap(source.progress),
@@ -132,10 +148,18 @@ function buildSnapshot(profile) {
 function buildSyncResult(profile, incomingState) {
   const remoteSnapshot = buildSnapshot(profile);
   const incoming = incomingState && typeof incomingState === 'object' ? incomingState : {};
+  const incomingSubscriptionsUpdatedAt = safeUpdatedAt(
+    incoming.subscriptionsUpdatedAt,
+    remoteSnapshot.subscriptionsUpdatedAt
+  );
 
   const mergedSubscriptions = mergeSubscriptions(
-    incoming.subscriptions,
-    remoteSnapshot.subscriptions
+    compareTimestamps(incomingSubscriptionsUpdatedAt, remoteSnapshot.subscriptionsUpdatedAt) >= 0
+      ? incoming.subscriptions
+      : remoteSnapshot.subscriptions,
+    compareTimestamps(incomingSubscriptionsUpdatedAt, remoteSnapshot.subscriptionsUpdatedAt) >= 0
+      ? remoteSnapshot.subscriptions
+      : incoming.subscriptions
   );
 
   const mergedProgress = mergeProgress(
@@ -155,6 +179,9 @@ function buildSyncResult(profile, incomingState) {
       subscriptions: mergedSubscriptions,
       progress: mergedProgress,
       stats: mergedStats,
+      subscriptionsUpdatedAt: compareTimestamps(incomingSubscriptionsUpdatedAt, remoteSnapshot.subscriptionsUpdatedAt) >= 0
+        ? incomingSubscriptionsUpdatedAt
+        : remoteSnapshot.subscriptionsUpdatedAt,
       queue: Array.isArray(incoming.queue) ? incoming.queue : remoteSnapshot.queue,
       playbackSession: incoming.playbackSession && typeof incoming.playbackSession === 'object'
         ? incoming.playbackSession
@@ -167,6 +194,9 @@ function buildSyncResult(profile, incomingState) {
       remoteProgressEntries: Object.keys(remoteSnapshot.progress).length,
       incomingProgressEntries: incoming.progress && typeof incoming.progress === 'object' ? Object.keys(incoming.progress).length : 0,
       mergedProgressEntries: Object.keys(mergedProgress).length,
+      subscriptionsUpdatedAt: compareTimestamps(incomingSubscriptionsUpdatedAt, remoteSnapshot.subscriptionsUpdatedAt) >= 0
+        ? incomingSubscriptionsUpdatedAt
+        : remoteSnapshot.subscriptionsUpdatedAt,
       mergedAt: toIsoNow(),
     },
   };

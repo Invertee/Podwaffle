@@ -639,9 +639,11 @@ const api = {
   _getLocalProfile(guid) {
     const resolvedGuid = guid || this._getLocalGuid();
     if (!resolvedGuid) return null;
+    const subscriptions = this._getJsonStorage(this._localKey('podwaffle_subscriptions', resolvedGuid), []);
     return {
       guid: resolvedGuid,
-      subscriptions: this._getJsonStorage(this._localKey('podwaffle_subscriptions', resolvedGuid), []),
+      subscriptions,
+      subscriptionsUpdatedAt: this._getJsonStorage(this._localKey('podwaffle_subscriptions_updated_at', resolvedGuid), new Date().toISOString()),
       progress: this._getJsonStorage(this._localKey('podwaffle_progress', resolvedGuid), {}),
       settings: this._getJsonStorage(this._localKey('podwaffle_settings', resolvedGuid), {}),
       stats: this._getJsonStorage(this._localKey('podwaffle_stats', resolvedGuid), { totalListenedSeconds: 0, totalSkippedSeconds: 0 }),
@@ -653,6 +655,7 @@ const api = {
   _saveLocalProfileField(guid, field, value) {
     const keyMap = {
       subscriptions: this._localKey('podwaffle_subscriptions', guid),
+      subscriptionsUpdatedAt: this._localKey('podwaffle_subscriptions_updated_at', guid),
       progress: this._localKey('podwaffle_progress', guid),
       settings: this._localKey('podwaffle_settings', guid),
       stats: this._localKey('podwaffle_stats', guid),
@@ -869,6 +872,7 @@ const api = {
       const current = this._getJsonStorage(this._localKey('podwaffle_subscriptions', guid), []);
       const updated = [...current.filter((item) => item.feedId !== normalized.feedId && item.feedUrl !== normalized.feedUrl), normalized];
       this._saveLocalProfileField(guid, 'subscriptions', updated);
+      this._saveLocalProfileField(guid, 'subscriptionsUpdatedAt', new Date().toISOString());
       if (window.appState) window.appState.subscriptions = updated;
       return normalized;
     }
@@ -878,6 +882,7 @@ const api = {
       const current = this._getJsonStorage(this._localKey('podwaffle_subscriptions', guid), []);
       const updated = current.filter((item) => item.feedId !== feedId && item.feedUrl !== feedId);
       this._saveLocalProfileField(guid, 'subscriptions', updated);
+      this._saveLocalProfileField(guid, 'subscriptionsUpdatedAt', new Date().toISOString());
       if (window.appState) window.appState.subscriptions = updated;
       return { ok: true };
     }
@@ -890,6 +895,7 @@ const api = {
       const remaining = current.filter((item) => !order.includes(item.feedId));
       const updated = [...reordered, ...remaining];
       this._saveLocalProfileField(guid, 'subscriptions', updated);
+      this._saveLocalProfileField(guid, 'subscriptionsUpdatedAt', new Date().toISOString());
       return updated;
     }
 
@@ -977,6 +983,7 @@ const api = {
         snapshot: {
           guid,
           updatedAt: new Date().toISOString(),
+          subscriptionsUpdatedAt: this._getJsonStorage(this._localKey('podwaffle_subscriptions_updated_at', guid), new Date().toISOString()),
           settings: profile.settings,
           subscriptions: this._normalizeSubscriptionsForSync(profile.subscriptions),
           progress: profile.progress,

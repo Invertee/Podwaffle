@@ -18,6 +18,7 @@ const syncManager = {
       return {
         guid,
         subscriptions: window.appState.subscriptions || user.subscriptions || [],
+        subscriptionsUpdatedAt: window.appState.subscriptionsUpdatedAt || user.subscriptionsUpdatedAt || user.updatedAt || null,
         progress: window.appState.progress || user.progress || {},
         stats: user.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 },
         settings: user.settings || {},
@@ -43,6 +44,7 @@ const syncManager = {
       return {
         guid,
         subscriptions: snapshot.subscriptions || [],
+        subscriptionsUpdatedAt: snapshot.subscriptionsUpdatedAt || snapshot.updatedAt || null,
         progress: snapshot.progress || {},
         stats: snapshot.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 },
         settings: snapshot.settings || {},
@@ -89,20 +91,22 @@ const syncManager = {
     return merged;
   },
 
-  /**
-   * Merge subscriptions: union of both lists, with remote order as authoritative
-   */
-  mergeSubscriptions(local = [], remote = []) {
-    const remoteSet = new Set(remote || []);
-    const localSet = new Set(local || []);
-
-    // Start with remote (authoritative order) and add any local-only subscriptions
-    const merged = new Set(remote || []);
-    for (const feedUrl of local || []) {
-      merged.add(feedUrl);
+  mergeSubscriptions(local = [], remote = [], preferLocal = false) {
+    const primary = preferLocal ? (local || []) : (remote || []);
+    const secondary = preferLocal ? (remote || []) : (local || []);
+    const merged = [];
+    const seen = new Set();
+    for (const feedUrl of primary) {
+      if (!feedUrl || seen.has(feedUrl)) continue;
+      seen.add(feedUrl);
+      merged.push(feedUrl);
     }
-
-    return Array.from(merged);
+    for (const feedUrl of secondary) {
+      if (!feedUrl || seen.has(feedUrl)) continue;
+      seen.add(feedUrl);
+      merged.push(feedUrl);
+    }
+    return merged;
   },
 
   /**
@@ -174,6 +178,7 @@ const syncManager = {
       console.log('[syncManager] Pushing local state to sync endpoint...');
       const pushPayload = {
         subscriptions: localState.subscriptions || [],
+        subscriptionsUpdatedAt: localState.subscriptionsUpdatedAt || new Date().toISOString(),
         progress: localState.progress || {},
         stats: localState.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 },
         settings: localState.settings || {},
@@ -185,7 +190,9 @@ const syncManager = {
       const mergedSnapshot = pushResult && pushResult.snapshot ? pushResult.snapshot : {};
       const mergedSummary = pushResult && pushResult.summary ? pushResult.summary : {};
 
-      const mergedSubs = mergedSnapshot.subscriptions || this.mergeSubscriptions(localState.subscriptions, remoteState.subscriptions);
+      const preferLocalSubs = (mergedSnapshot.subscriptionsUpdatedAt || mergedSummary.subscriptionsUpdatedAt || localState.subscriptionsUpdatedAt || 0)
+        >= (remoteState.subscriptionsUpdatedAt || remoteState.updatedAt || 0);
+      const mergedSubs = mergedSnapshot.subscriptions || this.mergeSubscriptions(localState.subscriptions, remoteState.subscriptions, preferLocalSubs);
       const mergedProgress = mergedSnapshot.progress || this.mergeProgress(localState.progress, remoteState.progress);
       const mergedStats = mergedSnapshot.stats || this.mergeStats(localState.stats, remoteState.stats);
 
@@ -197,9 +204,11 @@ const syncManager = {
       // 5. Update local appState with merged results
       if (window.appState) {
         window.appState.subscriptions = mergedSubs;
+        window.appState.subscriptionsUpdatedAt = mergedSnapshot.subscriptionsUpdatedAt || mergedSummary.subscriptionsUpdatedAt || localState.subscriptionsUpdatedAt || remoteState.subscriptionsUpdatedAt || remoteState.updatedAt || null;
         window.appState.progress = mergedProgress;
         if (window.appState.user) {
           window.appState.user.subscriptions = mergedSubs;
+          window.appState.user.subscriptionsUpdatedAt = window.appState.subscriptionsUpdatedAt;
           window.appState.user.progress = mergedProgress;
           window.appState.user.stats = mergedStats;
         }

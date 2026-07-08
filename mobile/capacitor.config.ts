@@ -53,6 +53,11 @@ const config: CapacitorConfig = {
     : {}),
 
   plugins: {
+    // Keep the native media-session service alive even while paused so lockscreen
+    // controls stay responsive after the app has been backgrounded for a while.
+    MediaSession: {
+      foregroundService: 'always',
+    },
     Cast: {
       uiMode: 'picker',
       autoJoinPolicy: 'origin_scoped',

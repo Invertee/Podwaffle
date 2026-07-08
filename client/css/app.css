@@ -2195,7 +2195,7 @@ input[type=range]::-moz-range-thumb {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -2207,6 +2207,9 @@ input[type=range]::-moz-range-thumb {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .stat-value {

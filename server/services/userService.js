@@ -55,6 +55,7 @@ function defaultProfile(guid) {
     guid,
     createdAt: now,
     updatedAt: now,
+    subscriptionsUpdatedAt: now,
     settings: {
       skipBack: 15,
       skipForward: 45
@@ -99,6 +100,7 @@ function ensureProfileShape(profile) {
   profile.playbackSession = profile.playbackSession && typeof profile.playbackSession === 'object'
     ? profile.playbackSession
     : null;
+  profile.subscriptionsUpdatedAt = profile.subscriptionsUpdatedAt || profile.updatedAt || new Date().toISOString();
 
   return profile;
 }
@@ -341,6 +343,7 @@ async function addSubscription(guid, feedUrl) {
   const profile = await ensureUser(guid);
   if (!profile.subscriptions.includes(feedUrl)) {
     profile.subscriptions.push(feedUrl);
+    profile.subscriptionsUpdatedAt = new Date().toISOString();
     await saveUser(profile);
     console.log(`[userService] addSubscription(${guid}) → added ${feedUrl}`);
   } else {
@@ -366,6 +369,9 @@ async function removeSubscription(guid, feedIdOrUrl) {
 
   const after = profile.subscriptions.length;
   console.log(`[userService] removeSubscription(${guid}) → removed ${before - after} entries`);
+  if (before !== after) {
+    profile.subscriptionsUpdatedAt = new Date().toISOString();
+  }
   await saveUser(profile);
   return profile.subscriptions;
 }
@@ -396,6 +402,7 @@ async function reorderSubscriptions(guid, orderedFeedIds) {
   }
 
   profile.subscriptions = reordered;
+  profile.subscriptionsUpdatedAt = new Date().toISOString();
   await saveUser(profile);
   console.log(`[userService] reorderSubscriptions(${guid}) → done`);
   return profile.subscriptions;
@@ -807,9 +814,17 @@ async function mergeAndSaveSyncState(guid, incomingState) {
     ...mergedSettings,
   };
 
-  profile.subscriptions = Array.isArray(merged.subscriptions)
-    ? merged.subscriptions
-    : profile.subscriptions;
+  const existingSubsUpdatedAt = profile.subscriptionsUpdatedAt || profile.updatedAt || null;
+  const incomingSubsUpdatedAt = merged.subscriptionsUpdatedAt || incomingState?.subscriptionsUpdatedAt || null;
+  const existingSubsTs = existingSubsUpdatedAt ? new Date(existingSubsUpdatedAt).getTime() : NaN;
+  const incomingSubsTs = incomingSubsUpdatedAt ? new Date(incomingSubsUpdatedAt).getTime() : NaN;
+  const useIncomingSubscriptions = Number.isFinite(incomingSubsTs) && (!Number.isFinite(existingSubsTs) || incomingSubsTs >= existingSubsTs);
+  if (Array.isArray(merged.subscriptions)) {
+    profile.subscriptions = useIncomingSubscriptions ? merged.subscriptions : profile.subscriptions;
+  }
+  profile.subscriptionsUpdatedAt = useIncomingSubscriptions
+    ? (incomingSubsUpdatedAt || profile.subscriptionsUpdatedAt || profile.updatedAt)
+    : (profile.subscriptionsUpdatedAt || profile.updatedAt);
 
   // Progress is intentionally NOT written to profile — it lives in the progress file
   profile.stats = {
