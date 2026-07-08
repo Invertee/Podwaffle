@@ -482,18 +482,19 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { guid, episodeGuid } = req.params;
     console.log(`[api] PUT /users/${guid}/progress/${episodeGuid}`, req.body);
     try {
-      const { position, duration, played, feedId, skipStats } = req.body || {};
+      const { position, duration, played, feedId, skipStats, updatedAt } = req.body || {};
+      const parsedUpdatedAt = updatedAt ? new Date(updatedAt).getTime() : NaN;
       const progressData = {
         position: typeof position === 'number' ? position : parseFloat(position) || 0,
         duration: typeof duration === 'number' ? duration : parseFloat(duration) || 0,
         played: !!played,
         feedId: feedId || '',
         skipStats: !!skipStats,
-        updatedAt: new Date().toISOString()
+        updatedAt: Number.isFinite(parsedUpdatedAt) ? new Date(parsedUpdatedAt).toISOString() : new Date().toISOString()
       };
       const updated = await userService.updateProgress(guid, episodeGuid, progressData);
       res.json(updated);
-      broadcastWs({ type: 'user:progress', data: { guid, episodeGuid } });
+      broadcastWs({ type: 'user:progress', data: { guid, episodeGuid, progress: updated } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
@@ -873,7 +874,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
 
   // POST /cast/play — start casting an episode to a device
   router.post('/cast/play', async (req, res) => {
-    const { userGuid, deviceId, mediaUrl, episodeGuid, title, podcastTitle, imageUrl, duration, startPosition } = req.body || {};
+    const { userGuid, deviceId, mediaUrl, episodeGuid, title, podcastTitle, imageUrl, duration, startPosition, feedId } = req.body || {};
     console.log(`[api] POST /cast/play user=${userGuid} device=${deviceId}`);
 
     if (!userGuid || !deviceId || !mediaUrl) {
@@ -881,13 +882,94 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     }
 
     try {
+      let lastCastProgressPersistAt = 0;
+      let lastKnownCastPosition = typeof startPosition === 'number' ? startPosition : parseFloat(startPosition) || 0;
+      let lastKnownCastDuration = typeof duration === 'number' ? duration : parseFloat(duration) || 0;
+      let castMarkedPlayed = false;
+
+      const persistCastStatus = async (status = {}) => {
+        if (!userGuid || !episodeGuid) return;
+        if (castMarkedPlayed) return;
+
+        const now = Date.now();
+        const rawPosition = Math.max(0, Math.floor(status.position ?? 0));
+        const pos = rawPosition > 0
+          ? rawPosition
+          : Math.max(0, Math.floor(lastKnownCastPosition || 0));
+        const dur = Math.max(0, Math.floor(status.duration ?? lastKnownCastDuration ?? 0));
+        const mappedStatus = String(status.status || '').toLowerCase();
+        const ratio = dur > 0 ? pos / dur : 0;
+        const nearEnd = dur > 0 && pos >= dur - 15;
+        const shouldMarkPlayed = dur > 0 && (ratio >= 0.95 || nearEnd);
+        const shouldPersistPosition = now - lastCastProgressPersistAt >= 15000;
+        const shouldPersistTerminal = mappedStatus === 'idle' || mappedStatus === 'error' || shouldMarkPlayed;
+
+        if (pos > 0) lastKnownCastPosition = pos;
+        if (dur > 0) lastKnownCastDuration = dur;
+
+        if (!shouldPersistPosition && !shouldPersistTerminal) return;
+
+        lastCastProgressPersistAt = now;
+        const updateTimestamp = new Date(now).toISOString();
+        const progressData = {
+          position: shouldMarkPlayed ? (dur || pos) : pos,
+          duration: dur,
+          played: shouldMarkPlayed || castMarkedPlayed,
+          feedId: feedId || '',
+          updatedAt: updateTimestamp,
+        };
+
+        try {
+          const updated = await userService.updateProgress(userGuid, episodeGuid, progressData);
+          broadcastWs({ type: 'user:progress', data: { guid: userGuid, episodeGuid, progress: updated } });
+
+          if (shouldMarkPlayed && !castMarkedPlayed) {
+            castMarkedPlayed = true;
+            await userService.clearPlaybackSession(userGuid, episodeGuid).catch(() => null);
+            await userService.addHistoryEntry(userGuid, {
+              episodeGuid,
+              feedId: feedId || '',
+              title: title || '',
+              podcastTitle: podcastTitle || '',
+              imageUrl: imageUrl || '',
+              listenedAt: updateTimestamp,
+              duration: dur,
+            }).catch((err) => {
+              console.warn('[api] Cast history update failed:', err.message);
+            });
+            return;
+          }
+
+          await userService.updatePlaybackSession(userGuid, {
+            episodeGuid,
+            feedId: feedId || '',
+            title: title || '',
+            podcastTitle: podcastTitle || '',
+            audioUrl: mediaUrl || '',
+            podcastImageUrl: imageUrl || '',
+            imageUrl: imageUrl || '',
+            position: pos,
+            duration: dur,
+            isPlaying: mappedStatus === 'playing',
+            mode: 'cast',
+            transport: 'cast',
+            castDeviceId: deviceId || '',
+            updatedAt: updateTimestamp,
+          }).catch((err) => {
+            console.warn('[api] Cast playback session update failed:', err.message);
+          });
+        } catch (err) {
+          console.warn('[api] Cast progress persist failed:', err.message);
+        }
+      };
+
       await castService.castTo(
         deviceId,
         userGuid,
         mediaUrl,
         startPosition || 0,
-        null,
-        { episodeGuid, title, podcastTitle, imageUrl, duration }
+        persistCastStatus,
+        { episodeGuid, title, podcastTitle, imageUrl, duration, feedId }
       );
       res.json({ ok: true, message: 'Cast started' });
     } catch (err) {

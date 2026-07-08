@@ -311,6 +311,7 @@ const googleCastSender = {
       podcastTitle: episode.podcastTitle || '',
       imageUrl: episode.podcastImageUrl || episode.imageUrl || '',
       duration: episode.duration || 0,
+      feedId: episode.feedId || '',
       startPosition: Math.max(0, Number(startPosition) || 0),
     };
 

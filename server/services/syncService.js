@@ -168,6 +168,22 @@ function buildSyncResult(profile, incomingState) {
   );
 
   const mergedStats = mergeStats(incoming.stats, remoteSnapshot.stats);
+  const incomingPlaybackSession = incoming.playbackSession && typeof incoming.playbackSession === 'object'
+    ? incoming.playbackSession
+    : null;
+  const remotePlaybackSession = remoteSnapshot.playbackSession && typeof remoteSnapshot.playbackSession === 'object'
+    ? remoteSnapshot.playbackSession
+    : null;
+  const useIncomingPlaybackSession = !!incomingPlaybackSession && (
+    !remotePlaybackSession
+    || compareTimestamps(incomingPlaybackSession.updatedAt, remotePlaybackSession.updatedAt) >= 0
+  );
+  const mergedPlaybackSession = useIncomingPlaybackSession
+    ? incomingPlaybackSession
+    : remotePlaybackSession;
+  const mergedQueue = useIncomingPlaybackSession && Array.isArray(incoming.queue)
+    ? incoming.queue
+    : remoteSnapshot.queue;
 
   return {
     guid: remoteSnapshot.guid,
@@ -182,10 +198,8 @@ function buildSyncResult(profile, incomingState) {
       subscriptionsUpdatedAt: compareTimestamps(incomingSubscriptionsUpdatedAt, remoteSnapshot.subscriptionsUpdatedAt) >= 0
         ? incomingSubscriptionsUpdatedAt
         : remoteSnapshot.subscriptionsUpdatedAt,
-      queue: Array.isArray(incoming.queue) ? incoming.queue : remoteSnapshot.queue,
-      playbackSession: incoming.playbackSession && typeof incoming.playbackSession === 'object'
-        ? incoming.playbackSession
-        : remoteSnapshot.playbackSession,
+      queue: mergedQueue,
+      playbackSession: mergedPlaybackSession,
     },
     summary: {
       remoteSubscriptions: remoteSnapshot.subscriptions.length,

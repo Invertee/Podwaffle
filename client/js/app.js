@@ -9,6 +9,9 @@ window.appState = {
 
 window.replaceProgressState = function(progressMap) {
   window.appState.progress = progressMap && typeof progressMap === 'object' ? { ...progressMap } : {};
+  if (window.appState.user) {
+    window.appState.user.progress = window.appState.progress;
+  }
   return window.appState.progress;
 };
 
@@ -27,6 +30,9 @@ window.setEpisodeProgressState = function(episodeGuid, progress) {
     window.appState.progress[episodeGuid] = nextProgress;
   } else {
     delete window.appState.progress[episodeGuid];
+  }
+  if (window.appState.user) {
+    window.appState.user.progress = window.appState.progress;
   }
 
   window.dispatchEvent(new CustomEvent('podwaffle:progress-updated', {
@@ -237,6 +243,48 @@ async function restoreLastInProgressEpisode(guid) {
   } catch (err) {
     console.warn('[app] Failed to restore last in-progress episode:', err);
   }
+}
+
+let profileStateRefreshPromise = null;
+let lastProfileStateRefreshAt = 0;
+
+async function refreshProfileStateFromServer(reason = 'manual', options = {}) {
+  const guid = window.appState?.guid || localStorage.getItem('podwaffle_guid');
+  if (!guid || !window.api) return null;
+
+  const cfg = window.api.getServerConnectionConfig ? window.api.getServerConnectionConfig() : null;
+  if (!cfg || !cfg.enabled || !cfg.host) return null;
+
+  const now = Date.now();
+  const minIntervalMs = options.force ? 0 : 10000;
+  if (profileStateRefreshPromise) return profileStateRefreshPromise;
+  if (now - lastProfileStateRefreshAt < minIntervalMs) return null;
+
+  profileStateRefreshPromise = (async () => {
+    try {
+      lastProfileStateRefreshAt = Date.now();
+      if (window.syncManager && typeof window.syncManager.performSync === 'function') {
+        const result = await window.syncManager.performSync(guid);
+        if (result?.ok && window.appState?.progress) {
+          window.dispatchEvent(new CustomEvent('podwaffle:progress-map-updated', {
+            detail: { guid, progress: window.appState.progress, reason },
+          }));
+        }
+        return result;
+      }
+
+      const progress = await window.api.getProgress(guid);
+      window.replaceProgressState(progress || {});
+      return { ok: true, mode: 'pull', reason };
+    } catch (err) {
+      console.warn(`[app] Profile state refresh failed (${reason}):`, err);
+      return null;
+    } finally {
+      profileStateRefreshPromise = null;
+    }
+  })();
+
+  return profileStateRefreshPromise;
 }
 
 async function handleRoute() {
@@ -540,9 +588,35 @@ async function initApp() {
 
     // Set up cross-client sync listeners
     if (window.castClient) {
-      window.castClient.on('user:progress', () => {
+      window.castClient.on('connected', () => {
+        refreshProfileStateFromServer('websocket-connected').then(() => {
+          const h = window.location.hash;
+          if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) {
+            handleRoute();
+          }
+        });
+        if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
+          window.googleCastSender.syncFromServerState().catch(() => null);
+        }
+      });
+      window.castClient.on('user:progress', async (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        if (payload?.episodeGuid && payload?.progress && window.setEpisodeProgressState) {
+          window.setEpisodeProgressState(payload.episodeGuid, payload.progress);
+        } else if (window.api && window.appState.guid) {
+          try {
+            const progress = await window.api.getProgress(window.appState.guid);
+            window.replaceProgressState(progress || {});
+            if (payload?.episodeGuid && window.setEpisodeProgressState) {
+              window.setEpisodeProgressState(payload.episodeGuid, progress?.[payload.episodeGuid] || null);
+            }
+          } catch (err) {
+            console.warn('[app] Failed to refresh progress after websocket update:', err);
+          }
+        }
         const h = window.location.hash;
-        if (h === '#/in-progress' || h === '#/history') handleRoute();
+        if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) handleRoute();
       });
       window.castClient.on('user:subscriptions', () => {
         const h = window.location.hash;
@@ -567,9 +641,19 @@ async function initApp() {
         }
       });
     }
+    refreshProfileStateFromServer('startup');
 
     // 5. Initial routing
     window.addEventListener('hashchange', handleRoute);
+    window.addEventListener('online', () => {
+      refreshProfileStateFromServer('browser-online');
+      if (window.castClient && !window.castClient.isConnected()) {
+        window.castClient.connect();
+      }
+    });
+    window.addEventListener('focus', () => {
+      refreshProfileStateFromServer('window-focus');
+    });
     await handleRoute();
 
     // 6. Register Service Worker
@@ -653,6 +737,15 @@ function _initCapacitorBridge() {
     } else {
       // Came to foreground: refresh queue/subscriptions in case another device updated them
       console.log('[capacitor] App foregrounded.');
+      refreshProfileStateFromServer('capacitor-foreground', { force: true }).then(() => {
+        const h = window.location.hash;
+        if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) {
+          handleRoute();
+        }
+      });
+      if (window.castClient && !window.castClient.isConnected()) {
+        window.castClient.connect();
+      }
       if (window.player && typeof window.player.hydrateQueueFromServer === 'function') {
         window.player.hydrateQueueFromServer();
       }

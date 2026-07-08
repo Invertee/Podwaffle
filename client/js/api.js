@@ -791,7 +791,7 @@ const api = {
     }
 
     if (cleanPath === '/cast/play' && method === 'POST') {
-      const { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration } = body || {};
+      const { deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration, feedId } = body || {};
       // For local device, just store the playback session
       // The actual playback is handled by the web audio player
       const session = {
@@ -801,6 +801,7 @@ const api = {
         title,
         podcastTitle,
         imageUrl,
+        feedId: feedId || '',
         position: startPosition || 0,
         duration,
         status: 'playing',
@@ -823,14 +824,15 @@ const api = {
       return { ok: true, status: 'stopped' };
     }
 
-    if (cleanPath === '/cast/seek' && method === 'PUT') {
+    if (cleanPath === '/cast/seek' && (method === 'PUT' || method === 'POST')) {
       const { position } = body || {};
       return { ok: true, position, status: 'paused' };
     }
 
-    if (cleanPath === '/cast/volume' && method === 'PUT') {
-      const { volume } = body || {};
-      return { ok: true, volume, status: 'paused' };
+    if ((cleanPath === '/cast/volume' || cleanPath === '/cast/setVolume') && (method === 'PUT' || method === 'POST')) {
+      const { volume, level } = body || {};
+      const nextVolume = volume != null ? volume : level;
+      return { ok: true, volume: nextVolume, status: 'paused' };
     }
 
     // ────── User-scoped routes ──────────────────────────────────────────
@@ -1275,10 +1277,10 @@ const api = {
     return this._fetch('/api/cast/devices');
   },
 
-  async castPlay(deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration) {
+  async castPlay(deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration, feedId = '') {
     return this._fetch('/api/cast/play', {
       method: 'POST',
-      body: JSON.stringify({ deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration }),
+      body: JSON.stringify({ deviceId, mediaUrl, startPosition, episodeGuid, userGuid, title, podcastTitle, imageUrl, duration, feedId }),
     });
   },
 
@@ -1295,15 +1297,15 @@ const api = {
   },
 
   async setCastVolume(volume) {
-    return this._fetch('/api/cast/volume', {
-      method: 'PUT',
-      body: JSON.stringify({ volume }),
+    return this._fetch('/api/cast/setVolume', {
+      method: 'POST',
+      body: JSON.stringify({ level: volume }),
     });
   },
 
   async castSeek(position) {
     return this._fetch('/api/cast/seek', {
-      method: 'PUT',
+      method: 'POST',
       body: JSON.stringify({ position }),
     });
   },

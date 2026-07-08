@@ -869,7 +869,7 @@ const player = {
     const dur = Math.max(0, Math.floor(this.duration || this.audio.duration || 0));
 
     // Don't sync if episode has already been marked as played (avoid race condition)
-    if (episode._markedPlayed) {
+    if (episode._markedPlayed || episode._markingPlayed) {
       console.log('[player] Skipping sync for already-played episode:', episode.title);
       return;
     }
@@ -1047,6 +1047,7 @@ const player = {
       duration: snapshot.duration,
       played: false,
       feedId: this.currentEpisode.feedId,
+      updatedAt: snapshot.updatedAt || new Date().toISOString(),
     }, requestOptions).catch((err) => {
       console.warn('[player] Failed to flush playback progress:', err);
     });

@@ -214,6 +214,17 @@ const syncManager = {
         }
       }
 
+      try {
+        localStorage.setItem(`podwaffle_subscriptions_${guid}`, JSON.stringify(mergedSubs || []));
+        localStorage.setItem(`podwaffle_progress_${guid}`, JSON.stringify(mergedProgress || {}));
+        localStorage.setItem(`podwaffle_stats_${guid}`, JSON.stringify(mergedStats || {}));
+        if (window.appState?.subscriptionsUpdatedAt) {
+          localStorage.setItem(`podwaffle_subscriptions_updated_at_${guid}`, JSON.stringify(window.appState.subscriptionsUpdatedAt));
+        }
+      } catch (err) {
+        console.warn('[syncManager] Failed to persist merged state locally:', err);
+      }
+
       result.ok = !!(pushResult && pushResult.ok !== false);
       result.endedAt = new Date().toISOString();
       result.durationMs = Date.now() - startedAt;
