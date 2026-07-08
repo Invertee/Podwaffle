@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const syncService = require('./syncService');
 
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
@@ -297,7 +297,7 @@ async function saveUser(profile) {
  * Create a brand-new user with default settings.
  */
 async function createUser() {
-  const guid = uuidv4();
+  const guid = randomUUID();
   console.log(`[userService] createUser() → new guid: ${guid}`);
   const profile = defaultProfile(guid);
   await saveUser(profile);
