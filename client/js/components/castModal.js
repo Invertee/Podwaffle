@@ -70,6 +70,7 @@ const castModal = {
     if (window.castClient) {
       this._castStateHandler = () => {
         this._renderHeaderState();
+        this.renderDeviceList(window.googleCastSender?.getAvailability() || { devices: [] });
         this._updateStopButtonVisibility();
       };
       window.castClient.on('cast:status', this._castStateHandler);

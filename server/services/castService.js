@@ -573,13 +573,15 @@ async function resume() {
  */
 async function stop(options = {}) {
   console.log('[castService] stop()');
+  const stopReason = options.reason || 'stopped';
   if (!state.player && !state.client && !state.activeDeviceId) {
     console.log('[castService] stop() → nothing to stop');
+    _resetState();
+    broadcastState(stopReason);
     return { status: 'idle' };
   }
 
   return new Promise((resolve) => {
-    const stopReason = options.reason || 'stopped';
     const notifyStopped = () => _notifyStatusUpdate({ status: 'idle', reason: stopReason });
     if (state.player) {
       state.player.stop((err) => {

@@ -408,6 +408,26 @@ const castClient = {
     }
   },
 
+  resetCastState(reason = 'client-reset') {
+    this._applyCastStatus({
+      activeDeviceId: null,
+      deviceId: null,
+      deviceName: null,
+      ownerGuid: null,
+      mediaUrl: null,
+      episodeGuid: null,
+      title: null,
+      podcastTitle: null,
+      imageUrl: null,
+      position: 0,
+      duration: 0,
+      volume: this._castState.volume || 1,
+      status: 'idle',
+      reason,
+    });
+    this._dispatch('cast:status', this.getCastState());
+  },
+
   _handleMessage(data) {
     if (data.type !== 'cast:state') {
       console.log('[castClient] Message received:', data.type, data);

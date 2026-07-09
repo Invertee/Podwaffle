@@ -1513,34 +1513,35 @@ const player = {
 
     try {
       // Stop the cast session on the server/device before resuming local playback.
-      if (window.googleCastSender && window.googleCastSender.isConnected()) {
+      const castClientState = window.castClient && typeof window.castClient.getCastState === 'function'
+        ? window.castClient.getCastState()
+        : null;
+      const shouldStopCast = !!(
+        window.googleCastSender &&
+        (
+          window.googleCastSender.isConnected() ||
+          this.mode === 'cast' ||
+          this._activeCastDeviceId ||
+          castClientState?.activeDeviceId
+        )
+      );
+
+      if (shouldStopCast) {
         const stopResult = await window.googleCastSender.stop();
         console.log('[player] Cast session stopped:', stopResult);
       }
 
       // Clear any residual client-side cast state immediately.
-      if (window.castClient && window.castClient.getCastState) {
-        const castState = window.castClient.getCastState();
-        if (castState.activeDeviceId) {
-          console.log('[player] Clearing residual cast state from client');
-          if (window.castClient._castState) {
-            window.castClient._castState.status = 'idle';
-            window.castClient._castState.position = 0;
-            window.castClient._castState.duration = 0;
-            window.castClient._castState.activeDeviceId = null;
-            window.castClient._castState.episodeGuid = null;
-            window.castClient._castState.title = null;
-            window.castClient._castState.podcastTitle = null;
-            window.castClient._castState.imageUrl = null;
-            window.castClient._castState.ownerGuid = null;
-            window.castClient._castState.deviceName = null;
-            window.castClient._castState.mediaUrl = null;
-            window.castClient._castState.volume = this.volume;
-          }
-        }
+      if (window.googleCastSender && typeof window.googleCastSender._clearLocalSession === 'function') {
+        window.googleCastSender._clearLocalSession('switch-to-local');
+      } else if (window.castClient && typeof window.castClient.resetCastState === 'function') {
+        window.castClient.resetCastState('switch-to-local');
       }
     } catch (err) {
       console.warn('[player] switchToLocal error (continuing anyway):', err);
+      if (window.googleCastSender && typeof window.googleCastSender._clearLocalSession === 'function') {
+        window.googleCastSender._clearLocalSession('switch-to-local-after-error');
+      }
     } finally {
       this._castStopInProgress = false;
     }

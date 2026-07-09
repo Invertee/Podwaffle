@@ -179,6 +179,29 @@ const googleCastSender = {
     };
   },
 
+  _clearLocalSession(reason = 'client-reset') {
+    this._currentSession = null;
+    if (window.castClient && typeof window.castClient.resetCastState === 'function') {
+      window.castClient.resetCastState(reason);
+    }
+    this._dispatch('statechange', {
+      status: 'idle',
+      activeDeviceId: null,
+      deviceId: null,
+      deviceName: null,
+      ownerGuid: null,
+      episodeGuid: null,
+      title: null,
+      podcastTitle: null,
+      imageUrl: null,
+      mediaUrl: null,
+      position: 0,
+      duration: 0,
+      volume: 1,
+      reason,
+    });
+  },
+
   getCurrentDevice() {
     const activeDeviceId = this._currentSession?.activeDeviceId || this._currentSession?.deviceId || null;
     if (!this._currentSession || !activeDeviceId) {
@@ -445,9 +468,6 @@ const googleCastSender = {
 
   async stop() {
     this._resolveApiBaseUrl();
-    if (!this._currentSession) {
-      return { status: 'idle' };
-    }
 
     try {
       if (this._apiBaseUrl) {
@@ -471,23 +491,11 @@ const googleCastSender = {
       }
     } catch (err) {
       console.warn('[googleCastSender] Failed to stop cast session cleanly:', err?.message || err);
+      this._clearLocalSession('stop-failed-local-reset');
       throw err;
     }
 
-    this._currentSession = null;
-    this._dispatch('statechange', {
-      status: 'idle',
-      activeDeviceId: null,
-      deviceName: null,
-      ownerGuid: null,
-      episodeGuid: null,
-      title: null,
-      podcastTitle: null,
-      imageUrl: null,
-      position: 0,
-      duration: 0,
-      volume: 1,
-    });
+    this._clearLocalSession('stopped');
     return { status: 'idle' };
   },
 
