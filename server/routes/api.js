@@ -388,9 +388,13 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     try {
       const profile = await userService.getUser(guid);
       if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
-      await userService.reorderSubscriptions(guid, order);
+      const subscriptions = await userService.reorderSubscriptions(guid, order);
       broadcastWs({ type: 'user:subscriptions', data: { guid } });
-      res.json({ success: true });
+      res.json({
+        success: true,
+        subscriptions,
+        subscriptionsUpdatedAt: new Date().toISOString(),
+      });
     } catch (err) {
       sendError(res, 500, 'Failed to reorder subscriptions', err.message);
     }
@@ -905,7 +909,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         const nearEnd = dur > 0 && pos >= dur - 15;
         const shouldMarkPlayed = dur > 0 && (ratio >= 0.95 || nearEnd);
         const shouldPersistPosition = now - lastCastProgressPersistAt >= 15000;
-        const shouldPersistTerminal = mappedStatus === 'idle' || mappedStatus === 'error' || shouldMarkPlayed;
+        const shouldClearCastSession = mappedStatus === 'idle' || mappedStatus === 'error';
+        const shouldPersistTerminal = shouldClearCastSession || shouldMarkPlayed;
 
         if (pos > 0) lastKnownCastPosition = pos;
         if (dur > 0) lastKnownCastDuration = dur;
@@ -941,6 +946,12 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
             }).catch((err) => {
               console.warn('[api] Cast history update failed:', err.message);
             });
+            return;
+          }
+
+          if (shouldClearCastSession) {
+            await userService.clearPlaybackSession(userGuid, episodeGuid).catch(() => null);
+            broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session: null, episodeGuid } });
             return;
           }
 

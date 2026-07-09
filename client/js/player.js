@@ -376,9 +376,10 @@ const player = {
       return;
     }
 
-    if (nextStatus === 'idle' && reason === 'timeout') {
+    const terminalIdleReasons = new Set(['timeout', 'health-reset', 'device-lost', 'poll', 'stopped']);
+    if (nextStatus === 'idle' && terminalIdleReasons.has(reason)) {
       this.switchToLocal().catch((err) => {
-        console.warn('[player] Failed to return to local playback after cast timeout:', err);
+        console.warn('[player] Failed to return to local playback after cast ended:', err);
       });
       return;
     }

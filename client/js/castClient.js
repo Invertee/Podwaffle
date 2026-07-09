@@ -120,10 +120,53 @@ const castClient = {
   },
 
   _startStatePolling() {
-    // Poll disabled: relying on WebSocket cast:status broadcasts from server
-    // Server sends cast:status every 1s when device is active, which is more reliable
-    // than HTTP polling and includes critical ownership metadata (ownerGuid)
     this._stopStatePolling();
+    if (!window.api || typeof window.api.getCastSession !== 'function') return;
+
+    const pollState = async () => {
+      try {
+        const response = await window.api.getCastSession();
+        const session = response?.session || response || null;
+        const activeDeviceId = session?.activeDeviceId || session?.deviceId || null;
+
+        if (session && activeDeviceId) {
+          this._handleMessage({
+            type: 'cast:status',
+            data: {
+              ...session,
+              activeDeviceId,
+            },
+          });
+          return;
+        }
+
+        if (this._castState.activeDeviceId || this._castState.status !== 'idle') {
+          this._handleMessage({
+            type: 'cast:status',
+            data: {
+              activeDeviceId: null,
+              deviceName: null,
+              ownerGuid: null,
+              mediaUrl: null,
+              episodeGuid: null,
+              title: null,
+              podcastTitle: null,
+              imageUrl: null,
+              position: 0,
+              duration: 0,
+              volume: this._castState.volume || 1,
+              status: 'idle',
+              reason: 'poll',
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('[castClient] Cast state poll failed:', err?.message || err);
+      }
+    };
+
+    this._statePollTimer = setInterval(pollState, 15000);
+    setTimeout(pollState, 1000);
   },
 
   _startHealthMonitoring() {
@@ -316,6 +359,55 @@ const castClient = {
     }
   },
 
+  _applyCastStatus(status = {}) {
+    const explicitStatus = String(status.status || '').toLowerCase();
+    const activeDeviceId = status.activeDeviceId !== undefined
+      ? status.activeDeviceId
+      : (status.deviceId !== undefined ? status.deviceId : this._castState.activeDeviceId);
+    const nextStatus = explicitStatus || (activeDeviceId ? this._castState.status : 'idle');
+    const isIdle = !activeDeviceId || nextStatus === 'idle';
+
+    this._castState = {
+      status: isIdle ? 'idle' : nextStatus,
+      position: isIdle ? 0 : (status.position != null ? status.position : this._castState.position),
+      duration: isIdle ? 0 : (status.duration != null ? status.duration : this._castState.duration),
+      activeDeviceId: isIdle ? null : activeDeviceId,
+      deviceName: isIdle ? null : (status.deviceName != null ? status.deviceName : this._castState.deviceName),
+      ownerGuid: isIdle ? null : (status.ownerGuid != null ? status.ownerGuid : this._castState.ownerGuid),
+      episodeGuid: isIdle ? null : (status.episodeGuid != null ? status.episodeGuid : this._castState.episodeGuid),
+      title: isIdle ? null : (status.title != null ? status.title : this._castState.title),
+      podcastTitle: isIdle ? null : (status.podcastTitle != null ? status.podcastTitle : this._castState.podcastTitle),
+      imageUrl: isIdle ? null : (status.imageUrl != null ? status.imageUrl : this._castState.imageUrl),
+      mediaUrl: isIdle ? null : (status.mediaUrl != null ? status.mediaUrl : this._castState.mediaUrl),
+      volume: status.volume != null ? status.volume : this._castState.volume,
+    };
+
+    if (isIdle) {
+      this._clearIdleTimer();
+    } else if (this._castState.status === 'playing') {
+      this._clearIdleTimer();
+    } else if (this._castState.status === 'paused' || this._castState.status === 'error') {
+      if (!this._idleTimer) this._startIdleTimer();
+    }
+
+    if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
+      window.player.applyCastState({
+        deviceId: this._castState.activeDeviceId,
+        deviceName: this._castState.deviceName,
+        mediaUrl: this._castState.mediaUrl,
+        episodeGuid: this._castState.episodeGuid,
+        title: this._castState.title,
+        podcastTitle: this._castState.podcastTitle,
+        imageUrl: this._castState.imageUrl,
+        position: this._castState.position,
+        duration: this._castState.duration,
+        status: this._castState.status,
+        reason: status.reason,
+        volume: this._castState.volume,
+      });
+    }
+  },
+
   _handleMessage(data) {
     if (data.type !== 'cast:state') {
       console.log('[castClient] Message received:', data.type, data);
@@ -328,42 +420,10 @@ const castClient = {
 
       case 'cast:state':
         if (data.data) {
-          this._castState = {
-            status: data.data.status || this._castState.status,
-            position: data.data.position != null ? data.data.position : this._castState.position,
-            duration: data.data.duration != null ? data.data.duration : this._castState.duration,
-            activeDeviceId: data.data.deviceId !== undefined ? data.data.deviceId : this._castState.activeDeviceId,
-            episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
-            title: data.data.title != null ? data.data.title : this._castState.title,
-            podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
-            imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
-            mediaUrl: data.data.mediaUrl != null ? data.data.mediaUrl : this._castState.mediaUrl,
-            volume: data.data.volume != null ? data.data.volume : this._castState.volume,
-          };
-
-          if (!this._castState.activeDeviceId || this._castState.status === 'idle') {
-            this._clearIdleTimer();
-          } else if (this._castState.status === 'playing') {
-            this._clearIdleTimer();
-          } else if (this._castState.status === 'paused' || this._castState.status === 'error') {
-            if (!this._idleTimer) this._startIdleTimer();
-          }
-
-          if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
-            window.player.applyCastState({
-              deviceId: this._castState.activeDeviceId,
-              mediaUrl: this._castState.mediaUrl,
-              episodeGuid: this._castState.episodeGuid,
-              title: this._castState.title,
-              podcastTitle: this._castState.podcastTitle,
-              imageUrl: this._castState.imageUrl,
-              position: this._castState.position,
-              duration: this._castState.duration,
-              status: this._castState.status,
-              reason: data.data.reason,
-              volume: this._castState.volume,
-            });
-          }
+          this._applyCastStatus({
+            ...data.data,
+            activeDeviceId: data.data.deviceId !== undefined ? data.data.deviceId : data.data.activeDeviceId,
+          });
         }
 
         this._dispatch('cast:state', data.data);
@@ -398,20 +458,7 @@ const castClient = {
 
       case 'cast:status':
         if (data.data) {
-          this._castState = {
-            status: data.data.status || this._castState.status,
-            position: data.data.position != null ? data.data.position : this._castState.position,
-            duration: data.data.duration != null ? data.data.duration : this._castState.duration,
-            activeDeviceId: data.data.activeDeviceId !== undefined ? data.data.activeDeviceId : this._castState.activeDeviceId,
-            deviceName: data.data.deviceName != null ? data.data.deviceName : this._castState.deviceName,
-            ownerGuid: data.data.ownerGuid != null ? data.data.ownerGuid : this._castState.ownerGuid,
-            episodeGuid: data.data.episodeGuid != null ? data.data.episodeGuid : this._castState.episodeGuid,
-            title: data.data.title != null ? data.data.title : this._castState.title,
-            podcastTitle: data.data.podcastTitle != null ? data.data.podcastTitle : this._castState.podcastTitle,
-            imageUrl: data.data.imageUrl != null ? data.data.imageUrl : this._castState.imageUrl,
-            mediaUrl: data.data.mediaUrl != null ? data.data.mediaUrl : this._castState.mediaUrl,
-            volume: data.data.volume != null ? data.data.volume : this._castState.volume,
-          };
+          this._applyCastStatus(data.data);
         }
         this._dispatch('cast:status', data.data);
         break;

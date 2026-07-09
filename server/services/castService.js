@@ -29,9 +29,14 @@ const state = {
   idleTimeoutTimer: null,
   lastSessionActivityAt: 0,
   lastProgressAt: 0,
+  onStatusUpdate: null,
   ownerGuid: null, // The user GUID who initiated the cast session
   broadcastFn: null // Callback to broadcast state to WS clients
 };
+
+const IDLE_SESSION_TIMEOUT_MS = 20 * 60 * 1000;
+const STALE_PLAYING_TIMEOUT_MS = 2 * 60 * 1000;
+const STUCK_SESSION_TIMEOUT_MS = 2 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // mDNS Discovery
@@ -113,7 +118,9 @@ function startDiscovery(onDeviceFound, onDeviceLost) {
           // If this was our active device, reset state
           if (state.activeDeviceId === id) {
             console.log('[castService] startDiscovery() → active device lost, resetting state');
+            _notifyStatusUpdate({ status: 'idle', reason: 'device-lost' });
             _resetState();
+            broadcastState('device-lost');
           }
           break;
         }
@@ -171,6 +178,26 @@ function _touchSessionActivity(progressChanged = false) {
   }
 }
 
+function _notifyStatusUpdate(status = {}) {
+  if (typeof state.onStatusUpdate !== 'function') return;
+  try {
+    state.onStatusUpdate({
+      position: status.position != null ? status.position : state.position,
+      duration: status.duration != null ? status.duration : state.duration,
+      status: status.status || state.status,
+      mediaUrl: state.mediaUrl,
+      episodeGuid: state.episodeGuid,
+      title: state.title,
+      podcastTitle: state.podcastTitle,
+      imageUrl: state.imageUrl,
+      volume: state.volume,
+      reason: status.reason || null
+    });
+  } catch (err) {
+    console.warn('[castService] status update callback failed:', err.message);
+  }
+}
+
 function _normalizeVolume(rawVolume) {
   if (rawVolume == null) return null;
   if (typeof rawVolume === 'number' && Number.isFinite(rawVolume)) {
@@ -216,14 +243,13 @@ function _armIdleTimeout(reason = 'idle') {
     stop({ reason: 'timeout' }).catch((err) => {
       console.error('[castService] idle timeout stop failed:', err.message);
     });
-  }, 18 * 60 * 1000);
-  console.log(`[castService] idle timeout armed (${reason}) for 18 minutes`);
+  }, IDLE_SESSION_TIMEOUT_MS);
+  console.log(`[castService] idle timeout armed (${reason}) for ${Math.round(IDLE_SESSION_TIMEOUT_MS / 60000)} minutes`);
 }
 
 function _resetState() {
   console.log('[castService] _resetState() → clearing cast session state');
   _clearStatusPoller();
-  _clearHealthWatchdog();
   _clearIdleTimeoutTimer();
   const previousActiveDeviceId = state.activeDeviceId;
   if (previousActiveDeviceId && devices.has(previousActiveDeviceId)) {
@@ -245,6 +271,7 @@ function _resetState() {
   state.status = 'idle';
   state.client = null;
   state.player = null;
+  state.onStatusUpdate = null;
   state.ownerGuid = null;
   state.lastSessionActivityAt = 0;
   state.lastProgressAt = 0;
@@ -298,6 +325,8 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
   state.imageUrl = metadata.imageUrl || null;
   state.position = startPosition;
   state.status = 'connecting';
+  state.onStatusUpdate = typeof onStatusUpdate === 'function' ? onStatusUpdate : null;
+  _touchSessionActivity(false);
   _clearStatusPoller();
   _clearIdleTimeoutTimer();
   broadcastState();
@@ -332,17 +361,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
       devices.set(deviceId, device);
       broadcastState();
       if (typeof onStatusUpdate === 'function') {
-        onStatusUpdate({
-          position: state.position,
-          duration: state.duration,
-          status: 'error',
-          mediaUrl: state.mediaUrl,
-          episodeGuid: state.episodeGuid,
-          title: state.title,
-          podcastTitle: state.podcastTitle,
-          imageUrl: state.imageUrl,
-          volume: state.volume
-        });
+        _notifyStatusUpdate({ status: 'error' });
       }
     });
 
@@ -372,6 +391,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           const playerState = playerStatus.playerState || 'IDLE';
           const statusVolume = _normalizeVolume(playerStatus.volume);
           const previousPosition = state.position;
+          const previousStatus = state.status;
 
           let mappedStatus;
           switch (playerState) {
@@ -382,10 +402,13 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
             default:         mappedStatus = 'idle';
           }
 
+          const progressChanged = newPosition > previousPosition + 0.25;
           state.position = newPosition;
           state.duration = newDuration;
           state.status = mappedStatus;
-          _touchSessionActivity(newPosition > previousPosition || mappedStatus === 'playing');
+          if (progressChanged || mappedStatus !== previousStatus) {
+            _touchSessionActivity(progressChanged);
+          }
           if (statusVolume != null) {
             state.volume = statusVolume;
           }
@@ -394,7 +417,9 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           if (mappedStatus === 'playing') {
             _clearIdleTimeoutTimer();
           } else if (mappedStatus === 'paused' || mappedStatus === 'idle') {
-            _armIdleTimeout(mappedStatus);
+            if (mappedStatus !== previousStatus || !state.idleTimeoutTimer) {
+              _armIdleTimeout(mappedStatus);
+            }
           }
 
           console.log(`[castService] player status → state=${playerState}, pos=${newPosition.toFixed(1)}s, dur=${newDuration.toFixed(1)}s`);
@@ -402,17 +427,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           broadcastState();
 
           if (typeof onStatusUpdate === 'function') {
-            onStatusUpdate({
-              position: newPosition,
-              duration: newDuration,
-              status: mappedStatus,
-              mediaUrl: state.mediaUrl,
-              episodeGuid: state.episodeGuid,
-              title: state.title,
-              podcastTitle: state.podcastTitle,
-              imageUrl: state.imageUrl,
-              volume: state.volume
-            });
+            _notifyStatusUpdate({ position: newPosition, duration: newDuration, status: mappedStatus });
           }
         };
 
@@ -429,7 +444,6 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
               return;
             }
             applyPlayerStatus(latestStatus);
-            _touchSessionActivity(false);
           });
         };
 
@@ -559,12 +573,14 @@ async function resume() {
  */
 async function stop(options = {}) {
   console.log('[castService] stop()');
-  if (!state.player && !state.client) {
+  if (!state.player && !state.client && !state.activeDeviceId) {
     console.log('[castService] stop() → nothing to stop');
     return { status: 'idle' };
   }
 
   return new Promise((resolve) => {
+    const stopReason = options.reason || 'stopped';
+    const notifyStopped = () => _notifyStatusUpdate({ status: 'idle', reason: stopReason });
     if (state.player) {
       state.player.stop((err) => {
         if (err) {
@@ -572,15 +588,17 @@ async function stop(options = {}) {
         } else {
           console.log('[castService] stop() → player stopped');
         }
+        notifyStopped();
         _disconnectClient();
         _resetState();
-        broadcastState(options.reason || 'stopped');
+        broadcastState(stopReason);
         resolve({ status: 'idle' });
       });
     } else {
+      notifyStopped();
       _disconnectClient();
       _resetState();
-      broadcastState(options.reason || 'stopped');
+      broadcastState(stopReason);
       resolve({ status: 'idle' });
     }
   });
@@ -701,8 +719,9 @@ function init(broadcastFn) {
       const now = Date.now();
       const lastActivityAge = state.lastSessionActivityAt ? now - state.lastSessionActivityAt : Number.POSITIVE_INFINITY;
       const lastProgressAge = state.lastProgressAt ? now - state.lastProgressAt : Number.POSITIVE_INFINITY;
-      const stalePlayingSession = currentStatus === 'playing' && lastProgressAge > 2 * 60 * 1000;
-      const stalePausedSession = currentStatus === 'paused' && lastActivityAge > 30 * 60 * 1000;
+      const stalePlayingSession = currentStatus === 'playing' && lastProgressAge > STALE_PLAYING_TIMEOUT_MS;
+      const stalePausedSession = currentStatus === 'paused' && lastActivityAge > IDLE_SESSION_TIMEOUT_MS;
+      const stuckSession = (currentStatus === 'connecting' || currentStatus === 'error') && lastActivityAge > STUCK_SESSION_TIMEOUT_MS;
 
       if (playerMissing && currentStatus !== 'idle') {
         console.warn('[castService] health watchdog → active session missing player/client; resetting');
@@ -712,8 +731,8 @@ function init(broadcastFn) {
         return;
       }
 
-      if (sessionLooksStuck && noOwner) {
-        console.warn('[castService] health watchdog → stuck session without owner; resetting');
+      if ((sessionLooksStuck && noOwner) || stuckSession) {
+        console.warn('[castService] health watchdog → stuck session; resetting');
         stop({ reason: 'health-reset' }).catch((err) => {
           console.error('[castService] health watchdog stop failed:', err.message);
         });

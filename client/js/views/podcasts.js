@@ -71,7 +71,7 @@ async function renderPodcasts(container) {
           : 'Unknown date';
         const description = sub.description || sub.author || 'No description available.';
         html += `
-          <div class="podcast-list-item" data-feed-id="${sub.feedId}" draggable="true">
+          <div class="podcast-list-item" data-feed-id="${_escapePodcastAttr(sub.feedId)}" data-feed-url="${_escapePodcastAttr(sub.feedUrl || '')}" draggable="true">
             <img src="${sub.imageUrl || 'icons/icon-192.png'}" alt="${sub.title || 'Podcast'}" onerror="this.src='icons/icon-192.png'" ${imageAttrs}>
             <div class="podcast-list-body">
               <div class="podcast-list-title">${sub.title || 'Untitled podcast'}</div>
@@ -83,7 +83,7 @@ async function renderPodcasts(container) {
         `;
       } else {
         html += `
-          <div class="podcast-tile" data-feed-id="${sub.feedId}" draggable="true">
+          <div class="podcast-tile" data-feed-id="${_escapePodcastAttr(sub.feedId)}" data-feed-url="${_escapePodcastAttr(sub.feedUrl || '')}" draggable="true">
             <img src="${sub.imageUrl || 'icons/icon-192.png'}" alt="${sub.title || 'Podcast'}" onerror="this.src='icons/icon-192.png'" ${imageAttrs}>
             ${sub.hasRecentEpisode ? '<div class="new-dot"></div>' : ''}
           </div>
@@ -141,10 +141,41 @@ function _prewarmPodcastArtwork(subscriptions = []) {
   }).catch(() => {});
 }
 
+function _escapePodcastAttr(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 async function _saveTileOrder(gridEl, guid) {
-  const feedIds = [...gridEl.querySelectorAll('[data-feed-id]')].map(t => t.dataset.feedId);
+  const tiles = [...gridEl.querySelectorAll('[data-feed-id]')];
+  const feedIds = tiles.map(t => t.dataset.feedId).filter(Boolean);
+  const feedUrls = tiles.map(t => t.dataset.feedUrl).filter(Boolean);
   try {
-    await window.api.reorderSubscriptions(guid, feedIds);
+    const result = await window.api.reorderSubscriptions(guid, feedIds);
+    const updatedAt = result?.subscriptionsUpdatedAt || new Date().toISOString();
+    const updatedSubscriptions = Array.isArray(result?.subscriptions)
+      ? result.subscriptions
+      : feedUrls;
+
+    if (window.appState) {
+      window.appState.subscriptions = updatedSubscriptions;
+      window.appState.subscriptionsUpdatedAt = updatedAt;
+      if (window.appState.user) {
+        window.appState.user.subscriptions = updatedSubscriptions;
+        window.appState.user.subscriptionsUpdatedAt = updatedAt;
+      }
+    }
+
+    try {
+      localStorage.setItem(`podwaffle_subscriptions_updated_at_${guid}`, JSON.stringify(updatedAt));
+      if (updatedSubscriptions.length > 0) {
+        localStorage.setItem(`podwaffle_subscriptions_${guid}`, JSON.stringify(updatedSubscriptions));
+      }
+    } catch (_) {}
+
     console.log('[podcasts] Saved tile order:', feedIds);
   } catch (err) {
     console.error('[podcasts] Failed to save tile order:', err);
