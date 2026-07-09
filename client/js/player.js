@@ -1357,8 +1357,8 @@ const player = {
       const amt = details.seekOffset || player.skipForwardSecs;
       player.seek(player.position + amt);
     });
-    navigator.mediaSession.setActionHandler('previoustrack', null);
-    navigator.mediaSession.setActionHandler('nexttrack', null);
+    navigator.mediaSession.setActionHandler('previoustrack', () => player.skipBack());
+    navigator.mediaSession.setActionHandler('nexttrack', () => player.skipForward());
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime != null) player.seek(details.seekTime);
     });
