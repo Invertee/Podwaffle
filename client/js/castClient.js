@@ -260,6 +260,8 @@ const castClient = {
 
     const localGuid = localStorage.getItem('podwaffle_guid');
     if (!localGuid || localGuid !== commandData.guid) return;
+    const localClientId = window.getPodwaffleClientId ? window.getPodwaffleClientId() : localStorage.getItem('podwaffle_client_id');
+    if (commandData.targetClientId && localClientId && commandData.targetClientId !== localClientId) return;
 
     const player = window.player;
     if (!player) return;
@@ -420,6 +422,10 @@ const castClient = {
 
       case 'user:progress':
         this._dispatch('user:progress', data.data);
+        break;
+
+      case 'user:playback-session':
+        this._dispatch('user:playback-session', data.data);
         break;
 
       case 'user:subscriptions':

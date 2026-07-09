@@ -1,4 +1,4 @@
-const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v2';
+const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v3';
 const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 
@@ -208,6 +208,20 @@ self.addEventListener('fetch', (event) => {
       const cache = await caches.open(IMAGE_CACHE_NAME);
       const cached = await cache.match(request);
 
+      if (cached) {
+        event.waitUntil(
+          fetch(request)
+            .then((response) => {
+              if (response && (response.ok || response.type === 'opaque')) {
+                return cache.put(request, response.clone());
+              }
+              return null;
+            })
+            .catch(() => null)
+        );
+        return cached;
+      }
+
       const networkFetch = fetch(request)
         .then((response) => {
           if (response && (response.ok || response.type === 'opaque')) {
@@ -216,11 +230,6 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => null);
-
-      if (cached) {
-        networkFetch.catch(() => null);
-        return cached;
-      }
 
       const fresh = await networkFetch;
       if (fresh) return fresh;

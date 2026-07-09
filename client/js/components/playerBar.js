@@ -423,6 +423,15 @@ const playerBar = {
     return text || 'No episode information available.';
   },
 
+  _setImageSrc(img, src) {
+    if (!img) return;
+    const nextSrc = src || 'icons/icon-192.png';
+    const current = img.getAttribute('src') || '';
+    if (current !== nextSrc) {
+      img.src = nextSrc;
+    }
+  },
+
   setMobileEpisodeInfoExpanded(expanded) {
     const wrap = document.getElementById('pb-mobile-episode-info-wrap');
     const toggle = document.getElementById('pb-mobile-episode-info-toggle');
@@ -482,7 +491,7 @@ const playerBar = {
       if (titleEl) titleEl.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (titleEl) titleEl.title = state.currentEpisode.title || 'Unknown Episode';
       if (podcastEl) podcastEl.textContent = state.currentEpisode.podcastTitle || ' ';
-      if (artEl) artEl.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
+      this._setImageSrc(artEl, state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png');
       const episodeInfoText = this._getEpisodeInfoText(state.currentEpisode);
       if (mobileEpisodeInfo) mobileEpisodeInfo.textContent = episodeInfoText;
       if (infoModalPodcast) infoModalPodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
@@ -500,14 +509,14 @@ const playerBar = {
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
-      if (mobileArt) mobileArt.src = state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png';
+      this._setImageSrc(mobileArt, state.currentEpisode.podcastImageUrl || state.currentEpisode.imageUrl || 'icons/icon-192.png');
       if (mobileTitle) mobileTitle.textContent = state.currentEpisode.title || 'Unknown Episode';
       if (mobileTitle) mobileTitle.title = state.currentEpisode.title || 'Unknown Episode';
       if (mobilePodcast) mobilePodcast.textContent = state.currentEpisode.podcastTitle || 'Unknown Podcast';
     } else {
       if (titleEl) titleEl.textContent = 'Nothing playing';
       if (podcastEl) podcastEl.textContent = 'Select a podcast to start';
-      if (artEl) artEl.src = 'icons/icon-192.png';
+      this._setImageSrc(artEl, 'icons/icon-192.png');
       if (mobileEpisodeInfo) mobileEpisodeInfo.textContent = 'No episode information available.';
       if (infoModalPodcast) infoModalPodcast.textContent = 'Select a podcast to start';
       if (infoModalEpisode) infoModalEpisode.textContent = 'Nothing playing';
@@ -518,7 +527,7 @@ const playerBar = {
       const mobileArt = document.getElementById('pb-mobile-art');
       const mobileTitle = document.getElementById('pb-mobile-title');
       const mobilePodcast = document.getElementById('pb-mobile-podcast');
-      if (mobileArt) mobileArt.src = 'icons/icon-192.png';
+      this._setImageSrc(mobileArt, 'icons/icon-192.png');
       if (mobileTitle) mobileTitle.textContent = 'Nothing playing';
       if (mobilePodcast) mobilePodcast.textContent = 'Select a podcast to start';
       window.requestAnimationFrame(() => this._syncMobileEpisodeInfoToggleVisibility());

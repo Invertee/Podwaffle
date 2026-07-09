@@ -8,7 +8,7 @@ const player = {
   audio: new Audio(),
   currentEpisode: null, // {guid, title, podcastTitle, audioUrl, imageUrl, feedId, duration}
   queue: [],
-  mode: 'local',        // 'local' | 'cast'
+  mode: 'local',        // 'local' | 'cast' | 'remote'
   isPlaying: false,
   position: 0,
   duration: 0,
@@ -39,6 +39,7 @@ const player = {
   _nativeMediaSession: null,
   _nativeMediaInitialized: false,
   _nativeMediaSyncTimer: null,
+  _remoteSession: null,
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -50,6 +51,68 @@ const player = {
     const guid = localStorage.getItem('podwaffle_guid');
     if (!guid) return null;
     return `podwaffle_queue_state_${guid}`;
+  },
+
+  _getClientId() {
+    return window.getPodwaffleClientId ? window.getPodwaffleClientId() : (localStorage.getItem('podwaffle_client_id') || '');
+  },
+
+  _isRemoteSessionActive() {
+    return this.mode === 'remote' && !!(this._remoteSession && this._remoteSession.clientId);
+  },
+
+  _sendRemoteCommand(command, data = {}) {
+    const guid = localStorage.getItem('podwaffle_guid');
+    const targetClientId = this._remoteSession?.clientId || '';
+    if (!guid || !targetClientId || !window.api || typeof window.api.sendMediaCommand !== 'function') {
+      console.warn('[player] Cannot send remote media command; missing target session.');
+      return Promise.resolve(null);
+    }
+    return window.api.sendMediaCommand(guid, command, {
+      ...(data || {}),
+      targetClientId,
+    }).catch((err) => {
+      console.warn('[player] Remote media command failed:', command, err?.message || err);
+      throw err;
+    });
+  },
+
+  applyRemotePlaybackSession(session) {
+    const localClientId = this._getClientId();
+    if (!session || !session.episodeGuid) {
+      if (this._isRemoteSessionActive()) {
+        this._remoteSession = null;
+        this.mode = 'local';
+        this.currentEpisode = null;
+        this.position = 0;
+        this.duration = 0;
+        this.isPlaying = false;
+        this._notifyStateChange();
+      }
+      return;
+    }
+
+    if (!session.clientId || session.clientId === localClientId) return;
+    if (this.mode !== 'remote' && this.mode !== 'local') return;
+    if (this.mode === 'local' && this.currentEpisode && (this.isPlaying || this.audio?.src)) return;
+
+    this._remoteSession = { ...session };
+    this.audio.pause();
+    this.mode = 'remote';
+    this.currentEpisode = {
+      guid: session.episodeGuid,
+      feedId: session.feedId || '',
+      title: session.title || 'Unknown episode',
+      podcastTitle: session.podcastTitle || 'Unknown podcast',
+      audioUrl: session.audioUrl || '',
+      podcastImageUrl: session.podcastImageUrl || session.imageUrl || '',
+      imageUrl: session.imageUrl || session.podcastImageUrl || '',
+      duration: session.duration || 0,
+    };
+    this.position = Math.max(0, Number(session.position || 0));
+    this.duration = Math.max(0, Number(session.duration || 0));
+    this.isPlaying = !!session.isPlaying;
+    this._notifyStateChange();
   },
 
   _sanitizeStartPosition(episode, startPosition = 0) {
@@ -500,6 +563,7 @@ const player = {
       console.error('[player] loadEpisode: missing audioUrl', episode);
       return;
     }
+    this._remoteSession = null;
 
     const safeStartPosition = this._sanitizeStartPosition(episode, startPosition);
     if (safeStartPosition !== startPosition) {
@@ -558,12 +622,19 @@ const player = {
     this._updateMediaSession();
     this._notifyStateChange();
     this._setupProgressSync();
+    this._flushPlaybackSnapshot();
     if (autoplay) {
       this.play();
     }
   },
 
   play() {
+    if (this._isRemoteSessionActive()) {
+      this.isPlaying = true;
+      this._sendRemoteCommand('play').finally(() => this._notifyStateChange());
+      this._notifyStateChange();
+      return;
+    }
     if (this.mode === 'cast') {
       if (this._castStartInFlight) {
         return;
@@ -587,12 +658,19 @@ const player = {
     }
     this.audio.play().then(() => {
       console.log('[player] Playing:', this.currentEpisode?.title);
+      this._flushPlaybackSnapshot();
     }).catch(err => {
       console.error('[player] play() error:', err);
     });
   },
 
   pause() {
+    if (this._isRemoteSessionActive()) {
+      this.isPlaying = false;
+      this._sendRemoteCommand('pause').finally(() => this._notifyStateChange());
+      this._notifyStateChange();
+      return;
+    }
     if (this.mode === 'cast') {
       if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
         console.warn('[player] pause ignored in cast mode: no active Cast session');
@@ -604,6 +682,7 @@ const player = {
       return;
     }
     this.audio.pause();
+    this._flushPlaybackSnapshot();
     console.log('[player] Paused.');
   },
 
@@ -624,13 +703,21 @@ const player = {
   skipForward() {
     const newPos = Math.min(this.duration || Infinity, this.position + this.skipForwardSecs);
     console.log(`[player] Skip forward ${this.skipForwardSecs}s: ${this.position} → ${newPos}`);
-    this.skippedSeconds += this.skipForwardSecs;
+    if (!this._isRemoteSessionActive()) {
+      this.skippedSeconds += this.skipForwardSecs;
+    }
     this.seek(newPos);
   },
 
   seek(position) {
     position = Math.max(0, Math.floor(position));
     console.log('[player] Seek to:', position);
+    if (this._isRemoteSessionActive()) {
+      this.position = position;
+      this._sendRemoteCommand('seek', { position }).finally(() => this._notifyStateChange());
+      this._notifyStateChange();
+      return;
+    }
     if (this.mode === 'cast') {
       if (!(window.googleCastSender && window.googleCastSender.isConnected())) {
         console.warn('[player] seek ignored in cast mode: no active Cast session');
@@ -643,11 +730,17 @@ const player = {
     }
     this.audio.currentTime = position;
     this.position = position;
+    this._flushPlaybackSnapshot();
     this._notifyStateChange();
   },
 
   setVolume(level) {
     this.volume = Math.max(0, Math.min(1, level));
+    if (this._isRemoteSessionActive()) {
+      this._sendRemoteCommand('set_volume', { volume: this.volume }).finally(() => this._notifyStateChange());
+      this._notifyStateChange();
+      return;
+    }
     this.audio.volume = this.volume;
     if (this.mode !== 'cast') {
       this._localVolume = this.volume;
@@ -987,6 +1080,7 @@ const player = {
       duration: Math.max(0, Math.floor(overrides.duration ?? this.duration ?? this.audio.duration ?? 0)),
       isPlaying: this.isPlaying,
       mode: this.mode,
+      clientId: this._getClientId(),
       updatedAt: overrides.updatedAt || new Date().toISOString(),
     };
   },

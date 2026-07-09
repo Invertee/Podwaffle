@@ -7,6 +7,17 @@ window.appState = {
   currentRoute: null,
 };
 
+window.getPodwaffleClientId = function() {
+  const key = 'podwaffle_client_id';
+  let existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const next = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(key, next);
+  return next;
+};
+
 window.replaceProgressState = function(progressMap) {
   window.appState.progress = progressMap && typeof progressMap === 'object' ? { ...progressMap } : {};
   if (window.appState.user) {
@@ -209,6 +220,12 @@ async function restoreLastInProgressEpisode(guid) {
       console.warn('[app] Failed to load playback session:', sessionErr);
     }
 
+    const localClientId = window.getPodwaffleClientId ? window.getPodwaffleClientId() : localStorage.getItem('podwaffle_client_id');
+    if (serverSession?.clientId && serverSession.clientId !== localClientId && window.player?.applyRemotePlaybackSession) {
+      window.player.applyRemotePlaybackSession(serverSession);
+      return;
+    }
+
     const sessionCandidates = [localSession, serverSession]
       .filter((item) => item && item.episodeGuid)
       .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
@@ -264,8 +281,21 @@ async function refreshProfileStateFromServer(reason = 'manual', options = {}) {
     try {
       lastProfileStateRefreshAt = Date.now();
       if (window.syncManager && typeof window.syncManager.performSync === 'function') {
+        const previousProgress = { ...(window.appState?.progress || {}) };
         const result = await window.syncManager.performSync(guid);
         if (result?.ok && window.appState?.progress) {
+          const nextProgress = window.appState.progress || {};
+          const episodeGuids = new Set([
+            ...Object.keys(previousProgress || {}),
+            ...Object.keys(nextProgress || {}),
+          ]);
+          episodeGuids.forEach((episodeGuid) => {
+            const before = JSON.stringify(previousProgress[episodeGuid] || null);
+            const after = JSON.stringify(nextProgress[episodeGuid] || null);
+            if (before !== after && window.setEpisodeProgressState) {
+              window.setEpisodeProgressState(episodeGuid, nextProgress[episodeGuid] || null);
+            }
+          });
           window.dispatchEvent(new CustomEvent('podwaffle:progress-map-updated', {
             detail: { guid, progress: window.appState.progress, reason },
           }));
@@ -589,12 +619,7 @@ async function initApp() {
     // Set up cross-client sync listeners
     if (window.castClient) {
       window.castClient.on('connected', () => {
-        refreshProfileStateFromServer('websocket-connected').then(() => {
-          const h = window.location.hash;
-          if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) {
-            handleRoute();
-          }
-        });
+        refreshProfileStateFromServer('websocket-connected');
         if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
           window.googleCastSender.syncFromServerState().catch(() => null);
         }
@@ -616,7 +641,23 @@ async function initApp() {
           }
         }
         const h = window.location.hash;
-        if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) handleRoute();
+        if (h === '#/in-progress') {
+          const row = payload?.episodeGuid
+            ? Array.from(document.querySelectorAll('[data-guid]')).find((item) => item.dataset.guid === payload.episodeGuid)
+            : null;
+          const progress = payload?.progress || null;
+          const shouldBeVisible = !!(progress && !progress.played && Number(progress.position || 0) > 0);
+          if (!row || !shouldBeVisible) handleRoute();
+        } else if (h === '#/history' && payload?.progress?.played) {
+          handleRoute();
+        }
+      });
+      window.castClient.on('user:playback-session', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        if (window.player && typeof window.player.applyRemotePlaybackSession === 'function') {
+          window.player.applyRemotePlaybackSession(payload?.session || null);
+        }
       });
       window.castClient.on('user:subscriptions', () => {
         const h = window.location.hash;
@@ -737,12 +778,7 @@ function _initCapacitorBridge() {
     } else {
       // Came to foreground: refresh queue/subscriptions in case another device updated them
       console.log('[capacitor] App foregrounded.');
-      refreshProfileStateFromServer('capacitor-foreground', { force: true }).then(() => {
-        const h = window.location.hash;
-        if (h === '#/in-progress' || h === '#/history' || h.startsWith('#/podcast/')) {
-          handleRoute();
-        }
-      });
+      refreshProfileStateFromServer('capacitor-foreground', { force: true });
       if (window.castClient && !window.castClient.isConnected()) {
         window.castClient.connect();
       }

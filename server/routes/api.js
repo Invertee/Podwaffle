@@ -525,6 +525,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     try {
       const session = await userService.updatePlaybackSession(guid, req.body || {});
       res.json(session);
+      broadcastWs({ type: 'user:playback-session', data: { guid, session } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
@@ -539,7 +540,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { episodeGuid } = req.query;
     console.log(`[api] DELETE /users/${guid}/playback-session?episodeGuid=${episodeGuid || ''}`);
     try {
-      await userService.clearPlaybackSession(guid, episodeGuid || undefined);
+      const session = await userService.clearPlaybackSession(guid, episodeGuid || undefined);
+      broadcastWs({ type: 'user:playback-session', data: { guid, session, episodeGuid: episodeGuid || null } });
       res.status(204).send();
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
@@ -644,7 +646,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   // POST /ha/media-player/:guid/command
   router.post('/ha/media-player/:guid/command', async (req, res) => {
     const { guid } = req.params;
-    const { command, value, position, volume } = req.body || {};
+    const { command, value, position, volume, targetClientId } = req.body || {};
     const normalized = String(command || '').trim().toLowerCase();
     console.log(`[api] POST /ha/media-player/${guid}/command`, req.body);
 
@@ -665,6 +667,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           value,
           position,
           volume,
+          targetClientId: targetClientId || null,
           issuedAt: new Date().toISOString(),
         }
       });
@@ -926,6 +929,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           if (shouldMarkPlayed && !castMarkedPlayed) {
             castMarkedPlayed = true;
             await userService.clearPlaybackSession(userGuid, episodeGuid).catch(() => null);
+            broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session: null, episodeGuid } });
             await userService.addHistoryEntry(userGuid, {
               episodeGuid,
               feedId: feedId || '',
@@ -954,7 +958,10 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
             mode: 'cast',
             transport: 'cast',
             castDeviceId: deviceId || '',
+            clientId: '',
             updatedAt: updateTimestamp,
+          }).then((session) => {
+            broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session } });
           }).catch((err) => {
             console.warn('[api] Cast playback session update failed:', err.message);
           });

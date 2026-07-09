@@ -1166,6 +1166,16 @@ const api = {
     });
   },
 
+  async sendMediaCommand(guid, command, data = {}) {
+    return this._fetch(`/api/ha/media-player/${guid}/command`, {
+      method: 'POST',
+      body: JSON.stringify({
+        command,
+        ...(data || {}),
+      }),
+    });
+  },
+
   async getQueue(guid) {
     return this._fetch(`/api/users/${guid}/queue`);
   },

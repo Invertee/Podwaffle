@@ -538,6 +538,7 @@ async function updatePlaybackSession(guid, sessionData) {
     transport: sessionData.transport || '',
     castDeviceId: sessionData.castDeviceId || '',
     castDeviceName: sessionData.castDeviceName || '',
+    clientId: sessionData.clientId || '',
     currentEpisodeGuid: sessionData.currentEpisodeGuid || sessionData.episodeGuid || '',
     queue: normalizedQueue,
     updatedAt: sessionData.updatedAt || now

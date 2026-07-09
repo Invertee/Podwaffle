@@ -2,6 +2,7 @@ async function renderPodcasts(container) {
   const VIEW_KEY = 'podwaffle_view_mode_podcasts';
   const getViewMode = () => localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
   const setViewMode = (mode) => localStorage.setItem(VIEW_KEY, mode === 'list' ? 'list' : 'grid');
+  const imageAttrs = 'loading="eager" decoding="async" draggable="false"';
 
   container.innerHTML = `
     <div class="view-header"></div>
@@ -46,6 +47,7 @@ async function renderPodcasts(container) {
     }
 
     const subscriptions = await window.api.getSubscriptions(guid);
+    _prewarmPodcastArtwork(subscriptions);
 
     if (!subscriptions || subscriptions.length === 0) {
       gridEl.innerHTML = `
@@ -70,7 +72,7 @@ async function renderPodcasts(container) {
         const description = sub.description || sub.author || 'No description available.';
         html += `
           <div class="podcast-list-item" data-feed-id="${sub.feedId}" draggable="true">
-            <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
+            <img src="${sub.imageUrl || 'icons/icon-192.png'}" alt="${sub.title || 'Podcast'}" onerror="this.src='icons/icon-192.png'" ${imageAttrs}>
             <div class="podcast-list-body">
               <div class="podcast-list-title">${sub.title || 'Untitled podcast'}</div>
               <div class="podcast-list-date">Last update: ${updatedText}</div>
@@ -82,7 +84,7 @@ async function renderPodcasts(container) {
       } else {
         html += `
           <div class="podcast-tile" data-feed-id="${sub.feedId}" draggable="true">
-            <img src="${sub.imageUrl}" alt="${sub.title}" onerror="this.src='icons/icon-192.png'" draggable="false">
+            <img src="${sub.imageUrl || 'icons/icon-192.png'}" alt="${sub.title || 'Podcast'}" onerror="this.src='icons/icon-192.png'" ${imageAttrs}>
             ${sub.hasRecentEpisode ? '<div class="new-dot"></div>' : ''}
           </div>
         `;
@@ -105,6 +107,38 @@ async function renderPodcasts(container) {
     console.error('Failed to load podcasts view:', err);
     gridEl.innerHTML = `<div class="error-state">Failed to load podcasts.</div>`;
   }
+}
+
+function _prewarmPodcastArtwork(subscriptions = []) {
+  const urls = Array.from(new Set((subscriptions || [])
+    .map((sub) => sub && sub.imageUrl)
+    .filter(Boolean)));
+  if (!urls.length) return;
+
+  urls.slice(0, 80).forEach((url) => {
+    try {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+    } catch (_) {}
+  });
+
+  if (typeof caches === 'undefined') return;
+  caches.open('podwaffle-images-v1').then((cache) => {
+    urls.slice(0, 80).forEach((url) => {
+      cache.match(url).then((cached) => {
+        if (!cached) {
+          fetch(url, { mode: 'no-cors' })
+            .then((response) => {
+              if (response && (response.ok || response.type === 'opaque')) {
+                cache.put(url, response.clone()).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      }).catch(() => {});
+    });
+  }).catch(() => {});
 }
 
 async function _saveTileOrder(gridEl, guid) {
