@@ -6,7 +6,74 @@
   --player-floating-control-gap: 45px;
 }
 
-/* Keep overlays attached to the actual rendered player stack. */
+/* Attach overlays to the actual rendered player/nav stack rather than nominal token heights. */
 .queue-panel {
-  bottom: var(--player-stack-height);
-  max-height: min(70vh, calc
+  bottom: var(--player-stack-height) !important;
+  max-height: min(70vh, calc(100vh - var(--player-stack-height) - 16px));
+  z-index: 250;
+}
+
+/* Keep the screen-mode switch consistently at the lower-right, 45px above the player. */
+.view-mode-toggle {
+  right: 18px !important;
+  bottom: calc(var(--player-stack-height) + var(--player-floating-control-gap)) !important;
+  z-index: 270;
+}
+
+/* Connection health values must never force horizontal page overflow. */
+.connection-health-grid {
+  display: grid;
+  grid-template-columns: 1fr !important;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.connection-health-grid .stat-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 16px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.connection-health-grid .stat-value {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  font-size: clamp(18px, 3.5vw, 25px);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.connection-health-grid .stat-label {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .view-mode-toggle {
+    right: 18px !important;
+  }
+
+  .queue-panel {
+    left: 0;
+    right: 0;
+  }
+
+  .connection-health-grid .stat-card {
+    grid-template-columns: 1fr;
+    row-gap: 5px;
+  }
+
+  .connection-health-grid .stat-label {
+    grid-column: 1;
+    grid-row: 2;
+    text-align: left;
+    white-space: normal;
+  }
+}
