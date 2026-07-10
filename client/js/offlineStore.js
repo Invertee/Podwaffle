@@ -1,93 +1,70 @@
-/* ============================================================
-   Podwaffle - offlineStore.js
-   Durable metadata and explicit-download helpers for offline use.
-   Loaded after api.js, cacheManager.js, and syncManager.js.
-   ============================================================ */
-
+/* Durable offline metadata and explicit-download state. */
 (function initOfflineStore() {
-  const SUBSCRIPTIONS_KEY_PREFIX = 'podwaffle_offline_subscriptions_';
-  const PODCAST_CATALOG_KEY = 'podwaffle_podcast_catalog';
+  const SUBS_PREFIX = 'podwaffle_offline_subscriptions_';
+  const CATALOG_KEY = 'podwaffle_podcast_catalog';
   const PINNED_AUDIO_KEY = 'podwaffle_pinned_audio_v1';
 
-  function readJson(key, fallback) {
+  const read = (key, fallback) => {
     try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
+      const value = localStorage.getItem(key);
+      return value ? JSON.parse(value) : fallback;
     } catch (_) {
       return fallback;
     }
-  }
+  };
 
-  function writeJson(key, value) {
+  const write = (key, value) => {
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch (err) {
-      console.warn('[offlineStore] Failed to persist', key, err);
+      console.warn('[offlineStore] Persist failed:', key, err);
     }
     return value;
-  }
+  };
 
-  function subscriptionUrl(entry) {
-    if (!entry) return '';
-    if (typeof entry === 'string') return entry.trim();
-    return String(entry.feedUrl || entry.url || '').trim();
-  }
+  const feedUrlOf = (entry) => typeof entry === 'string'
+    ? entry.trim()
+    : String(entry?.feedUrl || entry?.url || '').trim();
 
-  function makeFeedId(value) {
+  const makeFeedId = (value) => {
     const input = String(value || '').trim();
     if (!input) return 'podcast';
+    let source = input;
     try {
       const parsed = new URL(input);
-      return `${parsed.hostname}${parsed.pathname}`
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 120) || 'podcast';
-    } catch (_) {
-      return input
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 120) || 'podcast';
-    }
-  }
+      source = `${parsed.hostname}${parsed.pathname}`;
+    } catch (_) {}
+    return source.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'podcast';
+  };
 
-  function fallbackTitle(feedUrl) {
+  const fallbackTitle = (feedUrl) => {
     try {
-      const parsed = new URL(feedUrl);
-      return parsed.hostname.replace(/^www\./, '') || 'Podcast';
+      return new URL(feedUrl).hostname.replace(/^www\./, '') || 'Podcast';
     } catch (_) {
       return 'Podcast';
     }
-  }
+  };
 
-  function getCatalog() {
-    return readJson(PODCAST_CATALOG_KEY, {}) || {};
-  }
+  const getCatalog = () => read(CATALOG_KEY, {}) || {};
+  const saveCatalog = (catalog) => write(CATALOG_KEY, catalog || {});
 
-  function saveCatalog(catalog) {
-    return writeJson(PODCAST_CATALOG_KEY, catalog || {});
-  }
-
-  function findCatalogEntry(catalog, identifier) {
+  const findPodcast = (catalog, identifier) => {
     const needle = String(identifier || '').trim().toLowerCase();
     if (!needle) return null;
     if (catalog[identifier]) return catalog[identifier];
-    return Object.values(catalog).find((entry) => entry && (
-      String(entry.feedId || '').toLowerCase() === needle
-      || String(entry.feedUrl || '').toLowerCase() === needle
-      || String(entry.title || '').toLowerCase() === needle
+    return Object.values(catalog).find((item) => item && (
+      String(item.feedId || '').toLowerCase() === needle
+      || String(item.feedUrl || '').toLowerCase() === needle
+      || String(item.title || '').toLowerCase() === needle
     )) || null;
-  }
+  };
 
-  function normalizePodcast(podcast, fallback = {}) {
-    if (!podcast && !fallback) return null;
-    const merged = { ...(fallback || {}), ...(podcast || {}) };
-    const feedUrl = subscriptionUrl(merged);
-    const feedId = String(merged.feedId || makeFeedId(feedUrl || merged.title || 'podcast'));
+  const normalizePodcast = (podcast = {}, fallback = {}) => {
+    const merged = { ...fallback, ...podcast };
+    const feedUrl = feedUrlOf(merged);
     return {
       ...merged,
-      feedId,
+      feedId: String(merged.feedId || makeFeedId(feedUrl || merged.title)),
       feedUrl,
       title: merged.title || fallbackTitle(feedUrl),
       author: merged.author || '',
@@ -96,16 +73,31 @@
       episodes: Array.isArray(merged.episodes) ? merged.episodes : [],
       lastRefreshed: merged.lastRefreshed || new Date().toISOString(),
     };
-  }
+  };
 
-  function rememberPodcast(podcast) {
-    const normalized = normalizePodcast(podcast);
-    if (!normalized) return null;
+  function rememberPodcast(podcast, offset = 0) {
+    if (!podcast) return null;
+    const incoming = normalizePodcast(podcast);
     const catalog = getCatalog();
-    const existing = findCatalogEntry(catalog, normalized.feedId)
-      || findCatalogEntry(catalog, normalized.feedUrl)
-      || {};
-    const merged = normalizePodcast(normalized, existing);
+    const existing = findPodcast(catalog, incoming.feedId) || findPodcast(catalog, incoming.feedUrl) || {};
+    const merged = normalizePodcast(incoming, existing);
+    const incomingEpisodes = Array.isArray(podcast.episodes) ? podcast.episodes : [];
+    const existingEpisodes = Array.isArray(existing.episodes) ? existing.episodes : [];
+
+    if (!incomingEpisodes.length) {
+      merged.episodes = existingEpisodes;
+    } else if (offset > 0 && existingEpisodes.length) {
+      merged.episodes = [...existingEpisodes];
+      incomingEpisodes.forEach((episode, index) => {
+        merged.episodes[offset + index] = episode;
+      });
+      merged.episodes = merged.episodes.filter(Boolean);
+    } else {
+      const incomingGuids = new Set(incomingEpisodes.map((episode) => episode?.guid).filter(Boolean));
+      merged.episodes = [...incomingEpisodes, ...existingEpisodes.filter((episode) => !episode?.guid || !incomingGuids.has(episode.guid))];
+    }
+
+    merged.totalEpisodes = Math.max(Number(merged.totalEpisodes) || 0, Number(existing.totalEpisodes) || 0, merged.episodes.length);
     catalog[merged.feedId] = merged;
     saveCatalog(catalog);
     return merged;
@@ -113,11 +105,9 @@
 
   function rememberEpisode(episode) {
     if (!episode) return null;
-    const feedId = String(episode.feedId || makeFeedId(episode.feedUrl || episode.podcastTitle || 'podcast'));
+    const feedId = String(episode.feedId || makeFeedId(episode.feedUrl || episode.podcastTitle));
     const catalog = getCatalog();
-    const existing = findCatalogEntry(catalog, feedId)
-      || findCatalogEntry(catalog, episode.feedUrl)
-      || {};
+    const existing = findPodcast(catalog, feedId) || findPodcast(catalog, episode.feedUrl) || {};
     const podcast = normalizePodcast({
       ...existing,
       feedId,
@@ -125,9 +115,9 @@
       title: episode.podcastTitle || existing.title || 'Podcast',
       imageUrl: episode.podcastImageUrl || episode.imageUrl || existing.imageUrl,
     });
-    const episodes = Array.isArray(podcast.episodes) ? [...podcast.episodes] : [];
-    const index = episodes.findIndex((item) => item && item.guid === episode.guid);
-    const normalizedEpisode = {
+    const episodes = [...podcast.episodes];
+    const index = episodes.findIndex((item) => item?.guid === episode.guid);
+    const saved = {
       ...(index >= 0 ? episodes[index] : {}),
       ...episode,
       feedId,
@@ -135,193 +125,149 @@
       podcastImageUrl: episode.podcastImageUrl || podcast.imageUrl,
       imageUrl: episode.imageUrl || episode.podcastImageUrl || podcast.imageUrl,
     };
-    if (index >= 0) episodes[index] = normalizedEpisode;
-    else episodes.unshift(normalizedEpisode);
+    if (index >= 0) episodes[index] = saved;
+    else episodes.unshift(saved);
     podcast.episodes = episodes;
     podcast.totalEpisodes = Math.max(Number(podcast.totalEpisodes) || 0, episodes.length);
     catalog[podcast.feedId] = podcast;
     saveCatalog(catalog);
-    return normalizedEpisode;
+    return saved;
   }
 
-  function getOfflineSubscriptions(guid) {
-    return readJson(`${SUBSCRIPTIONS_KEY_PREFIX}${guid}`, []) || [];
-  }
+  const getSubscriptions = (guid) => read(`${SUBS_PREFIX}${guid}`, []) || [];
 
-  function saveOfflineSubscriptions(guid, subscriptions) {
-    const normalized = (subscriptions || []).filter(Boolean).map((entry) => normalizePodcast(entry));
-    normalized.forEach(rememberPodcast);
-    return writeJson(`${SUBSCRIPTIONS_KEY_PREFIX}${guid}`, normalized);
-  }
-
-  function hydrateSubscriptions(guid, subscriptions) {
+  function hydrateSubscriptions(guid, subscriptions = []) {
     const catalog = getCatalog();
-    const offline = getOfflineSubscriptions(guid);
-    const offlineByUrl = new Map();
-    const offlineById = new Map();
-    offline.forEach((entry) => {
-      if (!entry) return;
-      if (entry.feedUrl) offlineByUrl.set(String(entry.feedUrl).toLowerCase(), entry);
-      if (entry.feedId) offlineById.set(String(entry.feedId).toLowerCase(), entry);
-    });
-
-    return (subscriptions || []).map((entry) => {
-      const feedUrl = subscriptionUrl(entry);
-      const feedId = typeof entry === 'object' && entry
-        ? String(entry.feedId || makeFeedId(feedUrl))
-        : makeFeedId(feedUrl);
-      const cached = offlineById.get(feedId.toLowerCase())
-        || offlineByUrl.get(feedUrl.toLowerCase())
-        || findCatalogEntry(catalog, feedId)
-        || findCatalogEntry(catalog, feedUrl)
+    const cached = getSubscriptions(guid);
+    return subscriptions.map((entry) => {
+      const feedUrl = feedUrlOf(entry);
+      const suppliedFeedId = typeof entry === 'object' ? String(entry?.feedId || '') : '';
+      const fallback = cached.find((item) => (suppliedFeedId && item?.feedId === suppliedFeedId) || item?.feedUrl === feedUrl)
+        || findPodcast(catalog, suppliedFeedId)
+        || findPodcast(catalog, feedUrl)
         || {};
-      return normalizePodcast(typeof entry === 'object' ? entry : { feedUrl, feedId }, cached);
+      const feedId = suppliedFeedId || fallback.feedId || makeFeedId(feedUrl);
+      return normalizePodcast(typeof entry === 'object' ? entry : { feedId, feedUrl }, fallback);
     });
+  }
+
+  function saveSubscriptions(guid, subscriptions) {
+    const normalized = (subscriptions || []).filter(Boolean).map((item) => normalizePodcast(item));
+    normalized.forEach((item) => rememberPodcast(item));
+    return write(`${SUBS_PREFIX}${guid}`, normalized);
   }
 
   const offlineStore = {
     rememberPodcast,
     rememberEpisode,
     hydrateSubscriptions,
-    getOfflineSubscriptions,
-    getPinnedAudioUrls() {
-      return new Set(readJson(PINNED_AUDIO_KEY, []) || []);
+    getSubscriptions,
+    pinnedAudio() {
+      return new Set(read(PINNED_AUDIO_KEY, []) || []);
     },
     isAudioPinned(url) {
-      return this.getPinnedAudioUrls().has(String(url || ''));
+      return this.pinnedAudio().has(String(url || ''));
     },
     pinAudio(url) {
-      if (!url) return;
-      const urls = this.getPinnedAudioUrls();
-      urls.add(String(url));
-      writeJson(PINNED_AUDIO_KEY, [...urls]);
+      const urls = this.pinnedAudio();
+      if (url) urls.add(String(url));
+      write(PINNED_AUDIO_KEY, [...urls]);
     },
     unpinAudio(url) {
-      if (!url) return;
-      const urls = this.getPinnedAudioUrls();
-      urls.delete(String(url));
-      writeJson(PINNED_AUDIO_KEY, [...urls]);
+      const urls = this.pinnedAudio();
+      if (url) urls.delete(String(url));
+      write(PINNED_AUDIO_KEY, [...urls]);
     },
   };
-
   window.offlineStore = offlineStore;
 
   if (window.api) {
-    const originalGetSubscriptions = window.api.getSubscriptions.bind(window.api);
-    window.api.getSubscriptions = async function getSubscriptionsOfflineFirst(guid) {
+    const api = window.api;
+    const originalGetSubscriptions = api.getSubscriptions.bind(api);
+    api.getSubscriptions = async (guid) => {
       try {
-        const subscriptions = await originalGetSubscriptions(guid);
-        const hydrated = hydrateSubscriptions(guid, subscriptions);
-        if (hydrated.length > 0) saveOfflineSubscriptions(guid, hydrated);
+        const hydrated = hydrateSubscriptions(guid, await originalGetSubscriptions(guid));
+        if (hydrated.length) saveSubscriptions(guid, hydrated);
         return hydrated;
       } catch (err) {
-        const cached = getOfflineSubscriptions(guid);
-        if (cached.length > 0) {
-          console.warn('[offlineStore] Using cached subscriptions:', err?.message || err);
-          return cached;
-        }
+        const cached = getSubscriptions(guid);
+        if (cached.length) return cached;
         throw err;
       }
     };
 
-    const originalGetPodcast = window.api.getPodcast.bind(window.api);
-    window.api.getPodcast = async function getPodcastOfflineFirst(feedId, limit = 100, offset = 0) {
+    const originalGetPodcast = api.getPodcast.bind(api);
+    api.getPodcast = async (feedId, limit = 100, offset = 0) => {
       try {
         const podcast = await originalGetPodcast(feedId, limit, offset);
-        const remembered = rememberPodcast(podcast);
-        if (!remembered) return podcast;
-        return {
-          ...remembered,
-          episodes: (remembered.episodes || []).slice(offset, offset + limit),
-        };
+        rememberPodcast(podcast, offset);
+        return podcast;
       } catch (err) {
-        const cached = findCatalogEntry(getCatalog(), feedId);
-        if (cached) {
-          console.warn('[offlineStore] Using cached podcast:', feedId, err?.message || err);
-          return {
-            ...cached,
-            episodes: (cached.episodes || []).slice(offset, offset + limit),
-          };
-        }
-        throw err;
+        const cached = findPodcast(getCatalog(), feedId);
+        if (!cached) throw err;
+        return { ...cached, episodes: (cached.episodes || []).slice(offset, offset + limit) };
       }
     };
 
-    const originalSubscribe = window.api.subscribe.bind(window.api);
-    window.api.subscribe = async function subscribeOfflineFirst(guid, feedUrl, metadata) {
+    const originalSubscribe = api.subscribe.bind(api);
+    api.subscribe = async (guid, feedUrl, metadata) => {
       const result = await originalSubscribe(guid, feedUrl, metadata);
-      const remembered = rememberPodcast(metadata || result || { feedUrl });
-      const current = hydrateSubscriptions(guid, [
-        ...getOfflineSubscriptions(guid),
-        remembered || { feedUrl },
-      ]);
-      saveOfflineSubscriptions(guid, current.filter((entry, index, all) => {
-        const key = entry.feedUrl || entry.feedId;
-        return all.findIndex((candidate) => (candidate.feedUrl || candidate.feedId) === key) === index;
-      }));
+      const added = rememberPodcast(metadata || result || { feedUrl });
+      const all = hydrateSubscriptions(guid, [...getSubscriptions(guid), added || { feedUrl }]);
+      const deduped = all.filter((item, index) => all.findIndex((candidate) => (candidate.feedUrl || candidate.feedId) === (item.feedUrl || item.feedId)) === index);
+      saveSubscriptions(guid, deduped);
       return result;
     };
 
-    const originalUnsubscribe = window.api.unsubscribe.bind(window.api);
-    window.api.unsubscribe = async function unsubscribeOfflineFirst(guid, feedId) {
+    const originalUnsubscribe = api.unsubscribe.bind(api);
+    api.unsubscribe = async (guid, feedId) => {
       const result = await originalUnsubscribe(guid, feedId);
-      const remaining = getOfflineSubscriptions(guid).filter((entry) => (
-        entry.feedId !== feedId && entry.feedUrl !== feedId
-      ));
-      saveOfflineSubscriptions(guid, remaining);
+      saveSubscriptions(guid, getSubscriptions(guid).filter((item) => item.feedId !== feedId && item.feedUrl !== feedId));
       return result;
     };
   }
 
   if (window.cacheManager) {
     const manager = window.cacheManager;
-    const originalDownloadEpisode = manager.downloadEpisode.bind(manager);
-    manager.downloadEpisode = async function downloadEpisodeAndPin(episode) {
+    const originalDownload = manager.downloadEpisode.bind(manager);
+    manager.downloadEpisode = async function downloadAndPin(episode) {
       rememberEpisode(episode);
-      const status = await originalDownloadEpisode(episode);
+      const status = await originalDownload(episode);
       const url = this._resolveUrl(episode);
       if (url && status === 'cached') offlineStore.pinAudio(url);
       return status;
     };
 
-    const originalDeleteEpisode = manager.deleteEpisode.bind(manager);
-    manager.deleteEpisode = async function deleteEpisodeAndUnpin(episode) {
+    const originalDelete = manager.deleteEpisode.bind(manager);
+    manager.deleteEpisode = async function deleteAndUnpin(episode) {
       const url = this._resolveUrl(episode);
-      const deleted = await originalDeleteEpisode(episode);
-      if (url) offlineStore.unpinAudio(url);
+      const deleted = await originalDelete(episode);
+      offlineStore.unpinAudio(url);
       return deleted;
     };
 
     const originalIsExpired = manager._isExpired.bind(manager);
-    manager._isExpired = function isExpiredUnlessPinned(url) {
-      if (offlineStore.isAudioPinned(url)) return false;
-      return originalIsExpired(url);
-    };
+    manager._isExpired = (url) => offlineStore.isAudioPinned(url) ? false : originalIsExpired(url);
 
-    manager.cleanupExpired = async function cleanupExpiredUnlessPinned() {
+    manager.cleanupExpired = async function cleanupTransientAudio() {
       if (!this.isSupported()) return;
       const cache = await this._getCache();
       const requests = await cache.keys();
       const now = Date.now();
-
       for (const request of requests) {
         const url = request.url;
         if (offlineStore.isAudioPinned(url)) continue;
-        const cachedAt = this._cacheIndex ? this._cacheIndex[url] : null;
-        if (!cachedAt || !Number.isFinite(cachedAt)) {
-          this._cacheIndex[url] = now;
-          continue;
-        }
-        if ((now - cachedAt) > this.TTL_MS) {
+        const cachedAt = this._cacheIndex?.[url];
+        if (!cachedAt || !Number.isFinite(cachedAt)) this._cacheIndex[url] = now;
+        else if ((now - cachedAt) > this.TTL_MS) {
           await cache.delete(request);
           this._setStatus(url, 'uncached');
           delete this._cacheIndex[url];
         }
       }
-
-      const existingUrlSet = new Set(requests.map((request) => request.url));
+      const existing = new Set(requests.map((request) => request.url));
       Object.keys(this._cacheIndex || {}).forEach((url) => {
-        if (!existingUrlSet.has(url)) delete this._cacheIndex[url];
+        if (!existing.has(url)) delete this._cacheIndex[url];
       });
       this._saveIndex();
     };
