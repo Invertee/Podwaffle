@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.cache/
 
 # Generated native projects — commit these once they exist
 # android/
