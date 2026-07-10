@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "description": "PodWaffle native mobile app powered by Capacitor",
   "scripts": {
-    "setup": "npm install && npx cap sync",
-    "sync": "npx cap sync",
-    "android": "npx cap run android",
-    "android:open": "npx cap open android",
-    "ios": "npx cap run ios",
-    "ios:open": "npx cap open ios",
+    "prepare-web": "node scripts/sync-web-assets.js",
+    "setup": "npm install && npm run sync",
+    "sync": "npm run prepare-web && npx cap sync",
+    "android": "npm run sync && npx cap run android",
+    "android:open": "npm run sync && npx cap open android",
+    "ios": "npm run sync && npx cap run ios",
+    "ios:open": "npm run sync && npx cap open ios",
     "update-server": "node scripts/set-server.js"
   },
   "dependencies": {
@@ -18,7 +19,8 @@
     "@capacitor/ios": "^8.4.1",
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "^8.0.2",
-    "@strasberry/capacitor-cast": "^1.0.0"
+    "@strasberry/capacitor-cast": "^1.0.0",
+    "bulma": "1.0.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
