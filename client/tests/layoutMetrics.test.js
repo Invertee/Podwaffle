@@ -8,11 +8,11 @@ const test = require('node:test');
 const clientRoot = path.join(__dirname, '..');
 const index = fs.readFileSync(path.join(clientRoot, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(clientRoot, 'css', 'layout-fixes.css'), 'utf8');
-const metrics = fs.readFileSync(path.join(clientRoot, 'js', 'layoutMetrics.js'), 'utf8');
+const metrics = fs.readFileSync(path.join(clientRoot, 'js', 'layoutMetricsV2.js'), 'utf8');
 
 test('layout assets are loaded by the client shell', () => {
   assert.match(index, /css\/layout-fixes\.css/);
-  assert.match(index, /js\/layoutMetrics\.js/);
+  assert.match(index, /js\/layoutMetricsV2\.js/);
 });
 
 test('queue and view toggle use measured player stack height', () => {
