@@ -1,119 +1,109 @@
 # PodWaffle — Mobile App (Capacitor)
 
-Native Android/iOS wrapper for PodWaffle, built with [Capacitor](https://capacitorjs.com/).
+Native Android/iOS wrapper for PodWaffle, built with Capacitor.
 
-## How it works
+## Architecture
 
-The app loads the PodWaffle web app **directly from your server** via the `server.url` setting in `capacitor.config.ts`. This means:
+The mobile app packages the complete PodWaffle client inside the APK/IPA. It no longer loads its user interface from a remote `server.url`.
 
-- **Live updates** — deploy changes to the server and every device picks them up on the next launch. No app store release required for content/logic changes.
-- **Native media controls** — PodWaffle's existing Web Media Session API integration (`navigator.mediaSession`) surfaces episode info, artwork, and transport controls in the Android notification shade and lock screen out-of-the-box.
-- **Background audio** — the Android WebView continues audio playback when the app is backgrounded, managed by the system MediaSession.
+- The application shell, JavaScript, icons, app CSS, and Bulma CSS are local.
+- Subscriptions, podcast metadata, episode metadata, progress, queue state, and explicit downloads are available locally after they have been synced.
+- `backendUrl` is used only to refresh feeds and synchronise state between clients.
+- Explicitly downloaded episodes are pinned and are not removed by transient-cache expiry.
 
----
+This means the app can launch and display previously synced content while the device is in airplane mode.
 
 ## Prerequisites
 
 | Tool | Install |
 |---|---|
-| Node.js ≥ 18 | https://nodejs.org |
+| Node.js compatible with Capacitor 8 | https://nodejs.org |
 | Android Studio | https://developer.android.com/studio |
-| Java 17 (bundled with Android Studio) | — |
-| (iOS) Xcode 15+ | Mac App Store |
+| Java 17 | Bundled with Android Studio |
+| Xcode 15+ | Required for iOS builds |
 
----
+## Configure the backend and existing profile
 
-## Quick start
+The local mobile origin has separate browser storage from the older remote-wrapper build. To reconnect to the same server-side profile, configure both the backend URL and your existing PodWaffle profile GUID before the first build.
 
-### 1. Configure the server URL
+```bash
+cd mobile
+node scripts/set-server.js http://192.168.1.50:3000 YOUR-EXISTING-PROFILE-GUID
+```
 
-Edit `server.config.json`:
+You can also edit `server.config.json` directly:
 
 ```json
 {
-  "serverUrl": "http://192.168.1.50:3000",
+  "backendUrl": "http://192.168.1.50:3000",
+  "profileGuid": "01234567-89ab-4cde-8f01-23456789abcd",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
 }
 ```
 
-Or use the helper script:
+Use HTTPS when the server is behind a TLS reverse proxy. Plain HTTP is supported for trusted local-network deployments.
 
-```bash
-node scripts/set-server.js http://192.168.1.50:3000
-```
+If `profileGuid` is omitted, the app creates a new local profile and registers it with the backend when connectivity is available.
 
-Use `https://` if your server is behind a reverse proxy with TLS. HTTP cleartext is fine for local network use.
-
-### 2. Install dependencies
+## Build and run
 
 ```bash
 cd mobile
 npm install
+npm run sync
+npm run android:open
 ```
 
-For native Android lock-screen/notification controls we use:
+`npm run sync` performs these steps:
+
+1. Copies `../client` into `mobile/www`.
+2. Downloads and caches the pinned Bulma 1.0.2 stylesheet for local packaging.
+3. Removes remote Google Font dependencies from the mobile copy.
+4. Generates `mobile-config.js` with the backend URL and profile GUID.
+5. Runs `npx cap sync` to copy the local web bundle into the native project.
+
+After the first successful run, the Bulma asset is reused from `mobile/.cache`.
+
+The convenience commands also prepare and sync the web bundle automatically:
 
 ```bash
-npm install @jofr/capacitor-media-session
+npm run android
+npm run android:open
+npm run ios
+npm run ios:open
 ```
 
-### 3. Add native platforms
+## Offline test procedure
 
-```bash
-# Android
-npx cap add android
+1. Install the rebuilt app and open it while online.
+2. Confirm that the expected profile and subscriptions have synchronised.
+3. Open the podcasts you want available offline so their episode metadata is stored.
+4. Explicitly download at least one episode.
+5. Fully close the app.
+6. Enable airplane mode and reopen it.
 
-# iOS (Mac only)
-npx cap add ios
-```
+Expected results:
 
-### 4. Sync
+- The full interface and styling load.
+- Subscription titles and artwork remain visible.
+- Previously opened podcast episode lists remain visible.
+- Explicitly downloaded episodes play.
+- Local progress and subscription changes remain on-device and synchronise when connectivity returns.
 
-```bash
-npx cap sync
-```
+## Background audio — Android manifest
 
-This copies `www/` and plugins into the native projects and updates the Capacitor config.
-
-### 5. Open in Android Studio / Xcode
-
-```bash
-npx cap open android
-# or
-npx cap open ios
-```
-
-Build and run from the IDE as normal.
-
----
-
-## Updating the server URL later
-
-```bash
-node scripts/set-server.js http://NEW_IP:3000
-npx cap sync
-# Rebuild the app in Android Studio
-```
-
----
-
-## Background audio — Android manifest (one-time setup)
-
-After running `npx cap add android`, open  
-`android/app/src/main/AndroidManifest.xml` and add these permissions inside `<manifest>`:
+After running `npx cap add android`, ensure `android/app/src/main/AndroidManifest.xml` includes:
 
 ```xml
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<!-- Required on Android 14+ for media playback foreground services -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-<!-- Required for HTTP cleartext traffic to a local server -->
 <uses-permission android:name="android.permission.INTERNET" />
 ```
 
-This lets the Android system sustain the MediaSession foreground service that keeps audio running when the screen is off.
+The media-session foreground service remains active while paused so lock-screen controls can recover after the app has been backgrounded.
 
-For PodWaffle we keep that service alive even while paused, so lockscreen controls still wake the session cleanly after the app has been backgrounded for a long time. That behavior is enabled in `capacitor.config.ts` with:
+The relevant Capacitor configuration is:
 
 ```ts
 MediaSession: {
@@ -121,29 +111,20 @@ MediaSession: {
 }
 ```
 
----
+## Native media controls
 
-## Native media controls integration
+The app bridges playback to the native media-session integration:
 
-The app now bridges player state/actions to the `@jofr/capacitor-media-session` plugin:
+- Episode title, podcast title, and artwork
+- Play and pause
+- Seek backward and forward
+- Playback state and position
 
-- Metadata: episode title + podcast title + artwork
-- Actions: play, pause, seek backward, seek forward
-- State: playback state (`playing`/`paused`) and position state (duration/position)
+Run `npm run sync` and rebuild after changing client or native configuration.
 
-No extra app code is required beyond running:
+## Debug mode
 
-```bash
-npx cap sync
-```
-
-Then rebuild the Android app in Android Studio.
-
----
-
-## Disabling debug mode before release
-
-In `capacitor.config.ts`, set:
+Before publishing, set the following in `capacitor.config.ts`:
 
 ```ts
 android: {
@@ -151,22 +132,22 @@ android: {
 }
 ```
 
-Then `npx cap sync` and rebuild.
-
----
+Then run `npm run sync` and rebuild.
 
 ## Project layout
 
-```
+```text
 mobile/
-  capacitor.config.ts    ← main Capacitor config (reads server.config.json)
-  server.config.json     ← YOUR server URL — edit this
+  capacitor.config.ts
+  server.config.json
   package.json
-  tsconfig.json
-  www/
-    index.html           ← shown only if the server is unreachable at launch
   scripts/
-    set-server.js        ← CLI helper to update server URL
-  android/               ← generated by `cap add android` (commit this)
-  ios/                   ← generated by `cap add ios` (commit this)
+    set-server.js
+    sync-web-assets.js
+  www/                    generated local client bundle
+  .cache/                 downloaded pinned build assets; ignored by Git
+  android/
+  ios/
 ```
+
+`mobile/www` is regenerated from `client/` every time `npm run sync` runs. Do not make source changes directly inside `mobile/www`.
