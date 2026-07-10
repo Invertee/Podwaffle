@@ -3,54 +3,40 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 // ---------------------------------------------------------------------------
-// Load server.config.json — edit this file to point at your PodWaffle server.
+// Load server.config.json. The native app itself is bundled from mobile/www;
+// backendUrl is used only for API/WebSocket sync and optional navigation.
 // ---------------------------------------------------------------------------
 const serverConfigPath = resolve(__dirname, 'server.config.json');
 const serverConfig: Record<string, string> = existsSync(serverConfigPath)
   ? JSON.parse(readFileSync(serverConfigPath, 'utf-8'))
   : {};
 
-const defaultLiveUrl = 'https://invertee.github.io/PodWaffle';
-const serverUrl: string = serverConfig.serverUrl || defaultLiveUrl;
-const isHttp = serverUrl.startsWith('http://') && !serverUrl.startsWith('https://');
+const configuredEndpoint = serverConfig.backendUrl || serverConfig.serverUrl || '';
+const isHttp = configuredEndpoint.startsWith('http://') && !configuredEndpoint.startsWith('https://');
 
 let allowNavigation: string[] = [];
-if (serverUrl) {
+if (configuredEndpoint) {
   try {
-    const u = new URL(serverUrl);
+    const u = new URL(configuredEndpoint);
     const hostWithPort = `${u.hostname}:${u.port || (isHttp ? '80' : '443')}`;
     allowNavigation = u.port ? [u.hostname, hostWithPort] : [u.hostname];
-  } catch (_) { /* invalid URL — leave empty */ }
+  } catch (_) { /* invalid URL - leave empty */ }
 }
 
-// ---------------------------------------------------------------------------
-// Capacitor configuration
-// ---------------------------------------------------------------------------
 const config: CapacitorConfig = {
   appId: serverConfig.appId || 'com.podwaffle.app',
   appName: serverConfig.appName || 'PodWaffle',
 
-  // Capacitor looks here for the compiled web assets.
-  // When server.url is set the WebView loads from there instead; www/ is the
-  // offline-only fallback page shown when the server is unreachable.
+  // npm run sync copies the complete client into this directory before
+  // Capacitor updates the native project. The app therefore boots locally
+  // even when the backend and internet are unavailable.
   webDir: 'www',
 
-  // Remote server URL — this is what gives us "live update" for free.
-  // Any changes deployed to the server are picked up immediately on next
-  // app launch without needing a Play Store / App Store release.
-  ...(serverUrl
-    ? {
-        server: {
-          url: serverUrl,
-
-          // cleartext must be true for plain http:// server URLs.
-          // Capacitor injects the required network_security_config automatically.
-          cleartext: isHttp,
-
-          allowNavigation,
-        },
-      }
-    : {}),
+  server: {
+    // Required when backendUrl uses plain HTTP on a trusted local network.
+    cleartext: isHttp,
+    ...(allowNavigation.length ? { allowNavigation } : {}),
+  },
 
   plugins: {
     // Keep the native media-session service alive even while paused so lockscreen
