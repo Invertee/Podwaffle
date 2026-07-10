@@ -1,6 +1,7 @@
 {
-  "_comment": "Edit serverUrl to point at your running PodWaffle server. Use https:// if you have a reverse proxy with SSL.",
-  "serverUrl": "https://invertee.github.io/Podwaffle/#/podcasts",
+  "_comment": "Set backendUrl to your PodWaffle server and profileGuid to the GUID used by your existing clients before running npm run sync.",
+  "backendUrl": "",
+  "profileGuid": "",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
 }
