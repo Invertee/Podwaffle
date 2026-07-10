@@ -1,4 +1,4 @@
-const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v5';
+const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v6';
 const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 
@@ -11,6 +11,12 @@ const APP_SHELL_ASSETS = [
   './js/app.js',
   './js/cacheManager.js',
   './js/castClient.js',
+  './js/googleCastSender.js',
+  './js/syncManager.js',
+  './js/offlineStore.js',
+  './js/backgroundSyncManager.js',
+  './js/feedRefreshScheduler.js',
+  './js/capacitorBackgroundTasks.js',
   './js/player.js',
   './js/components/nav.js',
   './js/components/episodeRow.js',
@@ -23,6 +29,7 @@ const APP_SHELL_ASSETS = [
   './js/views/discover.js',
   './js/views/history.js',
   './js/views/profile.js',
+  './icons/icon-t.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/play.svg',
@@ -31,12 +38,35 @@ const APP_SHELL_ASSETS = [
   './icons/skip-forward.svg',
 ];
 
+const EXTERNAL_SHELL_ASSETS = [
+  'https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css',
+  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
+  'https://fonts.googleapis.com/css2?family=Playwrite+HR:wght@100..400&display=swap',
+  'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
+];
+
+const EXTERNAL_STATIC_HOSTS = new Set([
+  'cdn.jsdelivr.net',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+  'www.gstatic.com',
+]);
+
 function isSameOrigin(url) {
   return new URL(url).origin === self.location.origin;
 }
 
 function isApiOrSocketRequest(url) {
   return /\/api(\/|$)/.test(url.pathname) || /\/ws(\/|$)/.test(url.pathname);
+}
+
+function isExternalStaticRequest(request, url) {
+  if (request.method !== 'GET') return false;
+  if (!EXTERNAL_STATIC_HOSTS.has(url.hostname)) return false;
+  return request.destination === 'script'
+    || request.destination === 'style'
+    || request.destination === 'font'
+    || /\.(css|js|woff2?|ttf|otf)$/i.test(url.pathname);
 }
 
 function isAppShellRequest(request, url) {
@@ -116,14 +146,31 @@ function looksLikeAudioResponse(response) {
 
 async function precacheAppShell() {
   const cache = await caches.open(APP_SHELL_CACHE_NAME);
-  const precacheTasks = APP_SHELL_ASSETS.map(async (assetPath) => {
+  const localTasks = APP_SHELL_ASSETS.map(async (assetPath) => {
     try {
       await cache.add(new Request(assetPath, { cache: 'reload' }));
     } catch (err) {
       console.warn('[SW] Failed to precache asset:', assetPath, err?.message || err);
     }
   });
-  await Promise.all(precacheTasks);
+
+  const externalTasks = EXTERNAL_SHELL_ASSETS.map(async (assetUrl) => {
+    try {
+      const request = new Request(assetUrl, {
+        mode: 'no-cors',
+        credentials: 'omit',
+        cache: 'reload',
+      });
+      const response = await fetch(request);
+      if (response && (response.ok || response.type === 'opaque')) {
+        await cache.put(request, response.clone());
+      }
+    } catch (err) {
+      console.warn('[SW] Failed to precache external asset:', assetUrl, err?.message || err);
+    }
+  });
+
+  await Promise.all([...localTasks, ...externalTasks]);
 }
 
 async function handleNavigationRequest(event) {
@@ -174,6 +221,22 @@ async function handleAppShellRequest(request) {
   return new Response('Offline', { status: 503, statusText: 'Offline' });
 }
 
+async function handleExternalStaticRequest(request) {
+  const cache = await caches.open(APP_SHELL_CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: false });
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response && (response.ok || response.type === 'opaque')) {
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch (_) {
+    return new Response('', { status: 504, statusText: 'Static dependency unavailable' });
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     await precacheAppShell();
@@ -200,6 +263,11 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate' && isSameOrigin(url.href) && !isApiOrSocketRequest(url)) {
     event.respondWith(handleNavigationRequest(event));
+    return;
+  }
+
+  if (isExternalStaticRequest(request, url)) {
+    event.respondWith(handleExternalStaticRequest(request));
     return;
   }
 
