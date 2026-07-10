@@ -1,0 +1,12 @@
+/* Player-adjacent responsive layout corrections. */
+:root {
+  --player-rendered-height: var(--player-height);
+  --bottom-nav-rendered-height: 0px;
+  --player-stack-height: calc(var(--player-rendered-height) + var(--bottom-nav-rendered-height));
+  --player-floating-control-gap: 45px;
+}
+
+/* Keep overlays attached to the actual rendered player stack. */
+.queue-panel {
+  bottom: var(--player-stack-height);
+  max-height: min(70vh, calc
