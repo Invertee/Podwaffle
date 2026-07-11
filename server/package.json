@@ -4,8 +4,8 @@
   "description": "Podwaffle podcast server",
   "main": "server.js",
   "scripts": {
-    "start": "node -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js server.js",
-    "dev": "node --watch -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js server.js",
+    "start": "node -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js -r ./services/castVolumeSync.js server.js",
+    "dev": "node --watch -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js -r ./services/castVolumeSync.js server.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
