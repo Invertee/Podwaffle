@@ -37,4 +37,4 @@ bashio::log.info "Deployed file fingerprints: client/js/app.js=${CLIENT_JS_HASH}
 
 bashio::log.info "Starting Podwaffle on port ${PORT} (data: ${DATA_DIR}, disable_new_user_sessions=${DISABLE_NEW_USER_SESSIONS})"
 cd "${APP_DIR}/server"
-exec node -r ./services/castSessionRecovery.js server.js
+exec node -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js server.js
