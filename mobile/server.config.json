@@ -1,6 +1,7 @@
 {
-  "_comment": "Default backend used by packaged mobile builds. Override with scripts/set-server.js or PODWAFFLE_BACKEND_URL before running npm run sync.",
-  "backendUrl": "https://podwaffle.pecker.party",
+  "_comment": "The public site is hosted on GitHub Pages. backendUrl is optional and should point only to a PodWaffle API server, never the GitHub Pages site.",
+  "siteUrl": "https://invertee.github.io/Podwaffle",
+  "backendUrl": "",
   "profileGuid": "",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
