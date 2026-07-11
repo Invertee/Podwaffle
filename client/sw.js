@@ -1,4 +1,4 @@
-const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v6';
+const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v7';
 const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 
@@ -7,6 +7,7 @@ const APP_SHELL_ASSETS = [
   './index.html',
   './manifest.json',
   './css/app.css',
+  './css/layout-fixes.css',
   './js/api.js',
   './js/app.js',
   './js/cacheManager.js',
@@ -18,6 +19,11 @@ const APP_SHELL_ASSETS = [
   './js/feedRefreshScheduler.js',
   './js/capacitorBackgroundTasks.js',
   './js/player.js',
+  './js/castRecovery.js',
+  './js/layoutMetricsV2.js',
+  './js/castVolumeControl.js',
+  './js/localFirstRuntime.js',
+  './js/subscriptionSyncRepair.js',
   './js/components/nav.js',
   './js/components/episodeRow.js',
   './js/components/playerBar.js',
