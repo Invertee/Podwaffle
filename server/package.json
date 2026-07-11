@@ -12,4 +12,11 @@
     "bonjour-service": "^1.2.1",
     "castv2-client": "^1.2.0",
     "cors": "^2.8.5",
-    "express": "^4.19
+    "express": "^4.19.2",
+    "node-cron": "^4.6.0",
+    "node-fetch": "^2.7.0",
+    "rss-parser": "^3.13.0",
+    "uuid": "^14.0.1",
+    "ws": "^8.17.1"
+  }
+}
