@@ -10,7 +10,7 @@ const targetDir = path.join(mobileRoot, 'www');
 const configPath = path.join(mobileRoot, 'server.config.json');
 const bulmaCachePath = path.join(mobileRoot, '.cache', 'bulma-1.0.2.min.css');
 const bulmaUrl = 'https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css';
-const defaultBackendUrl = 'https://podwaffle.pecker.party';
+const defaultSiteUrl = 'https://invertee.github.io/Podwaffle';
 
 async function ensureBulma() {
   if (fs.existsSync(bulmaCachePath)) return bulmaCachePath;
@@ -43,13 +43,14 @@ async function main() {
   fs.mkdirSync(path.join(targetDir, 'css'), { recursive: true });
   fs.copyFileSync(bulmaSource, path.join(targetDir, 'css', 'bulma.min.css'));
 
+  const siteUrl = String(process.env.PODWAFFLE_SITE_URL || config.siteUrl || defaultSiteUrl).trim();
   const configuredBackendUrl = String(process.env.PODWAFFLE_BACKEND_URL || config.backendUrl || '').trim();
   const legacyServerUrl = String(config.serverUrl || '').trim();
   const backendUrl = configuredBackendUrl
-    || (/github\.io/i.test(legacyServerUrl) ? '' : legacyServerUrl)
-    || defaultBackendUrl;
+    || (/github\.io/i.test(legacyServerUrl) ? '' : legacyServerUrl);
   const profileGuid = String(config.profileGuid || '').trim();
   const mobileConfig = {
+    siteUrl,
     backendUrl,
     profileGuid,
     generatedAt: new Date().toISOString(),
@@ -66,34 +67,49 @@ async function main() {
     localStorage.setItem('podwaffle_guid', config.profileGuid);
   }
 
-  if (config.backendUrl) {
-    try {
-      const url = new URL(config.backendUrl);
-      const existingRaw = localStorage.getItem('podwaffle_server_connection');
-      let existing = null;
-      try { existing = existingRaw ? JSON.parse(existingRaw) : null; } catch (_) {}
+  const previousManagedUrl = localStorage.getItem(managedBackendKey) || '';
+  if (!config.backendUrl) {
+    const existingRaw = localStorage.getItem('podwaffle_server_connection');
+    let existing = null;
+    try { existing = existingRaw ? JSON.parse(existingRaw) : null; } catch (_) {}
+    const existingOrigin = existing && existing.host
+      ? (existing.secure ? 'https' : 'http') + '://' + existing.host + (existing.port ? ':' + existing.port : '')
+      : '';
 
-      const existingOrigin = existing && existing.host
-        ? (existing.secure ? 'https' : 'http') + '://' + existing.host + (existing.port ? ':' + existing.port : '')
-        : '';
-      const previousManagedUrl = localStorage.getItem(managedBackendKey) || '';
-      const legacyOrMissing = !existing || !existing.host || /github\\.io/i.test(existingOrigin);
-      const managedByPreviousBuild = !!previousManagedUrl && existingOrigin === previousManagedUrl;
-
-      if (legacyOrMissing || managedByPreviousBuild) {
-        localStorage.setItem('podwaffle_server_connection', JSON.stringify({
-          enabled: true,
-          host: url.hostname,
-          port: url.port || '',
-          secure: url.protocol === 'https:',
-          source: 'mobile-build',
-          updatedAt: new Date().toISOString(),
-        }));
-        localStorage.setItem(managedBackendKey, url.origin);
-      }
-    } catch (err) {
-      console.warn('[mobile] Invalid backendUrl in server.config.json:', err.message);
+    // Remove only the backend injected by an earlier packaged build. Manually
+    // configured server connections are preserved.
+    if (previousManagedUrl && existingOrigin === previousManagedUrl) {
+      localStorage.removeItem('podwaffle_server_connection');
     }
+    localStorage.removeItem(managedBackendKey);
+    return;
+  }
+
+  try {
+    const url = new URL(config.backendUrl);
+    const existingRaw = localStorage.getItem('podwaffle_server_connection');
+    let existing = null;
+    try { existing = existingRaw ? JSON.parse(existingRaw) : null; } catch (_) {}
+
+    const existingOrigin = existing && existing.host
+      ? (existing.secure ? 'https' : 'http') + '://' + existing.host + (existing.port ? ':' + existing.port : '')
+      : '';
+    const legacyOrMissing = !existing || !existing.host || /github\\.io/i.test(existingOrigin);
+    const managedByPreviousBuild = !!previousManagedUrl && existingOrigin === previousManagedUrl;
+
+    if (legacyOrMissing || managedByPreviousBuild) {
+      localStorage.setItem('podwaffle_server_connection', JSON.stringify({
+        enabled: true,
+        host: url.hostname,
+        port: url.port || '',
+        secure: url.protocol === 'https:',
+        source: 'mobile-build',
+        updatedAt: new Date().toISOString(),
+      }));
+      localStorage.setItem(managedBackendKey, url.origin);
+    }
+  } catch (err) {
+    console.warn('[mobile] Invalid backendUrl in server.config.json:', err.message);
   }
 })();
 `;
@@ -117,6 +133,7 @@ async function main() {
   }
 
   console.log(`[mobile] Copied client assets to ${targetDir}`);
+  console.log(`[mobile] Public site: ${siteUrl || 'not configured'}`);
   console.log(`[mobile] Backend bootstrap: ${backendUrl || 'not configured'}`);
   console.log(`[mobile] Profile bootstrap: ${profileGuid || 'not configured'}`);
 }
