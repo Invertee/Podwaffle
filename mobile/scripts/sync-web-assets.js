@@ -74,7 +74,7 @@ async function main() {
       try { existing = existingRaw ? JSON.parse(existingRaw) : null; } catch (_) {}
 
       const existingOrigin = existing && existing.host
-        ? \`${'${existing.secure ? \'https\' : \'http\'}'}://${'${existing.host}'}${'${existing.port ? `:${existing.port}` : \'\'}'}\`
+        ? (existing.secure ? 'https' : 'http') + '://' + existing.host + (existing.port ? ':' + existing.port : '')
         : '';
       const previousManagedUrl = localStorage.getItem(managedBackendKey) || '';
       const legacyOrMissing = !existing || !existing.host || /github\\.io/i.test(existingOrigin);
