@@ -13,4 +13,93 @@
   <meta property="og:title" content="Podwaffle">
   <meta property="og:description" content="">
   <meta property="og:type" content="website">
-  <
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playwrite+HR:wght@100..400&display=swap" rel="stylesheet">
+  <!-- Bulma CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
+  <!-- App CSS -->
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/layout-fixes.css">
+</head>
+<body class="has-dark-theme">
+  <div id="app-layout" class="app-layout">
+    <!-- Sidebar (desktop) -->
+    <aside id="sidebar" class="sidebar"></aside>
+
+    <!-- Main content -->
+    <main id="main-content" class="main-content">
+      <div class="loading-screen">
+        <div class="loading-logo">
+          <img src="icons/icon-t.png" alt="Podwaffle Logo" class="loading-logo-img" width="64" height="64">
+          <span class="loading-title">Podwaffle</span>
+        </div>
+        <div class="loading-spinner spin"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Bottom nav (mobile) -->
+  <nav id="bottom-nav" class="bottom-nav"></nav>
+
+  <!-- Player bar (always visible) -->
+  <div id="player-bar" class="player-bar"></div>
+
+  <!-- Queue panel (slide-up overlay) -->
+  <div id="queue-panel" class="queue-panel" style="display:none"></div>
+
+  <!-- Cast modal -->
+  <div id="cast-modal" style="display:none"></div>
+
+  <!-- Load scripts in correct order -->
+  <script>
+    /* Detect base path for GitHub Pages, HA add-on, or reverse proxy deployment */
+    (function() {
+      const pathname = window.location.pathname;
+      /* Strip trailing /index.html and any trailing slash to get the true repo/sub-path base.
+         Examples:
+           https://user.github.io/Podwaffle/        → /Podwaffle
+           https://user.github.io/Podwaffle/index.html → /Podwaffle
+           http://localhost:4000/                   → ''
+           /api/hassio_ingress/TOKEN/               → /api/hassio_ingress/TOKEN
+      */
+      const trimmed = pathname
+        .replace(/\/index\.html$/i, '')
+        .replace(/\/$/, '');
+      window.APP_BASE_PATH = trimmed || '';
+      console.log('[app] Detected base path:', window.APP_BASE_PATH || '(root)');
+    })();
+  </script>
+  <link rel="icon" type="image/x-icon" href="icons/icon-512.png">
+  <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+  <script src="js/api.js"></script>
+  <script src="js/cacheManager.js"></script>
+  <script src="js/castClient.js"></script>
+  <script src="js/googleCastSender.js"></script>
+  <script src="js/syncManager.js"></script>
+  <script src="js/offlineStore.js"></script>
+  <script src="js/backgroundSyncManager.js"></script>
+  <script src="js/feedRefreshScheduler.js"></script>
+  <script src="js/capacitorBackgroundTasks.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/castRecovery.js"></script>
+  <script src="js/layoutMetricsV2.js"></script>
+  <script src="js/components/nav.js"></script>
+  <script src="js/components/episodeRow.js"></script>
+  <script src="js/components/playerBar.js"></script>
+  <script src="js/castVolumeControl.js"></script>
+  <script src="js/components/queue.js"></script>
+  <script src="js/components/castModal.js"></script>
+  <script src="js/views/podcasts.js"></script>
+  <script src="js/views/podcastDetail.js"></script>
+  <script src="js/views/inProgress.js"></script>
+  <script src="js/views/discover.js"></script>
+  <script src="js/views/history.js"></script>
+  <script src="js/views/profile.js"></script>
+  <script src="js/localFirstRuntime.js"></script>
+  <script src="js/subscriptionSyncRepair.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
