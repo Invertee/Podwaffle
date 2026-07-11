@@ -1,6 +1,6 @@
 {
-  "_comment": "Set backendUrl to your PodWaffle server and profileGuid to the GUID used by your existing clients before running npm run sync.",
-  "backendUrl": "",
+  "_comment": "Default backend used by packaged mobile builds. Override with scripts/set-server.js or PODWAFFLE_BACKEND_URL before running npm run sync.",
+  "backendUrl": "https://podwaffle.pecker.party",
   "profileGuid": "",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
