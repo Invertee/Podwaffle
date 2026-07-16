@@ -70,7 +70,8 @@ test('watchdog recovers a cast session that remains paused past the timeout', as
   t.after(() => service.__castSessionRecovery.destroy());
   service.init((message) => broadcasts.push(message));
 
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  // Leave headroom for timer coalescing when Node runs test files in parallel.
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   assert.equal(service.getSession(), null);
   assert.ok(broadcasts.some((message) => message.data?.reason === 'timeout'));

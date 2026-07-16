@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         // Register custom Capacitor plugins before the bridge initialises the WebView
         registerPlugin(MediaSessionPlugin.class);
+        registerPlugin(FirebaseSyncPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

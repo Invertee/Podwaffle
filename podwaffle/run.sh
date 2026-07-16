@@ -8,6 +8,13 @@ if bashio::config.true 'disable_new_user_sessions'; then
 	export DISABLE_NEW_USER_SESSIONS="true"
 fi
 
+export FIREBASE_PROJECT_ID="$(bashio::config 'firebase_project_id' 2>/dev/null || true)"
+export FIREBASE_CLIENT_EMAIL="$(bashio::config 'firebase_client_email' 2>/dev/null || true)"
+export FIREBASE_PRIVATE_KEY="$(bashio::config 'firebase_private_key' 2>/dev/null || true)"
+export FIREBASE_API_KEY="$(bashio::config 'firebase_api_key' 2>/dev/null || true)"
+export FIREBASE_APP_ID="$(bashio::config 'firebase_app_id' 2>/dev/null || true)"
+export FIREBASE_SENDER_ID="$(bashio::config 'firebase_sender_id' 2>/dev/null || true)"
+
 SRC_DIR="/opt/podwaffle/src"
 APP_DIR="/config/app"
 DATA_DIR="/config/data"

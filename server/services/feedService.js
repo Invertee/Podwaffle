@@ -130,6 +130,11 @@ async function getCachedFeedByUrl(feedUrl) {
   return getCachedFeed(feedId);
 }
 
+async function getCachedFeedsByUrls(feedUrls) {
+  const feeds = await Promise.all((Array.isArray(feedUrls) ? feedUrls : []).map(getCachedFeedByUrl));
+  return feeds.filter(Boolean);
+}
+
 /**
  * Write a feed object to disk.
  */
@@ -426,6 +431,7 @@ module.exports = {
   fetchAndCacheFeed,
   getCachedFeed,
   getCachedFeedByUrl,
+  getCachedFeedsByUrls,
   getEpisodes,
   refreshAllSubscribedFeeds,
   markEpisodesNew,

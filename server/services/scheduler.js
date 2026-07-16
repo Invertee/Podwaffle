@@ -24,14 +24,27 @@ async function _runRefresh(feedService, userService, broadcastFn) {
 
     console.log('[scheduler] Refresh complete:', summary);
 
-    // Broadcast if any feeds have new episodes
+    // Broadcast actual updated feed snapshots to each affected user. Clients can
+    // update immediately without performing their own RSS fetch.
     if (summary.newEpisodesFeeds && summary.newEpisodesFeeds.length > 0) {
       console.log(`[scheduler] Broadcasting feeds:updated for ${summary.newEpisodesFeeds.length} feed(s)`);
       if (typeof broadcastFn === 'function') {
-        broadcastFn({
-          type: 'feeds:updated',
-          data: { updatedFeeds: summary.newEpisodesFeeds }
-        });
+        const users = await userService.getAllUserGuids();
+        for (const guid of users) {
+          const subscriptions = await userService.getSubscriptions(guid);
+          const feeds = await feedService.getCachedFeedsByUrls(subscriptions);
+          const changed = feeds.filter((feed) => summary.newEpisodesFeeds.includes(feed.feedId));
+          if (!changed.length) continue;
+          broadcastFn({
+            type: 'feeds:updated',
+            data: {
+              guid,
+              updatedFeeds: changed.map((feed) => feed.feedId),
+              feeds: changed,
+              refreshedAt: new Date().toISOString(),
+            }
+          });
+        }
       } else {
         console.warn('[scheduler] broadcastFn is not a function, skipping WS broadcast');
       }

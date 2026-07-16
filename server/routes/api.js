@@ -15,6 +15,7 @@ const fetch = require('node-fetch');
 function createApiRouter(feedService, userService, castService, broadcastWs, options = {}) {
   const router = express.Router();
   const disableNewUserSessions = !!options.disableNewUserSessions;
+  const pushService = options.pushService || null;
   const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   // =========================================================================
@@ -97,6 +98,48 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   }
 
   router.param('guid', requireGuidParam);
+
+  // Firebase is initialized dynamically by the sideloaded Android app. Only
+  // public app identifiers are returned here; service-account credentials stay
+  // on the backend.
+  router.get('/push/config', (req, res) => {
+    res.json(pushService ? pushService.getPublicConfig() : { enabled: false });
+  });
+
+  router.post('/users/:guid/push/register', async (req, res) => {
+    if (!pushService) return sendError(res, 503, 'Push service unavailable');
+    try {
+      const result = await pushService.registerDevice(req.params.guid, String(req.body?.token || ''), String(req.body?.clientId || ''));
+      res.json(result);
+    } catch (err) {
+      sendError(res, 400, 'Failed to register push device', err.message);
+    }
+  });
+
+  router.delete('/users/:guid/push/register', async (req, res) => {
+    if (!pushService) return sendError(res, 503, 'Push service unavailable');
+    await pushService.unregisterDevice(req.params.guid, String(req.body?.token || ''));
+    res.status(204).send();
+  });
+
+  // Supports background media controls and opt-in device operations such as
+  // caching an episode/feed for offline playback.
+  router.post('/users/:guid/push/command', async (req, res) => {
+    if (!pushService) return sendError(res, 503, 'Push service unavailable');
+    const command = String(req.body?.command || '').trim();
+    if (!command) return sendError(res, 400, 'command is required');
+    try {
+      const result = await pushService.sendToGuid(req.params.guid, {
+        type: 'podwaffle_command',
+        command,
+        payload: req.body?.data || {},
+        issuedAt: new Date().toISOString(),
+      });
+      res.json({ accepted: true, ...result });
+    } catch (err) {
+      sendError(res, 502, 'Failed to send push command', err.message);
+    }
+  });
 
   // =========================================================================
   // HEALTH
@@ -675,6 +718,18 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           issuedAt: new Date().toISOString(),
         }
       });
+
+      if (pushService) {
+        pushService.sendToGuid(guid, {
+          type: 'media_command',
+          command: normalized,
+          value: value == null ? '' : value,
+          position: position == null ? '' : position,
+          volume: volume == null ? '' : volume,
+          targetClientId: targetClientId || '',
+          issuedAt: new Date().toISOString(),
+        }).catch((err) => console.warn('[api] Background command delivery failed:', err.message));
+      }
 
       return res.json({ accepted: true, command: normalized });
     } catch (err) {

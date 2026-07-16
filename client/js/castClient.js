@@ -16,6 +16,8 @@ const castClient = {
   _pendingHealthPing: null,
   _lastPongAt: 0,
   _lastMessageAt: 0,
+  _lastUserRevision: 0,
+  _resyncRequested: false,
   _idleTimer: null,
   _IDLE_TIMEOUT_MS: 20 * 60 * 1000, // 20 minutes
   _HEALTH_CHECK_INTERVAL_MS: 15000,
@@ -68,6 +70,11 @@ const castClient = {
       this._lastMessageAt = Date.now();
       this._startStatePolling();
       this._startHealthMonitoring();
+      const guid = localStorage.getItem('podwaffle_guid') || '';
+      const clientId = window.getPodwaffleClientId ? window.getPodwaffleClientId() : (localStorage.getItem('podwaffle_client_id') || '');
+      if (guid) {
+        this.send('sync:hello', { guid, clientId, lastUserRevision: this._lastUserRevision });
+      }
       this._dispatch('connected', {});
     });
 
@@ -359,6 +366,27 @@ const castClient = {
     }
   },
 
+  _observeSync(sync) {
+    if (!sync || !Number.isFinite(Number(sync.userRevision))) return;
+    const revision = Number(sync.userRevision);
+    if (this._lastUserRevision > 0 && revision > this._lastUserRevision + 1 && !this._resyncRequested) {
+      this._resyncRequested = true;
+      this.send('sync:request', {
+        guid: localStorage.getItem('podwaffle_guid') || '',
+        lastUserRevision: this._lastUserRevision,
+      });
+    }
+    this._lastUserRevision = Math.max(this._lastUserRevision, revision);
+    try {
+      localStorage.setItem('podwaffle_last_sync', JSON.stringify({
+        revision: this._lastUserRevision,
+        lastSyncAt: sync.lastSyncAt || null,
+        serverTime: sync.serverTime || null,
+      }));
+    } catch (_) {}
+    this._dispatch('sync:clock', { ...sync, revision: this._lastUserRevision });
+  },
+
   _applyCastStatus(status = {}) {
     const explicitStatus = String(status.status || '').toLowerCase();
     const activeDeviceId = status.activeDeviceId !== undefined
@@ -390,7 +418,9 @@ const castClient = {
       if (!this._idleTimer) this._startIdleTimer();
     }
 
-    if (window.player && window.player.mode === 'cast' && typeof window.player.applyCastState === 'function') {
+    const localGuid = localStorage.getItem('podwaffle_guid') || '';
+    const belongsToUser = !!(this._castState.ownerGuid && this._castState.ownerGuid === localGuid);
+    if (window.player && (window.player.mode === 'cast' || belongsToUser) && typeof window.player.applyCastState === 'function') {
       window.player.applyCastState({
         deviceId: this._castState.activeDeviceId,
         deviceName: this._castState.deviceName,
@@ -404,6 +434,7 @@ const castClient = {
         status: this._castState.status,
         reason: status.reason,
         volume: this._castState.volume,
+        ownerGuid: this._castState.ownerGuid,
       });
     }
   },
@@ -429,6 +460,7 @@ const castClient = {
   },
 
   _handleMessage(data) {
+    this._observeSync(data?.sync);
     if (data.type !== 'cast:state') {
       console.log('[castClient] Message received:', data.type, data);
     }
@@ -485,6 +517,14 @@ const castClient = {
 
       case 'feeds:updated':
         this._dispatch('feeds:updated', data.data);
+        break;
+
+      case 'sync:state':
+        this._resyncRequested = false;
+        this._dispatch('sync:state', data.data);
+        break;
+
+      case 'sync:clock':
         break;
 
       case 'user:progress':

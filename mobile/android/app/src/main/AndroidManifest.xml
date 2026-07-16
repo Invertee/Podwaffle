@@ -51,6 +51,20 @@
             </intent-filter>
         </service>
 
+        <provider
+            android:name=".FirebaseSyncInitProvider"
+            android:authorities="${applicationId}.firebase-sync-init"
+            android:exported="false"
+            android:initOrder="100" />
+
+        <service
+            android:name=".FirebaseSyncMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name="androidx.media.session.MediaButtonReceiver"
             android:exported="true">

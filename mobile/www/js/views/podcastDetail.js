@@ -1,0 +1,285 @@
+async function renderPodcastDetail(container, feedId) {
+  container.innerHTML = `
+    <div class="view-header with-back">
+    </div>
+    <div id="pd-content">
+      <div class="loading-state">
+        <div class="spinner spin"></div>
+        <p>Loading podcast details...</p>
+      </div>
+    </div>
+  `;
+
+  const contentEl = document.getElementById('pd-content');
+  const guid = window.appState ? window.appState.guid : localStorage.getItem('podwaffle_guid');
+  
+  try {
+    const [podcast, progressData] = await Promise.all([
+      window.api.getPodcast(feedId, 100, 0),
+      window.api.getProgress(guid)
+    ]);
+    window.replaceProgressState(progressData);
+    
+    // Clear new flag for this user
+    await window.api.markEpisodesSeen(feedId, guid, []);
+    
+    let isSubscribed = false;
+    try {
+      const subs = await window.api.getSubscriptions(guid);
+      isSubscribed = subs.some(s => s.feedId === feedId);
+    } catch(e){}
+
+    const headerHtml = `
+      <div class="podcast-detail-header">
+        <img src="${podcast.imageUrl}" class="podcast-artwork-large" onerror="this.src='icons/icon-192.png'">
+        <div class="podcast-detail-info">
+          <h2>${podcast.title}</h2>
+          <div class="pd-author">${podcast.author || ''}</div>
+          <br>
+          <div class="pd-action-row">
+            <button id="pd-sub-btn" class="btn button ${isSubscribed ? 'btn-outline is-danger' : 'btn-primary is-info'} pd-sub-btn">
+              ${isSubscribed ? 'Unsubscribe' : 'Subscribe'}
+            </button>
+            <button id="pd-refresh-btn" class="btn button btn-outline pd-sub-btn">Refresh Episodes</button>
+          </div>
+        </div>
+      </div>
+      <div class="podcast-description" id="pd-desc">
+        ${podcast.description || 'No description available.'}
+      </div>
+      
+      <div class="pd-bulk-actions">
+        <label class="checkbox episode-checkbox" id="pd-select-all-label">
+          <input type="checkbox" id="pd-select-all">
+          <span class="episode-checkbox-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+        </label>
+        <label for="pd-select-all" class="pd-select-all-text">Select All</label>
+        <button id="pd-mark-selected" class="btn btn-outline btn-small" disabled>Mark Played</button>
+      </div>
+      
+      <div id="pd-episodes" class="pd-episode-list"></div>
+      
+      ${podcast.episodes.length === 100 ? `<div class="pd-load-more"><button id="pd-load-more-btn" class="btn btn-outline">Load more episodes</button></div>` : ''}
+    `;
+    
+    contentEl.innerHTML = headerHtml;
+    
+    // Desc expand
+    document.getElementById('pd-desc').addEventListener('click', (e) => {
+      e.currentTarget.classList.toggle('description-expanded');
+    });
+    
+    // Sub toggle
+    document.getElementById('pd-sub-btn').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        if (isSubscribed) {
+          await window.api.unsubscribe(guid, feedId);
+          isSubscribed = false;
+          btn.textContent = 'Subscribe';
+          btn.className = 'button btn btn-primary is-info pd-sub-btn';
+        } else {
+          await window.api.subscribe(guid, podcast.feedUrl, podcast);
+          isSubscribed = true;
+          btn.textContent = 'Unsubscribe';
+          btn.className = 'button btn btn-outline is-danger pd-sub-btn';
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Failed to change subscription status');
+      }
+      btn.disabled = false;
+    });
+
+    document.getElementById('pd-refresh-btn').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = 'Refreshing...';
+      try {
+        await window.api.refreshPodcast(feedId);
+        await renderPodcastDetail(container, feedId);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to refresh episodes. If this feed blocks browser CORS, use your local/backend server connection.');
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
+    });
+
+    const epsContainer = document.getElementById('pd-episodes');
+    
+    // Render episodes
+    const renderEps = async (eps) => {
+      const cacheStatuses = window.cacheManager
+        ? await window.cacheManager.getStatuses(eps || [])
+        : {};
+
+      eps.forEach(ep => {
+        // Find progress if any
+        let prog = progressData[ep.guid];
+        if (!prog) {
+          // Check if it's already marked as played somehow else, but usually it's in progressData
+          prog = { played: false, position: 0 };
+        }
+        
+        // Add podcast metadata to ep object for player and artwork
+        ep.podcastTitle = podcast.title;
+        ep.podcastImageUrl = podcast.imageUrl;
+        ep.feedId = feedId;
+        
+        const row = window.createEpisodeRow(ep, prog, {
+          showCheckbox: true,
+          cacheStatus: cacheStatuses[ep.guid] || 'uncached',
+          onPlay: (episode) => {
+            if (window.player) {
+              const latestProgress = window.appState.progress?.[episode.guid] || prog;
+              const resumePosition = latestProgress?.played ? 0 : (latestProgress?.position || 0);
+              window.player.loadEpisode(episode, resumePosition, { autoplay: true });
+            }
+          },
+          onPlayNext: (episode) => {
+            if (window.player) window.player.playNext(episode);
+          },
+          onPlayLast: (episode) => {
+            if (window.player) window.player.addToQueue(episode);
+          },
+          onDownload: (episode) => window.cacheManager ? window.cacheManager.downloadEpisode(episode) : Promise.reject(new Error('Caching unavailable')),
+          onMarkPlayed: async (episode, isCurrentlyPlayed) => {
+            try {
+              const nextProgress = isCurrentlyPlayed
+                ? {
+                    position: 0,
+                    duration: episode.duration || 0,
+                    played: false,
+                    skipStats: true,
+                    feedId: feedId,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : {
+                    position: episode.duration || 0,
+                    duration: episode.duration || 0,
+                    played: true,
+                    skipStats: true,
+                    feedId: feedId,
+                    updatedAt: new Date().toISOString(),
+                  };
+              await window.api.updateProgress(guid, episode.guid, nextProgress);
+              window.setEpisodeProgressState(episode.guid, nextProgress);
+              if (!isCurrentlyPlayed && window.cacheManager) {
+                await window.cacheManager.deleteEpisode(episode);
+              }
+              if (window.player?.currentEpisode?.guid === episode.guid && isCurrentlyPlayed) {
+                window.player.currentEpisode._markedPlayed = false;
+                window.player.currentEpisode._markingPlayed = false;
+              }
+            } catch(e) { console.error(e); }
+          }
+        });
+        epsContainer.appendChild(row);
+      });
+    };
+    
+    await renderEps(podcast.episodes);
+    
+    // Bulk actions
+    const selectAll = document.getElementById('pd-select-all');
+    const markSelectedBtn = document.getElementById('pd-mark-selected');
+    
+    const updateBulkBtn = () => {
+      const checked = epsContainer.querySelectorAll('.episode-checkbox input:checked');
+      markSelectedBtn.disabled = checked.length === 0;
+      markSelectedBtn.textContent = checked.length > 0 ? `Mark Played (${checked.length})` : 'Mark Played';
+    };
+    
+    selectAll.addEventListener('change', (e) => {
+      const isChecked = e.currentTarget.checked;
+      epsContainer.querySelectorAll('.episode-checkbox input').forEach(cb => {
+        cb.checked = isChecked;
+      });
+      updateBulkBtn();
+    });
+    
+    epsContainer.addEventListener('change', (e) => {
+      if (e.target.matches('.episode-checkbox input')) {
+        updateBulkBtn();
+        // Update select all indeterminate state if needed
+      }
+    });
+    
+    markSelectedBtn.addEventListener('click', async () => {
+      const checked = epsContainer.querySelectorAll('.episode-checkbox input:checked');
+      if (checked.length === 0) return;
+      
+      markSelectedBtn.disabled = true;
+      markSelectedBtn.textContent = 'Marking...';
+      
+      try {
+        const promises = Array.from(checked).map(cb => {
+          const epGuid = cb.value;
+          const episode = (podcast.episodes || []).find((ep) => ep.guid === epGuid);
+          const nextProgress = {
+            position: episode?.duration || 1,
+            duration: episode?.duration || 1,
+            played: true,
+            skipStats: true,
+            feedId: feedId,
+            updatedAt: new Date().toISOString(),
+          };
+          return window.api.updateProgress(guid, epGuid, nextProgress).then(async () => {
+            window.setEpisodeProgressState(epGuid, nextProgress);
+            if (episode && window.cacheManager) {
+              await window.cacheManager.deleteEpisode(episode);
+            }
+          });
+        });
+        
+        await Promise.all(promises);
+        renderPodcastDetail(container, feedId);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to mark episodes as played');
+        updateBulkBtn();
+      }
+    });
+    
+    // Pagination (Load More)
+    let currentOffset = 100;
+    const loadMoreBtn = document.getElementById('pd-load-more-btn');
+    if (loadMoreBtn) {
+      loadMoreBtn.addEventListener('click', async () => {
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.textContent = 'Loading...';
+        try {
+          const nextData = await window.api.getPodcast(feedId, 100, currentOffset);
+          await renderEps(nextData.episodes);
+          currentOffset += 100;
+          if (nextData.episodes.length < 100) {
+            loadMoreBtn.parentElement.style.display = 'none';
+          } else {
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.textContent = 'Load more episodes';
+          }
+        } catch (err) {
+          console.error(err);
+          loadMoreBtn.disabled = false;
+          loadMoreBtn.textContent = 'Error loading. Try again.';
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error('Failed to load podcast detail:', err);
+    contentEl.innerHTML = `
+      <div class="error-state">
+        Failed to load podcast details.<br>
+        <button class="btn btn-outline mt-4" onclick="window.renderPodcastDetail(document.getElementById('main-content'), '${feedId}')">Retry</button>
+      </div>
+    `;
+  }
+}
+
+window.renderPodcastDetail = renderPodcastDetail;

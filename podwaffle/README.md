@@ -67,6 +67,17 @@ If the user session is local playback, commands are delivered via Podwaffle WebS
 ### Via Home Assistant Ingress (Reverse Proxy)
 When installed as an HA add-on using **Ingress**, the app runs behind HA's reverse proxy at a base path like `/api/hassio/...`. The app automatically detects this base path and routes all API calls, WebSocket connections, and asset requests correctly.
 
+## Android background sync (Firebase)
+
+The sideloaded Android app can receive high-priority Firebase data messages for media controls and optional `cache_episode` / `cache_podcast` commands while it is backgrounded. Configure these add-on options from one Firebase Android app whose package name is `com.podwaffle.app`:
+
+- `firebase_project_id`, `firebase_api_key`, `firebase_app_id`, and `firebase_sender_id` from the Android app configuration.
+- `firebase_client_email` and `firebase_private_key` from a service-account JSON key with permission to send Firebase Cloud Messaging messages.
+
+The backend exposes only the public Android app identifiers. The service-account email/private key remain server-side. A `google-services.json` file is not required because Podwaffle initializes Firebase programmatically. The device must include Google Play services; sideloading the APK is supported by FCM and does not require Play Store distribution.
+
+After first launch, the Android app registers its FCM token against the active Podwaffle user GUID. Device cache commands can be sent with `POST /api/users/:guid/push/command`, for example `{ "command": "cache_episode", "data": { "episode": { ... } } }`.
+
 ### Via Direct URL
 You can also access Podwaffle directly on the exposed port (default `3000`) without using Ingress:
 1. In the add-on settings, toggle **"Show in sidebar"** and/or enable **"Network"** settings to expose a port.

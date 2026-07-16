@@ -618,6 +618,32 @@ async function initApp() {
 
     // Set up cross-client sync listeners
     if (window.castClient) {
+      window.castClient.on('sync:state', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        const snapshot = payload?.snapshot || {};
+        if (snapshot.progress && window.replaceProgressState) {
+          window.replaceProgressState(snapshot.progress);
+        }
+        if (window.appState?.user && Array.isArray(snapshot.subscriptions)) {
+          window.appState.user.subscriptions = snapshot.subscriptions;
+        }
+        if (window.player && typeof window.player.applyRemotePlaybackSession === 'function') {
+          window.player.applyRemotePlaybackSession(payload?.playbackSession || snapshot.playbackSession || null);
+        }
+        window.dispatchEvent(new CustomEvent('podwaffle:sync-state', { detail: payload }));
+        const h = window.location.hash;
+        if (!h || h === '#/' || h === '#/podcasts' || h === '#/in-progress' || h === '#/history') {
+          handleRoute();
+        }
+      });
+      window.castClient.on('feeds:updated', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        window.dispatchEvent(new CustomEvent('podwaffle:feeds-updated', { detail: payload }));
+        const h = window.location.hash;
+        if (!h || h === '#/' || h === '#/podcasts' || h.startsWith('#/podcast/')) handleRoute();
+      });
       window.castClient.on('connected', () => {
         refreshProfileStateFromServer('websocket-connected');
         if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {

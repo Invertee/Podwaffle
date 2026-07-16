@@ -15,6 +15,8 @@ const feedService = require('./services/feedService');
 const userService = require('./services/userService');
 const castService = require('./services/castService');
 const scheduler = require('./services/scheduler');
+const realtimeSync = require('./services/realtimeSyncService');
+const pushService = require('./services/pushService');
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -117,10 +119,12 @@ const wss = new WebSocketServer({ server });
  * @param {Object} msgObj
  */
 function broadcastWs(msgObj) {
-  const payload = JSON.stringify(msgObj);
+  const stamped = realtimeSync.stamp(msgObj, msgObj.type !== 'sync:clock');
+  const payload = JSON.stringify(stamped);
+  const targetGuid = stamped && stamped.data && stamped.data.guid ? String(stamped.data.guid) : null;
   let sent = 0;
   wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && (!targetGuid || !client.guid || client.guid === targetGuid)) {
       client.send(payload);
       sent++;
     }
@@ -128,6 +132,16 @@ function broadcastWs(msgObj) {
   if (sent > 0) {
     console.log(`[ws] Broadcast to ${sent} client(s): type=${msgObj.type}`);
   }
+}
+
+async function sendUserSyncState(ws, guid) {
+  const bootstrap = await userService.getBootstrapSyncState(guid);
+  const subscriptions = bootstrap?.snapshot?.subscriptions || [];
+  const feeds = await feedService.getCachedFeedsByUrls(subscriptions);
+  ws.send(JSON.stringify(realtimeSync.stamp({
+    type: 'sync:state',
+    data: { guid, ...bootstrap, feeds },
+  }, false)));
 }
 
 // ---------------------------------------------------------------------------
@@ -177,37 +191,55 @@ wss.on('connection', (ws, req) => {
   });
 
   // Handle incoming messages
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
       console.log(`[ws] Message from ${clientIp}:`, msg);
 
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
+      } else if (msg.type === 'sync:hello') {
+        const guid = String(msg.guid || msg.data?.guid || '').trim();
+        if (!guid) {
+          ws.send(JSON.stringify({ type: 'sync:error', data: { error: 'guid is required' } }));
+          return;
+        }
+        ws.guid = guid;
+        ws.clientId = String(msg.clientId || msg.data?.clientId || '').trim();
+        await userService.ensureUser(guid);
+        await sendUserSyncState(ws, guid);
+      } else if (msg.type === 'sync:request') {
+        const guid = ws.guid || String(msg.guid || msg.data?.guid || '').trim();
+        if (guid) await sendUserSyncState(ws, guid);
       } else if (msg.type === 'cast:get_devices') {
         const devices = castService.getDevices();
         ws.send(JSON.stringify({ type: 'cast:devices', data: devices }));
       } else if (msg.type === 'cast:play') {
+        if (!castService.canControl(ws.guid || '')) return ws.send(JSON.stringify({ type: 'cast:error', data: { error: 'This user does not own the active cast session' } }));
         castService.resume().catch(err => {
           console.error('[ws] cast:play failed:', err.message);
           broadcastWs({ type: 'cast:error', data: { error: err.message } });
         });
       } else if (msg.type === 'cast:pause') {
+        if (!castService.canControl(ws.guid || '')) return ws.send(JSON.stringify({ type: 'cast:error', data: { error: 'This user does not own the active cast session' } }));
         castService.pause().catch(err => {
           console.error('[ws] cast:pause failed:', err.message);
           broadcastWs({ type: 'cast:error', data: { error: err.message } });
         });
       } else if (msg.type === 'cast:seek') {
+        if (!castService.canControl(ws.guid || '')) return ws.send(JSON.stringify({ type: 'cast:error', data: { error: 'This user does not own the active cast session' } }));
         castService.seek(msg.position || 0).catch(err => {
           console.error('[ws] cast:seek failed:', err.message);
           broadcastWs({ type: 'cast:error', data: { error: err.message } });
         });
       } else if (msg.type === 'cast:setVolume') {
+        if (!castService.canControl(ws.guid || '')) return ws.send(JSON.stringify({ type: 'cast:error', data: { error: 'This user does not own the active cast session' } }));
         castService.setVolume(msg.level || 0).catch(err => {
           console.error('[ws] cast:setVolume failed:', err.message);
           broadcastWs({ type: 'cast:error', data: { error: err.message } });
         });
       } else if (msg.type === 'cast:stop') {
+        if (!castService.canControl(ws.guid || '')) return ws.send(JSON.stringify({ type: 'cast:error', data: { error: 'This user does not own the active cast session' } }));
         castService.stop().catch(err => {
           console.error('[ws] cast:stop failed:', err.message);
           broadcastWs({ type: 'cast:error', data: { error: err.message } });
@@ -240,8 +272,17 @@ const heartbeatInterval = setInterval(() => {
   });
 }, 30000);
 
+// Application-level clock lets clients detect a missed websocket mutation even
+// when the TCP connection itself appears healthy.
+const syncClockInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(realtimeSync.clock(ws.guid || '')));
+  });
+}, 10000);
+
 wss.on('close', () => {
   clearInterval(heartbeatInterval);
+  clearInterval(syncClockInterval);
   console.log('[ws] WebSocket server closed');
 });
 
@@ -249,7 +290,8 @@ wss.on('close', () => {
 // API routes
 // ---------------------------------------------------------------------------
 app.use('/api', createApiRouter(feedService, userService, castService, broadcastWs, {
-  disableNewUserSessions: DISABLE_NEW_USER_SESSIONS
+  disableNewUserSessions: DISABLE_NEW_USER_SESSIONS,
+  pushService,
 }));
 
 // ---------------------------------------------------------------------------

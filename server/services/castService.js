@@ -800,6 +800,7 @@ function broadcastState(reason = null) {
   state.broadcastFn({
     type: 'cast:status',
     data: {
+      guid: state.ownerGuid,
       activeDeviceId: state.activeDeviceId,
       deviceName: state.activeDeviceId ? (devices.get(state.activeDeviceId)?.name || 'Unknown') : null,
       ownerGuid: state.ownerGuid,

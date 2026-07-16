@@ -5,8 +5,12 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.media.AudioManager;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.IBinder;
@@ -17,6 +21,7 @@ import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.session.MediaButtonReceiver;
 import androidx.media.app.NotificationCompat.MediaStyle;
 
@@ -57,6 +62,18 @@ public class MediaSessionService extends Service {
 
     private MediaSessionPlugin plugin;
     private MediaSessionCallback callback;
+    private boolean noisyAudioReceiverRegistered = false;
+
+    private final BroadcastReceiver noisyAudioReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())
+                    && playbackState == PlaybackStateCompat.STATE_PLAYING
+                    && plugin != null) {
+                plugin.actionCallback("pause");
+            }
+        }
+    };
 
     private final IBinder binder = new LocalBinder();
 
@@ -83,6 +100,16 @@ public class MediaSessionService extends Service {
         mediaSession = new MediaSessionCompat(this, "WebViewMediaSession");
         mediaSession.setCallback(new MediaSessionCallback(plugin));
         mediaSession.setActive(true);
+
+        if (!noisyAudioReceiverRegistered) {
+            ContextCompat.registerReceiver(
+                    this,
+                    noisyAudioReceiver,
+                    new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+                    ContextCompat.RECEIVER_EXPORTED
+            );
+            noisyAudioReceiverRegistered = true;
+        }
 
         playbackStateBuilder = new PlaybackStateCompat.Builder()
                 .setActions(PlaybackStateCompat.ACTION_PLAY)
@@ -145,8 +172,26 @@ public class MediaSessionService extends Service {
     }
 
     public void destroy() {
+        unregisterNoisyAudioReceiver();
         stopForeground(true);
         stopSelf();
+    }
+
+    @Override
+    public void onDestroy() {
+        unregisterNoisyAudioReceiver();
+        if (mediaSession != null) {
+            mediaSession.release();
+            mediaSession = null;
+        }
+        super.onDestroy();
+    }
+
+    private void unregisterNoisyAudioReceiver() {
+        if (noisyAudioReceiverRegistered) {
+            unregisterReceiver(noisyAudioReceiver);
+            noisyAudioReceiverRegistered = false;
+        }
     }
 
     @Override

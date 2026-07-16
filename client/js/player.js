@@ -40,6 +40,7 @@ const player = {
   _nativeMediaInitialized: false,
   _nativeMediaSyncTimer: null,
   _remoteSession: null,
+  _remoteDeadReckoningTimer: null,
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -77,9 +78,27 @@ const player = {
     });
   },
 
+  _stopRemoteDeadReckoning() {
+    clearInterval(this._remoteDeadReckoningTimer);
+    this._remoteDeadReckoningTimer = null;
+  },
+
+  _startRemoteDeadReckoning() {
+    this._stopRemoteDeadReckoning();
+    if (!this._remoteSession?.isPlaying) return;
+    this._remoteDeadReckoningTimer = setInterval(() => {
+      if (!this._remoteSession?.isPlaying || this.mode !== 'remote') return;
+      const elapsed = Math.max(0, (Date.now() - Number(this._remoteSession._receivedAt || Date.now())) / 1000);
+      const estimated = Number(this._remoteSession.position || 0) + elapsed;
+      this.position = this.duration > 0 ? Math.min(this.duration, estimated) : estimated;
+      this._notifyStateChange();
+    }, 1000);
+  },
+
   applyRemotePlaybackSession(session) {
     const localClientId = this._getClientId();
     if (!session || !session.episodeGuid) {
+      this._stopRemoteDeadReckoning();
       if (this._isRemoteSessionActive()) {
         this._remoteSession = null;
         this.mode = 'local';
@@ -94,9 +113,19 @@ const player = {
 
     if (!session.clientId || session.clientId === localClientId) return;
     if (this.mode !== 'remote' && this.mode !== 'local') return;
-    if (this.mode === 'local' && this.currentEpisode && (this.isPlaying || this.audio?.src)) return;
+    if (this.mode === 'local' && this.currentEpisode && (this.isPlaying || this.audio?.src)) {
+      let localUpdatedAt = 0;
+      try {
+        localUpdatedAt = this._toTimestamp(JSON.parse(localStorage.getItem('podwaffle_playback_session') || 'null')?.updatedAt);
+      } catch (_) {}
+      const incomingUpdatedAt = this._toTimestamp(session.updatedAt);
+      if (!incomingUpdatedAt || incomingUpdatedAt <= localUpdatedAt) return;
+      this.audio.pause();
+    }
 
-    this._remoteSession = { ...session };
+    const receivedAt = Date.now();
+    const updateAgeSeconds = Math.max(0, Math.min(30, (receivedAt - this._toTimestamp(session.updatedAt)) / 1000));
+    this._remoteSession = { ...session, _receivedAt: receivedAt };
     this.audio.pause();
     this.mode = 'remote';
     this.currentEpisode = {
@@ -109,9 +138,10 @@ const player = {
       imageUrl: session.imageUrl || session.podcastImageUrl || '',
       duration: session.duration || 0,
     };
-    this.position = Math.max(0, Number(session.position || 0));
+    this.position = Math.max(0, Number(session.position || 0) + (session.isPlaying ? updateAgeSeconds : 0));
     this.duration = Math.max(0, Number(session.duration || 0));
     this.isPlaying = !!session.isPlaying;
+    this._startRemoteDeadReckoning();
     this._notifyStateChange();
   },
 
@@ -397,10 +427,19 @@ const player = {
     if (!statusObj) return;
     
     const hasActiveDevice = !!(statusObj.deviceId || this._activeCastDeviceId);
+    const localGuid = localStorage.getItem('podwaffle_guid') || '';
+    const belongsToUser = !!(statusObj.ownerGuid && statusObj.ownerGuid === localGuid);
     const isActiveCast = this.mode === 'cast' || hasActiveDevice;
     
     if (!isActiveCast) {
       return; // No active cast session
+    }
+
+    if (hasActiveDevice && belongsToUser && this.mode !== 'cast') {
+      this.audio.pause();
+      this._stopRemoteDeadReckoning();
+      this._remoteSession = null;
+      this.mode = 'cast';
     }
 
     // Clear cast state if device is idle and no active device
@@ -950,7 +989,7 @@ const player = {
     }
     this.progressSyncInterval = setInterval(() => {
       this._syncProgress();
-    }, 15000);
+    }, 5000);
   },
 
   async _syncProgress() {
