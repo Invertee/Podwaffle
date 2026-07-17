@@ -9,18 +9,18 @@ const repoRoot = path.join(__dirname, '..', '..');
 const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mobile', 'server.config.json'), 'utf8'));
 const buildScript = fs.readFileSync(path.join(repoRoot, 'mobile', 'scripts', 'sync-web-assets.js'), 'utf8');
 
-test('mobile build records the GitHub Pages site separately from the API backend', () => {
-  assert.equal(config.siteUrl, 'https://invertee.github.io/Podwaffle');
+test('mobile build targets the Home Assistant add-on without a static-site dependency', () => {
   assert.equal(config.backendUrl, '');
-  assert.match(buildScript, /PODWAFFLE_SITE_URL/);
-  assert.match(buildScript, /defaultSiteUrl\s*=\s*'https:\/\/invertee\.github\.io\/Podwaffle'/);
-  assert.doesNotMatch(buildScript, /defaultBackendUrl/);
+  assert.equal(config.profileId, '');
+  assert.equal(config.siteUrl, undefined);
+  assert.match(buildScript, /PODWAFFLE_BACKEND_URL/);
+  assert.doesNotMatch(buildScript, /github\.io/i);
+  assert.doesNotMatch(buildScript, /PODWAFFLE_SITE_URL/);
 });
 
-test('mobile backend remains optional and preserves manually configured servers', () => {
-  assert.match(buildScript, /PODWAFFLE_BACKEND_URL/);
-  assert.match(buildScript, /podwaffle_mobile_managed_backend_url/);
-  assert.match(buildScript, /localStorage\.removeItem\('podwaffle_server_connection'\)/);
-  assert.match(buildScript, /managedByPreviousBuild/);
-  assert.match(buildScript, /source:\s*'mobile-build'/);
+test('mobile bundle can seed a profile and preserves a manually entered access key', () => {
+  assert.match(buildScript, /config\.profileId/);
+  assert.match(buildScript, /baseUrl:/);
+  assert.match(buildScript, /\.\.\.\(existing \|\| \{\}\)/);
+  assert.doesNotMatch(buildScript, /accessKey:/);
 });

@@ -7,12 +7,13 @@ const cron = require('node-cron');
 // ---------------------------------------------------------------------------
 
 let scheduledTask = null;
+let refreshInFlight = null;
 
 /**
  * Core refresh logic shared by both the scheduled cron run and the
  * immediate startup run.
  */
-async function _runRefresh(feedService, userService, broadcastFn) {
+async function _executeRefresh(feedService, userService, broadcastFn) {
   const startTime = new Date().toISOString();
   console.log(`[scheduler] Feed refresh started at ${startTime}`);
 
@@ -60,6 +61,16 @@ async function _runRefresh(feedService, userService, broadcastFn) {
     console.error('[scheduler] Refresh run encountered an unhandled error:', err);
     return { total: 0, succeeded: 0, failed: 0, newEpisodesFeeds: [], error: err.message };
   }
+}
+
+function _runRefresh(feedService, userService, broadcastFn) {
+  if (refreshInFlight) {
+    console.log('[scheduler] Feed refresh already running; joining the active run');
+    return refreshInFlight;
+  }
+  refreshInFlight = _executeRefresh(feedService, userService, broadcastFn)
+    .finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
 }
 
 /**

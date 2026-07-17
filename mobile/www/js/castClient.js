@@ -20,8 +20,8 @@ const castClient = {
   _resyncRequested: false,
   _idleTimer: null,
   _IDLE_TIMEOUT_MS: 20 * 60 * 1000, // 20 minutes
-  _HEALTH_CHECK_INTERVAL_MS: 15000,
-  _HEALTH_PONG_TIMEOUT_MS: 10000,
+  _HEALTH_CHECK_INTERVAL_MS: 30000,
+  _HEALTH_PONG_TIMEOUT_MS: 15000,
   _castState: {
     status: 'idle',
     position: 0,
@@ -68,11 +68,14 @@ const castClient = {
       clearTimeout(this._reconnectTimer);
       this._lastPongAt = Date.now();
       this._lastMessageAt = Date.now();
-      this._startStatePolling();
+      this._stopStatePolling();
       this._startHealthMonitoring();
       const guid = localStorage.getItem('podwaffle_guid') || '';
       const clientId = window.getPodwaffleClientId ? window.getPodwaffleClientId() : (localStorage.getItem('podwaffle_client_id') || '');
-      if (guid) this.send('sync:hello', { guid, clientId, lastUserRevision: this._lastUserRevision });
+      const accessKey = window.api?.getServerConnectionConfig?.().accessKey || '';
+      if (guid) {
+        this.send('sync:hello', { guid, clientId, accessKey, lastUserRevision: this._lastUserRevision });
+      }
       this._dispatch('connected', {});
     });
 
@@ -89,7 +92,7 @@ const castClient = {
     this.ws.addEventListener('close', (event) => {
       console.warn(`[castClient] WebSocket closed (code=${event.code}). Intentional=${this._intentionalClose}`);
       this.ws = null;
-      this._stopStatePolling();
+      if (!this._intentionalClose) this._startStatePolling();
       this._stopHealthMonitoring();
       this._dispatch('disconnected', { code: event.code });
       if (!this._intentionalClose) {
@@ -170,7 +173,8 @@ const castClient = {
       }
     };
 
-    this._statePollTimer = setInterval(pollState, 15000);
+    // HTTP is only a low-frequency fallback while the WebSocket is down.
+    this._statePollTimer = setInterval(pollState, 60000);
     setTimeout(pollState, 1000);
   },
 
@@ -364,15 +368,43 @@ const castClient = {
     }
   },
 
+  requestSync(reason = 'client-request') {
+    if (!this.isConnected()) return false;
+    return this.send('sync:request', {
+      guid: localStorage.getItem('podwaffle_guid') || '',
+      reason,
+      lastUserRevision: this._lastUserRevision,
+    });
+  },
+
+  getTransportStatus() {
+    return {
+      method: this.isConnected() ? 'websocket' : (this._statePollTimer ? 'http-fallback' : 'offline'),
+      connected: this.isConnected(),
+      lastMessageAt: this._lastMessageAt ? new Date(this._lastMessageAt).toISOString() : null,
+      lastPongAt: this._lastPongAt ? new Date(this._lastPongAt).toISOString() : null,
+      userRevision: this._lastUserRevision,
+    };
+  },
+
   _observeSync(sync) {
     if (!sync || !Number.isFinite(Number(sync.userRevision))) return;
     const revision = Number(sync.userRevision);
     if (this._lastUserRevision > 0 && revision > this._lastUserRevision + 1 && !this._resyncRequested) {
       this._resyncRequested = true;
-      this.send('sync:request', { guid: localStorage.getItem('podwaffle_guid') || '', lastUserRevision: this._lastUserRevision });
+      this.send('sync:request', {
+        guid: localStorage.getItem('podwaffle_guid') || '',
+        lastUserRevision: this._lastUserRevision,
+      });
     }
     this._lastUserRevision = Math.max(this._lastUserRevision, revision);
-    try { localStorage.setItem('podwaffle_last_sync', JSON.stringify({ revision: this._lastUserRevision, lastSyncAt: sync.lastSyncAt || null, serverTime: sync.serverTime || null })); } catch (_) {}
+    try {
+      localStorage.setItem('podwaffle_last_sync', JSON.stringify({
+        revision: this._lastUserRevision,
+        lastSyncAt: sync.lastSyncAt || null,
+        serverTime: sync.serverTime || null,
+      }));
+    } catch (_) {}
     this._dispatch('sync:clock', { ...sync, revision: this._lastUserRevision });
   },
 
@@ -508,16 +540,16 @@ const castClient = {
         this._dispatch('feeds:updated', data.data);
         break;
 
-      case 'user:progress':
-        this._dispatch('user:progress', data.data);
-        break;
-
       case 'sync:state':
         this._resyncRequested = false;
         this._dispatch('sync:state', data.data);
         break;
 
       case 'sync:clock':
+        break;
+
+      case 'user:progress':
+        this._dispatch('user:progress', data.data);
         break;
 
       case 'user:playback-session':

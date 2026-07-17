@@ -22,7 +22,7 @@
   }
 
   function updateConnectionHealthGrid() {
-    const mode = document.getElementById('conn-mode');
+    const mode = document.getElementById('admin-transport');
     const grid = mode?.closest('.stats-grid');
     if (grid && !grid.classList.contains('connection-health-grid')) {
       grid.classList.add('connection-health-grid');

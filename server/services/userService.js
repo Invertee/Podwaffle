@@ -8,9 +8,11 @@ const syncService = require('./syncService');
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const USERS_DIR = path.join(_dataRoot, 'users');
 const PROGRESS_DIR = path.join(_dataRoot, 'progress');
-const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const GUID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const userWriteQueues = new Map();
 const progressWriteQueues = new Map();
+let allowedProfileIds = null;
+const UNCHANGED_USER = Symbol('unchanged-user');
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap
@@ -53,6 +55,7 @@ function defaultProfile(guid) {
   const now = new Date().toISOString();
   return {
     guid,
+    name: guid,
     createdAt: now,
     updatedAt: now,
     subscriptionsUpdatedAt: now,
@@ -92,6 +95,9 @@ function ensureProfileShape(profile) {
   profile.progress = profile.progress && typeof profile.progress === 'object' ? profile.progress : {};
   profile.queue = Array.isArray(profile.queue) ? normalizeQueue(profile.queue) : [];
   profile.history = Array.isArray(profile.history) ? profile.history : [];
+  profile.processedStatMutations = Array.isArray(profile.processedStatMutations)
+    ? profile.processedStatMutations.slice(-500)
+    : [];
   profile.stats = {
     totalListenedSeconds: 0,
     totalSkippedSeconds: 0,
@@ -268,7 +274,7 @@ async function getUser(guid) {
  * Persist a user profile to disk, bumping updatedAt.
  * Progress is stored in a separate file and is stripped from the user file.
  */
-async function saveUser(profile) {
+async function persistUser(profile) {
   profile.guid = assertSafeGuid(profile.guid);
   ensureProfileShape(profile);
   profile.updatedAt = new Date().toISOString();
@@ -277,33 +283,37 @@ async function saveUser(profile) {
   const filePath = userFilePath(profile.guid);
   const profileForDisk = { ...profile, progress: {} };
   console.log(`[userService] saveUser(${profile.guid}) → writing ${filePath}`);
-  return queueUserWrite(profile.guid, async () => {
-    try {
-      await atomicWriteFile(filePath, JSON.stringify(profileForDisk, null, 2));
-      console.log(`[userService] saveUser(${profile.guid}) → saved OK`);
-      return profile;
-    } catch (err) {
-      console.error(`[userService] saveUser(${profile.guid}) → write error:`, err);
-      throw err;
-    }
+  await atomicWriteFile(filePath, JSON.stringify(profileForDisk, null, 2));
+  console.log(`[userService] saveUser(${profile.guid}) → saved OK`);
+  return profile;
+}
+
+async function saveUser(profile) {
+  const guid = assertSafeGuid(profile.guid);
+  return queueUserWrite(guid, () => persistUser(profile));
+}
+
+// Every read-modify-write of the profile file runs in one queue. Serialising
+// only the final write is insufficient: two callers can otherwise read the
+// same old profile and the later write silently discards the first mutation.
+async function mutateUser(guid, operation) {
+  guid = assertSafeGuid(guid);
+  return queueUserWrite(guid, async () => {
+    const profile = await getUser(guid) || defaultProfile(guid);
+    const result = await operation(profile);
+    if (result && result[UNCHANGED_USER]) return result.value;
+    await persistUser(profile);
+    return result;
   });
+}
+
+function unchangedUser(value) {
+  return { [UNCHANGED_USER]: true, value };
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-/**
- * Create a brand-new user with default settings.
- */
-async function createUser() {
-  const guid = randomUUID();
-  console.log(`[userService] createUser() → new guid: ${guid}`);
-  const profile = defaultProfile(guid);
-  await saveUser(profile);
-  console.log(`[userService] createUser() → created user ${guid}`);
-  return profile;
-}
 
 /**
  * Ensure a user profile exists for the given GUID.
@@ -314,11 +324,15 @@ async function ensureUser(guid) {
   guid = assertSafeGuid(guid);
   const existing = await getUser(guid);
   if (existing) return existing;
-  console.log(`[userService] ensureUser(${guid}) → no profile found, creating default`);
-  const profile = defaultProfile(guid);
-  await saveUser(profile);
-  console.log(`[userService] ensureUser(${guid}) → created`);
-  return profile;
+  return queueUserWrite(guid, async () => {
+    const queuedExisting = await getUser(guid);
+    if (queuedExisting) return queuedExisting;
+    console.log(`[userService] ensureUser(${guid}) → no profile found, creating default`);
+    const profile = defaultProfile(guid);
+    await persistUser(profile);
+    console.log(`[userService] ensureUser(${guid}) → created`);
+    return profile;
+  });
 }
 
 /**
@@ -327,11 +341,11 @@ async function ensureUser(guid) {
 async function updateSettings(guid, settings) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] updateSettings(${guid})`, settings);
-  const profile = await ensureUser(guid);
-  profile.settings = { ...profile.settings, ...settings };
-  await saveUser(profile);
-  console.log(`[userService] updateSettings(${guid}) → done`);
-  return profile.settings;
+  return mutateUser(guid, async (profile) => {
+    profile.settings = { ...profile.settings, ...settings };
+    console.log(`[userService] updateSettings(${guid}) → done`);
+    return profile.settings;
+  });
 }
 
 /**
@@ -340,16 +354,16 @@ async function updateSettings(guid, settings) {
 async function addSubscription(guid, feedUrl) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] addSubscription(${guid}, ${feedUrl})`);
-  const profile = await ensureUser(guid);
-  if (!profile.subscriptions.includes(feedUrl)) {
-    profile.subscriptions.push(feedUrl);
-    profile.subscriptionsUpdatedAt = new Date().toISOString();
-    await saveUser(profile);
-    console.log(`[userService] addSubscription(${guid}) → added ${feedUrl}`);
-  } else {
-    console.log(`[userService] addSubscription(${guid}) → already subscribed to ${feedUrl}`);
-  }
-  return profile.subscriptions;
+  return mutateUser(guid, async (profile) => {
+    if (!profile.subscriptions.includes(feedUrl)) {
+      profile.subscriptions.push(feedUrl);
+      profile.subscriptionsUpdatedAt = new Date().toISOString();
+      console.log(`[userService] addSubscription(${guid}) → added ${feedUrl}`);
+    } else {
+      console.log(`[userService] addSubscription(${guid}) → already subscribed to ${feedUrl}`);
+    }
+    return profile.subscriptions;
+  });
 }
 
 /**
@@ -359,21 +373,18 @@ async function removeSubscription(guid, feedIdOrUrl) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] removeSubscription(${guid}, ${feedIdOrUrl})`);
   const crypto = require('crypto');
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    const before = profile.subscriptions.length;
+    profile.subscriptions = profile.subscriptions.filter(url => {
+      const hash = crypto.createHash('md5').update(url).digest('hex');
+      return hash !== feedIdOrUrl && url !== feedIdOrUrl;
+    });
 
-  const before = profile.subscriptions.length;
-  profile.subscriptions = profile.subscriptions.filter(url => {
-    const hash = crypto.createHash('md5').update(url).digest('hex');
-    return hash !== feedIdOrUrl && url !== feedIdOrUrl;
+    const after = profile.subscriptions.length;
+    console.log(`[userService] removeSubscription(${guid}) → removed ${before - after} entries`);
+    if (before !== after) profile.subscriptionsUpdatedAt = new Date().toISOString();
+    return profile.subscriptions;
   });
-
-  const after = profile.subscriptions.length;
-  console.log(`[userService] removeSubscription(${guid}) → removed ${before - after} entries`);
-  if (before !== after) {
-    profile.subscriptionsUpdatedAt = new Date().toISOString();
-  }
-  await saveUser(profile);
-  return profile.subscriptions;
 }
 
 /**
@@ -384,28 +395,25 @@ async function reorderSubscriptions(guid, orderedFeedIds) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] reorderSubscriptions(${guid}) → ${orderedFeedIds.length} entries`);
   const crypto = require('crypto');
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    const urlByFeedId = {};
+    for (const url of profile.subscriptions) {
+      const feedId = crypto.createHash('md5').update(url).digest('hex');
+      urlByFeedId[feedId] = url;
+    }
 
-  // Build feedId → feedUrl map from current subscriptions
-  const urlByFeedId = {};
-  for (const url of profile.subscriptions) {
-    const feedId = crypto.createHash('md5').update(url).digest('hex');
-    urlByFeedId[feedId] = url;
-  }
+    const reordered = orderedFeedIds
+      .filter(id => urlByFeedId[id])
+      .map(id => urlByFeedId[id]);
+    for (const url of profile.subscriptions) {
+      if (!reordered.includes(url)) reordered.push(url);
+    }
 
-  // Rebuild array in new order; append any not mentioned
-  const reordered = orderedFeedIds
-    .filter(id => urlByFeedId[id])
-    .map(id => urlByFeedId[id]);
-  for (const url of profile.subscriptions) {
-    if (!reordered.includes(url)) reordered.push(url);
-  }
-
-  profile.subscriptions = reordered;
-  profile.subscriptionsUpdatedAt = new Date().toISOString();
-  await saveUser(profile);
-  console.log(`[userService] reorderSubscriptions(${guid}) → done`);
-  return profile.subscriptions;
+    profile.subscriptions = reordered;
+    profile.subscriptionsUpdatedAt = new Date().toISOString();
+    console.log(`[userService] reorderSubscriptions(${guid}) → done`);
+    return profile.subscriptions;
+  });
 }
 
 /**
@@ -424,8 +432,8 @@ async function getSubscriptions(guid) {
 }
 
 /**
- * Update playback progress for an episode. Uses updatedAt for conflict resolution
- * (most-recent write wins).
+ * Update playback progress for an episode. The server assigns updatedAt so
+ * clock skew between clients cannot make a stale device permanently win.
  *
  * Progress is stored in data/progress/{guid}.json (separate from the user profile)
  * so bulk progress writes cannot corrupt subscriptions or settings.
@@ -441,16 +449,6 @@ async function updateProgress(guid, episodeGuid, progressData) {
     const progressMap = await loadProgressForUser(guid);
     const existing = progressMap[episodeGuid];
 
-    // Conflict resolution: most recent updatedAt wins
-    if (existing && progressData.updatedAt && existing.updatedAt) {
-      const existingTime = new Date(existing.updatedAt).getTime();
-      const incomingTime = new Date(progressData.updatedAt).getTime();
-      if (existingTime >= incomingTime) {
-        console.log(`[userService] updateProgress(${guid}, ${episodeGuid}) → skipping, existing record is newer`);
-        return existing;
-      }
-    }
-
     const oldPosition = existing ? (existing.position || 0) : 0;
     const newPosition = typeof progressData.position === 'number' ? progressData.position : oldPosition;
     const delta = Math.max(0, newPosition - oldPosition);
@@ -459,7 +457,7 @@ async function updateProgress(guid, episodeGuid, progressData) {
     progressMap[episodeGuid] = {
       position: newPosition,
       duration: progressData.duration !== undefined ? progressData.duration : (existing ? existing.duration : 0),
-      updatedAt: progressData.updatedAt || now,
+      updatedAt: now,
       played: progressData.played !== undefined ? progressData.played : (existing ? existing.played : false),
       feedId: progressData.feedId || (existing ? existing.feedId : '')
     };
@@ -475,6 +473,7 @@ async function updateProgress(guid, episodeGuid, progressData) {
         if (!profile) return;
         profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
         profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + delta;
+        profile.updatedAt = new Date().toISOString();
         console.log(`[userService] updateProgress → stats +${delta.toFixed(1)}s (total: ${profile.stats.totalListenedSeconds.toFixed(1)}s)`);
         const profileForDisk = { ...profile, progress: {} };
         await atomicWriteFile(userFilePath(guid), JSON.stringify(profileForDisk, null, 2));
@@ -506,72 +505,98 @@ async function getPlaybackSession(guid) {
  */
 async function updatePlaybackSession(guid, sessionData) {
   guid = assertSafeGuid(guid);
-  console.log(`[userService] updatePlaybackSession(${guid})`, sessionData);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    console.log(`[userService] updatePlaybackSession(${guid})`, sessionData);
+    const existing = profile.playbackSession;
+    const nextOwner = String(sessionData.ownerClientId || sessionData.clientId || '').trim();
+    const existingOwner = String(existing?.ownerClientId || existing?.clientId || '').trim();
+    const incomingLeaseToken = String(sessionData.leaseToken || '').trim();
 
-  const existing = profile.playbackSession;
-  if (existing && sessionData.updatedAt && existing.updatedAt) {
-    const existingTime = new Date(existing.updatedAt).getTime();
-    const incomingTime = new Date(sessionData.updatedAt).getTime();
-    if (existingTime > incomingTime) {
-      console.log(`[userService] updatePlaybackSession(${guid}) → skipping, existing session is newer`);
-      return existing;
+    // A stale pause/position flush from a client that has already lost the
+    // playback lease must never overwrite the current owner's session.
+    if (existing?.isPlaying && existingOwner && nextOwner && existingOwner !== nextOwner && !sessionData.isPlaying) {
+      console.log(`[userService] updatePlaybackSession(${guid}) → ignored non-owner update from ${nextOwner}`);
+      return unchangedUser({ ...existing, ignoredNonOwner: true });
     }
-  }
 
-  const now = new Date().toISOString();
-  const normalizedQueue = normalizeQueue(sessionData.queue !== undefined
-    ? sessionData.queue
-    : (existing && Array.isArray(existing.queue) ? existing.queue : []));
-  profile.playbackSession = {
-    episodeGuid: sessionData.episodeGuid || '',
-    feedId: sessionData.feedId || '',
-    title: sessionData.title || '',
-    podcastTitle: sessionData.podcastTitle || '',
-    audioUrl: sessionData.audioUrl || '',
-    podcastImageUrl: sessionData.podcastImageUrl || '',
-    imageUrl: sessionData.imageUrl || '',
-    position: typeof sessionData.position === 'number' ? sessionData.position : parseFloat(sessionData.position) || 0,
-    duration: typeof sessionData.duration === 'number' ? sessionData.duration : parseFloat(sessionData.duration) || 0,
-    isPlaying: !!sessionData.isPlaying,
-    mode: sessionData.mode === 'cast' ? 'cast' : 'local',
-    transport: sessionData.transport || '',
-    castDeviceId: sessionData.castDeviceId || '',
-    castDeviceName: sessionData.castDeviceName || '',
-    clientId: sessionData.clientId || '',
-    currentEpisodeGuid: sessionData.currentEpisodeGuid || sessionData.episodeGuid || '',
-    queue: normalizedQueue,
-    updatedAt: sessionData.updatedAt || now
-  };
+    // The active lease token lets a newly informed client take control, while
+    // rejecting late "still playing" writes from the client that just lost it.
+    // Server-owned transports (Cast) explicitly force their initial takeover.
+    if (existing?.isPlaying
+      && existingOwner
+      && nextOwner
+      && existingOwner !== nextOwner
+      && existing.leaseToken
+      && !sessionData.forceTakeover
+      && incomingLeaseToken !== existing.leaseToken) {
+      console.log(`[userService] updatePlaybackSession(${guid}) → ignored stale lease from ${nextOwner}`);
+      return unchangedUser({ ...existing, ignoredStaleLease: true });
+    }
 
-  profile.queue = normalizedQueue;
+    const previousOwnerClientId = sessionData.isPlaying && existingOwner && nextOwner && existingOwner !== nextOwner
+      ? existingOwner
+      : '';
+    const ownerChanged = !!nextOwner && nextOwner !== existingOwner;
+    const now = new Date().toISOString();
+    const normalizedQueue = normalizeQueue(sessionData.queue !== undefined
+      ? sessionData.queue
+      : (existing && Array.isArray(existing.queue) ? existing.queue : []));
+    profile.playbackSession = {
+      episodeGuid: sessionData.episodeGuid || '',
+      feedId: sessionData.feedId || '',
+      title: sessionData.title || '',
+      podcastTitle: sessionData.podcastTitle || '',
+      audioUrl: sessionData.audioUrl || '',
+      podcastImageUrl: sessionData.podcastImageUrl || '',
+      imageUrl: sessionData.imageUrl || '',
+      position: typeof sessionData.position === 'number' ? sessionData.position : parseFloat(sessionData.position) || 0,
+      duration: typeof sessionData.duration === 'number' ? sessionData.duration : parseFloat(sessionData.duration) || 0,
+      isPlaying: !!sessionData.isPlaying,
+      mode: sessionData.mode === 'cast' ? 'cast' : 'local',
+      transport: sessionData.transport || (sessionData.mode === 'cast' ? 'cast' : 'web'),
+      castDeviceId: sessionData.castDeviceId || '',
+      castDeviceName: sessionData.castDeviceName || '',
+      clientId: nextOwner,
+      ownerClientId: nextOwner,
+      leaseToken: ownerChanged || !existing?.leaseToken ? randomUUID() : existing.leaseToken,
+      sessionVersion: Math.max(0, Number(existing?.sessionVersion || 0)) + 1,
+      currentEpisodeGuid: sessionData.currentEpisodeGuid || sessionData.episodeGuid || '',
+      queue: normalizedQueue,
+      // Server time is authoritative. Client clocks are retained nowhere in
+      // the lease because they are not safe for cross-device arbitration.
+      updatedAt: now,
+    };
 
-  await saveUser(profile);
-  console.log(`[userService] updatePlaybackSession(${guid}) → saved ${profile.playbackSession.episodeGuid} @ ${profile.playbackSession.position}s`);
-  return profile.playbackSession;
+    profile.queue = normalizedQueue;
+    console.log(`[userService] updatePlaybackSession(${guid}) → owner=${nextOwner || 'unclaimed'} playing=${profile.playbackSession.isPlaying} version=${profile.playbackSession.sessionVersion}`);
+    return { ...profile.playbackSession, previousOwnerClientId };
+  });
 }
 
 /**
  * Clear the active playback session.
  */
-async function clearPlaybackSession(guid, episodeGuid) {
+async function clearPlaybackSession(guid, episodeGuid, requesterClientId = '') {
   guid = assertSafeGuid(guid);
   console.log(`[userService] clearPlaybackSession(${guid}, ${episodeGuid || '*'})`);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    if (!profile.playbackSession) return unchangedUser(null);
 
-  if (!profile.playbackSession) {
+    if (episodeGuid && profile.playbackSession.episodeGuid && profile.playbackSession.episodeGuid !== episodeGuid) {
+      console.log(`[userService] clearPlaybackSession(${guid}) → skipped, different active episode`);
+      return unchangedUser({ ...profile.playbackSession, ignoredEpisodeMismatch: true });
+    }
+
+    const owner = String(profile.playbackSession.ownerClientId || profile.playbackSession.clientId || '');
+    if (requesterClientId && owner && requesterClientId !== owner) {
+      console.log(`[userService] clearPlaybackSession(${guid}) → ignored non-owner ${requesterClientId}`);
+      return unchangedUser({ ...profile.playbackSession, ignoredNonOwner: true });
+    }
+
+    profile.playbackSession = null;
+    console.log(`[userService] clearPlaybackSession(${guid}) → cleared`);
     return null;
-  }
-
-  if (episodeGuid && profile.playbackSession.episodeGuid && profile.playbackSession.episodeGuid !== episodeGuid) {
-    console.log(`[userService] clearPlaybackSession(${guid}) → skipped, different active episode`);
-    return profile.playbackSession;
-  }
-
-  profile.playbackSession = null;
-  await saveUser(profile);
-  console.log(`[userService] clearPlaybackSession(${guid}) → cleared`);
-  return null;
+  });
 }
 
 async function getQueue(guid) {
@@ -594,7 +619,7 @@ async function getQueue(guid) {
       queue: profile.playbackSession.queue,
       mode: profile.playbackSession.mode === 'cast' ? 'cast' : 'local',
       currentEpisodeGuid: profile.playbackSession.currentEpisodeGuid || profile.playbackSession.episodeGuid || '',
-      updatedAt: profile.playbackSession.updatedAt || null,
+      updatedAt: profile.playbackSession.queueUpdatedAt || profile.playbackSession.updatedAt || null,
     };
   }
 
@@ -610,47 +635,31 @@ async function getQueue(guid) {
 async function updateQueue(guid, queueItems, metadata = {}) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] updateQueue(${guid}) → ${Array.isArray(queueItems) ? queueItems.length : 0} items`);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    const normalizedQueue = normalizeQueue(queueItems);
+    const existingSession = profile.playbackSession && typeof profile.playbackSession === 'object'
+      ? profile.playbackSession
+      : null;
 
-  const normalizedQueue = normalizeQueue(queueItems);
-  const now = new Date().toISOString();
-  const existingSession = profile.playbackSession && typeof profile.playbackSession === 'object'
-    ? profile.playbackSession
-    : null;
-  const incomingUpdatedAt = metadata.updatedAt ? new Date(metadata.updatedAt).getTime() : NaN;
-  const existingUpdatedAt = existingSession && existingSession.updatedAt ? new Date(existingSession.updatedAt).getTime() : NaN;
-
-  if (Number.isFinite(incomingUpdatedAt) && Number.isFinite(existingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt) {
-    console.log(`[userService] updateQueue(${guid}) → skipped stale update (${incomingUpdatedAt} < ${existingUpdatedAt})`);
-    return normalizeQueue(existingSession.queue || profile.queue || []);
-  }
-
-  const nextMode = metadata.mode === 'cast'
-    ? 'cast'
-    : (metadata.mode === 'local'
-      ? 'local'
-      : (existingSession ? existingSession.mode : 'local'));
-
-  profile.playbackSession = {
-    episodeGuid: existingSession ? (existingSession.episodeGuid || '') : '',
-    feedId: existingSession ? (existingSession.feedId || '') : '',
-    title: existingSession ? (existingSession.title || '') : '',
-    podcastTitle: existingSession ? (existingSession.podcastTitle || '') : '',
-    audioUrl: existingSession ? (existingSession.audioUrl || '') : '',
-    podcastImageUrl: existingSession ? (existingSession.podcastImageUrl || '') : '',
-    imageUrl: existingSession ? (existingSession.imageUrl || '') : '',
-    position: existingSession ? (existingSession.position || 0) : 0,
-    duration: existingSession ? (existingSession.duration || 0) : 0,
-    isPlaying: existingSession ? !!existingSession.isPlaying : false,
-    mode: nextMode,
-    currentEpisodeGuid: metadata.currentEpisodeGuid || (existingSession ? (existingSession.currentEpisodeGuid || existingSession.episodeGuid || '') : ''),
-    queue: normalizedQueue,
-    updatedAt: metadata.updatedAt || now,
-  };
-
-  profile.queue = normalizedQueue;
-  await saveUser(profile);
-  return profile.playbackSession.queue;
+    // Queue writes never arbitrate playback ownership and therefore do not use
+    // a client timestamp. Preserve all lease fields from the active session.
+    const nextMode = metadata.mode === 'cast'
+      ? 'cast'
+      : (metadata.mode === 'local' ? 'local' : (existingSession?.mode || 'local'));
+    profile.playbackSession = {
+      ...(existingSession || {}),
+      mode: nextMode,
+      currentEpisodeGuid: metadata.currentEpisodeGuid
+        || existingSession?.currentEpisodeGuid
+        || existingSession?.episodeGuid
+        || '',
+      queue: normalizedQueue,
+      queueUpdatedAt: new Date().toISOString(),
+      updatedAt: existingSession?.updatedAt || new Date().toISOString(),
+    };
+    profile.queue = normalizedQueue;
+    return normalizedQueue;
+  });
 }
 
 /**
@@ -687,45 +696,57 @@ async function getHistory(guid, limit = 50, offset = 0) {
 async function addHistoryEntry(guid, entry) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] addHistoryEntry(${guid})`, entry);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    profile.history = profile.history || [];
+    const mutationId = String(entry.mutationId || '').trim();
+    if (mutationId) {
+      const existing = profile.history.find((item) => item?.mutationId === mutationId);
+      if (existing) return unchangedUser({ entry: existing, duplicate: true });
+    }
+    const nextEntry = {
+      ...entry,
+      listenedAt: entry.listenedAt || new Date().toISOString()
+    };
+    profile.history.unshift(nextEntry);
 
-  profile.history = profile.history || [];
-  profile.history.unshift({
-    ...entry,
-    listenedAt: entry.listenedAt || new Date().toISOString()
+    if (profile.history.length > 1000) {
+      const removed = profile.history.length - 1000;
+      profile.history = profile.history.slice(0, 1000);
+      console.log(`[userService] addHistoryEntry(${guid}) → trimmed ${removed} old entries`);
+    }
+
+    console.log(`[userService] addHistoryEntry(${guid}) → history length: ${profile.history.length}`);
+    return { entry: nextEntry, duplicate: false };
   });
-
-  // Cap at 1000 entries
-  if (profile.history.length > 1000) {
-    const removed = profile.history.length - 1000;
-    profile.history = profile.history.slice(0, 1000);
-    console.log(`[userService] addHistoryEntry(${guid}) → trimmed ${removed} old entries`);
-  }
-
-  await saveUser(profile);
-  console.log(`[userService] addHistoryEntry(${guid}) → history length: ${profile.history.length}`);
-  return profile.history[0];
 }
 
 /**
  * Increment listened/skipped stats by the given deltas.
  */
-async function updateStats(guid, listenedDelta, skippedDelta) {
+async function updateStats(guid, listenedDelta, skippedDelta, mutationId = '') {
   guid = assertSafeGuid(guid);
   console.log(`[userService] updateStats(${guid}, listened+${listenedDelta}, skipped+${skippedDelta})`);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    const stableMutationId = String(mutationId || '').trim();
+    profile.processedStatMutations = profile.processedStatMutations || [];
+    if (stableMutationId && profile.processedStatMutations.includes(stableMutationId)) {
+      return unchangedUser({ stats: profile.stats, duplicate: true });
+    }
+    profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
+    if (typeof listenedDelta === 'number' && listenedDelta > 0) {
+      profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + listenedDelta;
+    }
+    if (typeof skippedDelta === 'number' && skippedDelta > 0) {
+      profile.stats.totalSkippedSeconds = (profile.stats.totalSkippedSeconds || 0) + skippedDelta;
+    }
+    if (stableMutationId) {
+      profile.processedStatMutations.push(stableMutationId);
+      profile.processedStatMutations = profile.processedStatMutations.slice(-500);
+    }
 
-  profile.stats = profile.stats || { totalListenedSeconds: 0, totalSkippedSeconds: 0 };
-  if (typeof listenedDelta === 'number' && listenedDelta > 0) {
-    profile.stats.totalListenedSeconds = (profile.stats.totalListenedSeconds || 0) + listenedDelta;
-  }
-  if (typeof skippedDelta === 'number' && skippedDelta > 0) {
-    profile.stats.totalSkippedSeconds = (profile.stats.totalSkippedSeconds || 0) + skippedDelta;
-  }
-
-  await saveUser(profile);
-  console.log(`[userService] updateStats(${guid}) → total listened: ${profile.stats.totalListenedSeconds}s, skipped: ${profile.stats.totalSkippedSeconds}s`);
-  return profile.stats;
+    console.log(`[userService] updateStats(${guid}) → total listened: ${profile.stats.totalListenedSeconds}s, skipped: ${profile.stats.totalSkippedSeconds}s`);
+    return { stats: profile.stats, duplicate: false };
+  });
 }
 
 /**
@@ -735,9 +756,10 @@ async function getAllUserGuids() {
   console.log(`[userService] getAllUserGuids()`);
   try {
     const files = await fs.promises.readdir(USERS_DIR);
-    const guids = files
+    let guids = files
       .filter(f => f.endsWith('.json'))
       .map(f => f.replace('.json', ''));
+    if (allowedProfileIds) guids = guids.filter((guid) => allowedProfileIds.has(guid));
     console.log(`[userService] getAllUserGuids() → ${guids.length} users`);
     return guids;
   } catch (err) {
@@ -746,28 +768,31 @@ async function getAllUserGuids() {
   }
 }
 
+function setAllowedProfileIds(ids) {
+  allowedProfileIds = new Set((ids || []).map((id) => String(id)));
+}
+
 /**
  * Mark episodes as seen for a given feed (adds guids to seenEpisodes[feedId]).
  */
 async function markEpisodesSeen(guid, feedId, episodeGuids) {
   guid = assertSafeGuid(guid);
   console.log(`[userService] markEpisodesSeen(${guid}, feedId=${feedId}, count=${episodeGuids.length})`);
-  const profile = await ensureUser(guid);
+  return mutateUser(guid, async (profile) => {
+    profile.seenEpisodes = profile.seenEpisodes || {};
+    profile.seenEpisodes[feedId] = profile.seenEpisodes[feedId] || [];
 
-  profile.seenEpisodes = profile.seenEpisodes || {};
-  profile.seenEpisodes[feedId] = profile.seenEpisodes[feedId] || [];
-
-  let added = 0;
-  for (const epGuid of episodeGuids) {
-    if (!profile.seenEpisodes[feedId].includes(epGuid)) {
-      profile.seenEpisodes[feedId].push(epGuid);
-      added++;
+    let added = 0;
+    for (const epGuid of episodeGuids) {
+      if (!profile.seenEpisodes[feedId].includes(epGuid)) {
+        profile.seenEpisodes[feedId].push(epGuid);
+        added++;
+      }
     }
-  }
 
-  await saveUser(profile);
-  console.log(`[userService] markEpisodesSeen(${guid}, ${feedId}) → added ${added} new guids`);
-  return profile.seenEpisodes[feedId];
+    console.log(`[userService] markEpisodesSeen(${guid}, ${feedId}) → added ${added} new guids`);
+    return profile.seenEpisodes[feedId];
+  });
 }
 
 /**
@@ -784,86 +809,6 @@ async function getSeenEpisodes(guid, feedId) {
   const seen = (profile.seenEpisodes || {})[feedId] || [];
   console.log(`[userService] getSeenEpisodes(${guid}, ${feedId}) → ${seen.length} seen guids`);
   return seen;
-}
-
-async function getSyncSnapshot(guid) {
-  guid = assertSafeGuid(guid);
-  console.log(`[userService] getSyncSnapshot(${guid})`);
-  const profile = await getUser(guid);
-  if (!profile) throw new Error(`User ${guid} not found`);
-  const progress = await loadProgressForUser(guid);
-  return syncService.buildSnapshot({ ...profile, progress });
-}
-
-async function mergeAndSaveSyncState(guid, incomingState) {
-  guid = assertSafeGuid(guid);
-  console.log(`[userService] mergeAndSaveSyncState(${guid})`);
-  const profile = await ensureUser(guid);
-  const existingProgress = await loadProgressForUser(guid);
-
-  // Build the sync result with actual progress from the progress file
-  const syncResult = syncService.buildSyncResult({ ...profile, progress: existingProgress }, incomingState || {});
-  const merged = syncResult.mergedState;
-  const mergedSettings = merged.settings && typeof merged.settings === 'object'
-    ? { ...merged.settings }
-    : {};
-  delete mergedSettings.podcastIndexApiKey;
-  delete mergedSettings.podcastIndexApiSecret;
-
-  profile.settings = {
-    ...profile.settings,
-    ...mergedSettings,
-  };
-
-  const existingSubsUpdatedAt = profile.subscriptionsUpdatedAt || profile.updatedAt || null;
-  const incomingSubsUpdatedAt = merged.subscriptionsUpdatedAt || incomingState?.subscriptionsUpdatedAt || null;
-  const existingSubsTs = existingSubsUpdatedAt ? new Date(existingSubsUpdatedAt).getTime() : NaN;
-  const incomingSubsTs = incomingSubsUpdatedAt ? new Date(incomingSubsUpdatedAt).getTime() : NaN;
-  const useIncomingSubscriptions = Number.isFinite(incomingSubsTs) && (!Number.isFinite(existingSubsTs) || incomingSubsTs >= existingSubsTs);
-  if (Array.isArray(merged.subscriptions)) {
-    profile.subscriptions = useIncomingSubscriptions ? merged.subscriptions : profile.subscriptions;
-  }
-  profile.subscriptionsUpdatedAt = useIncomingSubscriptions
-    ? (incomingSubsUpdatedAt || profile.subscriptionsUpdatedAt || profile.updatedAt)
-    : (profile.subscriptionsUpdatedAt || profile.updatedAt);
-
-  // Progress is intentionally NOT written to profile — it lives in the progress file
-  profile.stats = {
-    ...(profile.stats || {}),
-    ...(merged.stats || {}),
-  };
-
-  if (Array.isArray(merged.queue)) {
-    profile.queue = normalizeQueue(merged.queue);
-  }
-
-  if (merged.playbackSession && typeof merged.playbackSession === 'object') {
-    profile.playbackSession = {
-      ...profile.playbackSession,
-      ...merged.playbackSession,
-      queue: normalizeQueue(
-        merged.playbackSession.queue !== undefined
-          ? merged.playbackSession.queue
-          : (profile.playbackSession && profile.playbackSession.queue)
-      ),
-    };
-  }
-
-  // Save user profile (without progress)
-  await saveUser(profile);
-
-  // Save merged progress to the dedicated progress file
-  if (merged.progress && typeof merged.progress === 'object') {
-    await queueProgressWrite(guid, async () => {
-      await atomicWriteFile(progressFilePath(guid), JSON.stringify(merged.progress, null, 2));
-    });
-  }
-
-  const finalProgress = merged.progress || existingProgress;
-  return {
-    snapshot: syncService.buildSnapshot({ ...profile, progress: finalProgress }),
-    summary: syncResult.summary,
-  };
 }
 
 async function getBootstrapSyncState(guid) {
@@ -889,7 +834,6 @@ async function getBootstrapSyncState(guid) {
 // Exports
 // ---------------------------------------------------------------------------
 module.exports = {
-  createUser,
   ensureUser,
   getUser,
   saveUser,
@@ -909,9 +853,8 @@ module.exports = {
   addHistoryEntry,
   updateStats,
   getAllUserGuids,
+  setAllowedProfileIds,
   markEpisodesSeen,
   getSeenEpisodes,
-  getSyncSnapshot,
-  mergeAndSaveSyncState,
   getBootstrapSyncState
 };

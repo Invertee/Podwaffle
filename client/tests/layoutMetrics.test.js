@@ -23,7 +23,8 @@ test('queue and view toggle use measured player stack height', () => {
   assert.match(metrics, /--bottom-nav-rendered-height/);
 });
 
-test('connection health cards are promoted to a full-width grid', () => {
+test('admin connection health cards are promoted to a full-width grid', () => {
+  assert.match(metrics, /admin-transport/);
   assert.match(metrics, /closest\('\.stats-grid'\)/);
   assert.match(metrics, /connection-health-grid/);
   assert.match(css, /\.connection-health-grid\s*\{[\s\S]*grid-template-columns:\s*1fr/);

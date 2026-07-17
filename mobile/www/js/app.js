@@ -269,43 +269,22 @@ async function refreshProfileStateFromServer(reason = 'manual', options = {}) {
   const guid = window.appState?.guid || localStorage.getItem('podwaffle_guid');
   if (!guid || !window.api) return null;
 
-  const cfg = window.api.getServerConnectionConfig ? window.api.getServerConnectionConfig() : null;
-  if (!cfg || !cfg.enabled || !cfg.host) return null;
-
   const now = Date.now();
-  const minIntervalMs = options.force ? 0 : 10000;
+  const minIntervalMs = options.force ? 0 : 30000;
   if (profileStateRefreshPromise) return profileStateRefreshPromise;
   if (now - lastProfileStateRefreshAt < minIntervalMs) return null;
 
   profileStateRefreshPromise = (async () => {
     try {
       lastProfileStateRefreshAt = Date.now();
-      if (window.syncManager && typeof window.syncManager.performSync === 'function') {
-        const previousProgress = { ...(window.appState?.progress || {}) };
-        const result = await window.syncManager.performSync(guid);
-        if (result?.ok && window.appState?.progress) {
-          const nextProgress = window.appState.progress || {};
-          const episodeGuids = new Set([
-            ...Object.keys(previousProgress || {}),
-            ...Object.keys(nextProgress || {}),
-          ]);
-          episodeGuids.forEach((episodeGuid) => {
-            const before = JSON.stringify(previousProgress[episodeGuid] || null);
-            const after = JSON.stringify(nextProgress[episodeGuid] || null);
-            if (before !== after && window.setEpisodeProgressState) {
-              window.setEpisodeProgressState(episodeGuid, nextProgress[episodeGuid] || null);
-            }
-          });
-          window.dispatchEvent(new CustomEvent('podwaffle:progress-map-updated', {
-            detail: { guid, progress: window.appState.progress, reason },
-          }));
-        }
-        return result;
+      const result = await window.offlineStore?.refreshProfile?.(guid);
+      const profile = window.offlineStore?.cachedProfile?.(guid);
+      if (profile) {
+        window.appState.user = profile;
+        window.appState.subscriptions = profile.subscriptions || [];
+        window.replaceProgressState(profile.progress || {});
       }
-
-      const progress = await window.api.getProgress(guid);
-      window.replaceProgressState(progress || {});
-      return { ok: true, mode: 'pull', reason };
+      return result ? { ok: true, mode: 'server', reason } : null;
     } catch (err) {
       console.warn(`[app] Profile state refresh failed (${reason}):`, err);
       return null;
@@ -354,74 +333,105 @@ async function handleRoute() {
   }
 }
 
-// Show modal to enter existing GUID when signups are disabled
-async function showGuidEntryModal() {
+async function showConnectionSetup(message = '') {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'guid-entry-modal-overlay';
     overlay.innerHTML = `
       <div class="guid-entry-modal">
-        <h2>Enter Profile GUID</h2>
-        <p>New user signups are currently disabled. Please enter an existing profile GUID to continue.</p>
+        <h2>Connect to Podwaffle</h2>
+        <p id="server-setup-message"></p>
         <div class="field">
-          <input id="guid-entry-input" class="input" type="text" placeholder="Paste your profile GUID here">
-          <small class="text-secondary">You can get your GUID from another device in Settings > Your GUID</small>
+          <label class="label has-text-light">Server URL</label>
+          <input id="server-setup-url" class="input" type="url" placeholder="Leave blank when opened from the add-on">
         </div>
-        <div class="modal-actions">
-          <button id="guid-entry-cancel" class="button">Cancel</button>
-          <button id="guid-entry-submit" class="button is-success">Continue</button>
+        <div class="field">
+          <label class="label has-text-light">Access key</label>
+          <input id="server-setup-key" class="input" type="password" autocomplete="current-password" placeholder="Configured in the add-on">
         </div>
-        <div id="guid-entry-error" class="error-banner" style="display: none; margin-top: 1rem;"></div>
-      </div>
-    `;
+        <div class="modal-actions"><button id="server-setup-submit" class="button is-success">Continue</button></div>
+        <div id="server-setup-error" class="error-banner" style="display: none; margin-top: 1rem;"></div>
+      </div>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('#server-setup-message').textContent = message || 'Connect this client to your Home Assistant Podwaffle add-on.';
+    const urlInput = overlay.querySelector('#server-setup-url');
+    const keyInput = overlay.querySelector('#server-setup-key');
+    const submit = overlay.querySelector('#server-setup-submit');
+    const error = overlay.querySelector('#server-setup-error');
+    const current = window.api.getServerConnectionConfig();
+    urlInput.value = current.baseUrl || '';
+    keyInput.value = current.accessKey || '';
 
-    const input = document.getElementById('guid-entry-input');
-    const submitBtn = document.getElementById('guid-entry-submit');
-    const cancelBtn = document.getElementById('guid-entry-cancel');
-    const errorDiv = document.getElementById('guid-entry-error');
-
-    const cleanup = () => {
-      overlay.remove();
-    };
-
-    submitBtn.addEventListener('click', async () => {
-      const guid = input.value.trim();
-      if (!guid) {
-        errorDiv.textContent = 'Please enter a GUID';
-        errorDiv.style.display = 'block';
-        return;
-      }
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Validating...';
-
+    submit.addEventListener('click', async () => {
+      submit.disabled = true;
+      submit.textContent = 'Connecting...';
       try {
-        // Validate GUID exists
-        await window.api.getUser(guid);
-        localStorage.setItem('podwaffle_guid', guid);
-        window.appState.guid = guid;
-        cleanup();
-        resolve(guid);
+        window.api.saveServerConnectionConfig({ baseUrl: urlInput.value.trim(), accessKey: keyInput.value });
+        const response = await window.api.getProfiles();
+        overlay.remove();
+        resolve(response.profiles || []);
       } catch (err) {
-        errorDiv.textContent = 'Invalid GUID or profile not found.';
-        errorDiv.style.display = 'block';
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Continue';
+        error.textContent = err.status === 401 ? 'The access key is incorrect.' : (err.message || 'The server could not be reached.');
+        error.style.display = 'block';
+        submit.disabled = false;
+        submit.textContent = 'Continue';
       }
     });
-
-    cancelBtn.addEventListener('click', () => {
-      cleanup();
-      resolve(null);
-    });
-
-    input.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') submitBtn.click();
-    });
-
-    input.focus();
+    keyInput.addEventListener('keypress', (event) => { if (event.key === 'Enter') submit.click(); });
+    (current.baseUrl ? keyInput : urlInput).focus();
   });
+}
+
+async function showProfilePicker(profiles, selectedId = '') {
+  if (profiles.length === 1) return profiles[0].id;
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'guid-entry-modal-overlay';
+    overlay.innerHTML = `
+      <div class="guid-entry-modal">
+        <h2>Choose a profile</h2>
+        <p>Profiles are managed in the Home Assistant add-on configuration.</p>
+        <div class="field"><select id="profile-picker" class="input"></select></div>
+        <div class="modal-actions"><button id="profile-picker-submit" class="button is-success">Continue</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const select = overlay.querySelector('#profile-picker');
+    profiles.forEach((profile) => {
+      const option = document.createElement('option');
+      option.value = profile.id;
+      option.textContent = profile.name;
+      option.selected = profile.id === selectedId;
+      select.appendChild(option);
+    });
+    overlay.querySelector('#profile-picker-submit').addEventListener('click', () => {
+      const value = select.value;
+      overlay.remove();
+      resolve(value);
+    });
+  });
+}
+
+async function selectConfiguredProfile() {
+  const savedId = localStorage.getItem('podwaffle_guid') || '';
+  try {
+    const response = await window.api.getProfiles();
+    const profiles = response?.profiles || [];
+    if (!profiles.length) throw new Error('No profiles are configured on the server.');
+    const selected = profiles.some((profile) => profile.id === savedId) ? savedId : await showProfilePicker(profiles, savedId);
+    localStorage.setItem('podwaffle_guid', selected);
+    return selected;
+  } catch (err) {
+    const cached = savedId && window.offlineStore?.cachedProfile?.(savedId);
+    if (cached && (!navigator.onLine || !err.status)) return savedId;
+    const profiles = await showConnectionSetup(
+      err.status === 401
+        ? 'Enter the access key configured in the add-on.'
+        : 'Enter the URL of your Home Assistant Podwaffle add-on.'
+    );
+    const selected = await showProfilePicker(profiles, savedId);
+    localStorage.setItem('podwaffle_guid', selected);
+    return selected;
+  }
 }
 
 // App Initialization
@@ -434,104 +444,10 @@ async function initApp() {
       }, 6 * 60 * 60 * 1000);
     }
 
-    // 1. Ensure user GUID (no backend needed - all local)
-    // GUID is created below in step 2 if it doesn't already exist
-
-    // 2. Initialize local user profile (no API calls needed)
-    // All data is stored in localStorage for offline-first operation
-    const generateUUID = () => {
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-      });
-    };
-
-    const loadLocalUserProfile = () => {
-      const guid = window.appState.guid;
-      if (!guid) return null;
-
-      // Load subscriptions from localStorage
-      const subsKey = `podwaffle_subscriptions_${guid}`;
-      const subscriptions = (() => {
-        try {
-          const raw = localStorage.getItem(subsKey);
-          return raw ? JSON.parse(raw) : [];
-        } catch (_) {
-          return [];
-        }
-      })();
-
-      // Load progress from localStorage
-      const progressKey = `podwaffle_progress_${guid}`;
-      const progress = (() => {
-        try {
-          const raw = localStorage.getItem(progressKey);
-          return raw ? JSON.parse(raw) : {};
-        } catch (_) {
-          return {};
-        }
-      })();
-
-      // Load playback session
-      const playbackSessionKey = 'podwaffle_playback_session';
-      const playbackSession = (() => {
-        try {
-          const raw = localStorage.getItem(playbackSessionKey);
-          return raw ? JSON.parse(raw) : null;
-        } catch (_) {
-          return null;
-        }
-      })();
-
-      // Load queue
-      const queueKey = `podwaffle_queue_state_${guid}`;
-      const queue = (() => {
-        try {
-          const raw = localStorage.getItem(queueKey);
-          return raw ? JSON.parse(raw) : [];
-        } catch (_) {
-          return [];
-        }
-      })();
-
-      // Load settings
-      const settingsKey = `podwaffle_settings_${guid}`;
-      const settings = (() => {
-        try {
-          const raw = localStorage.getItem(settingsKey);
-          return raw ? JSON.parse(raw) : {};
-        } catch (_) {
-          return {};
-        }
-      })();
-
-      return {
-        guid,
-        subscriptions,
-        progress,
-        playbackSession,
-        queue,
-        settings,
-        stats: { totalListenedSeconds: 0, totalSkippedSeconds: 0 },
-      };
-    };
-
-    let user = loadLocalUserProfile();
-
-    // If no GUID exists, create one locally
-    if (!window.appState.guid) {
-      window.appState.guid = generateUUID();
-      localStorage.setItem('podwaffle_guid', window.appState.guid);
-      user = loadLocalUserProfile();
-      console.log('[app] Created new local profile:', window.appState.guid);
-    }
-
-    // Register this client's GUID with the backend (idempotent — creates profile if missing).
-    // Non-fatal: if the backend is unreachable the app continues in local mode.
-    if (window.api && window.appState.guid) {
-      await window.api.ensureUserOnBackend(window.appState.guid).catch(() => {});
-    }
+    // Profiles are server-configured. A previously cached profile is sufficient
+    // to start while offline after the first successful connection.
+    window.appState.guid = await selectConfiguredProfile();
+    const user = await window.api.getUser(window.appState.guid);
 
     window.appState.user = user;
     window.appState.subscriptions = user.subscriptions || [];
@@ -552,25 +468,6 @@ async function initApp() {
     // 4. Connect WebSocket and rejoin cast session if active
     let hasActiveCastSession = false;
     if (window.castClient) {
-      window.castClient.on('sync:state', (payload) => {
-        const incomingGuid = payload?.guid;
-        if (incomingGuid && incomingGuid !== window.appState.guid) return;
-        const snapshot = payload?.snapshot || {};
-        if (snapshot.progress && window.replaceProgressState) window.replaceProgressState(snapshot.progress);
-        if (window.appState?.user && Array.isArray(snapshot.subscriptions)) window.appState.user.subscriptions = snapshot.subscriptions;
-        if (window.player && typeof window.player.applyRemotePlaybackSession === 'function') window.player.applyRemotePlaybackSession(payload?.playbackSession || snapshot.playbackSession || null);
-        window.dispatchEvent(new CustomEvent('podwaffle:sync-state', { detail: payload }));
-        const h = window.location.hash;
-        if (!h || h === '#/' || h === '#/podcasts' || h === '#/in-progress' || h === '#/history') handleRoute();
-      });
-      window.castClient.on('feeds:updated', (payload) => {
-        const incomingGuid = payload?.guid;
-        if (incomingGuid && incomingGuid !== window.appState.guid) return;
-        window.dispatchEvent(new CustomEvent('podwaffle:feeds-updated', { detail: payload }));
-        const h = window.location.hash;
-        if (!h || h === '#/' || h === '#/podcasts' || h.startsWith('#/podcast/')) handleRoute();
-      });
-      window.castClient.connect();
       try {
         const castSessionResponse = (window.api && typeof window.api.getCastSession === 'function')
           ? await window.api.getCastSession()
@@ -636,7 +533,55 @@ async function initApp() {
 
     // Set up cross-client sync listeners
     if (window.castClient) {
+      window.castClient.on('sync:state', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        const snapshot = payload?.snapshot || {};
+        window.offlineStore?.hydrateSyncState?.(payload);
+        if (snapshot.progress && window.replaceProgressState) {
+          window.replaceProgressState(snapshot.progress);
+        }
+        const cachedProfile = window.offlineStore?.cachedProfile?.(window.appState.guid);
+        if (window.appState?.user && Array.isArray(cachedProfile?.subscriptions)) {
+          // hydrateSyncState enriches server feed URLs with cached feed data.
+          // Keep that shape in appState so an incoming event cannot temporarily
+          // replace usable podcast cards with bare strings.
+          window.appState.user.subscriptions = cachedProfile.subscriptions;
+        }
+        if (window.player && typeof window.player.applyRemotePlaybackSession === 'function') {
+          window.player.applyRemotePlaybackSession(payload?.playbackSession || snapshot.playbackSession || null);
+        }
+        window.dispatchEvent(new CustomEvent('podwaffle:sync-state', { detail: payload }));
+        const h = window.location.hash;
+        if (!h || h === '#/' || h === '#/podcasts' || h === '#/in-progress' || h === '#/history') {
+          handleRoute();
+        }
+      });
+      window.castClient.on('feeds:updated', (payload) => {
+        const incomingGuid = payload?.guid;
+        if (incomingGuid && incomingGuid !== window.appState.guid) return;
+        const feeds = Array.isArray(payload?.feeds) ? payload.feeds : [];
+        feeds.forEach((feed) => window.offlineStore?.rememberPodcast?.(feed));
+        if (feeds.length) {
+          const cached = window.offlineStore?.cachedProfile?.(window.appState.guid);
+          const replacements = new Map();
+          feeds.forEach((feed) => {
+            if (feed.feedId) replacements.set(feed.feedId, feed);
+            if (feed.feedUrl) replacements.set(feed.feedUrl, feed);
+          });
+          const subscriptions = (cached?.subscriptions || []).map((feed) => {
+            const key = typeof feed === 'string' ? feed : (feed.feedId || feed.feedUrl);
+            return replacements.get(key) || feed;
+          });
+          window.offlineStore?.rememberProfile?.(window.appState.guid, { subscriptions });
+          if (window.appState?.user) window.appState.user.subscriptions = subscriptions;
+        }
+        window.dispatchEvent(new CustomEvent('podwaffle:feeds-updated', { detail: payload }));
+        const h = window.location.hash;
+        if (!h || h === '#/' || h === '#/podcasts' || h.startsWith('#/podcast/')) handleRoute();
+      });
       window.castClient.on('connected', () => {
+        window.dispatchEvent(new CustomEvent('podwaffle:websocket-connected'));
         refreshProfileStateFromServer('websocket-connected');
         if (window.googleCastSender && typeof window.googleCastSender.syncFromServerState === 'function') {
           window.googleCastSender.syncFromServerState().catch(() => null);
@@ -677,6 +622,11 @@ async function initApp() {
           window.player.applyRemotePlaybackSession(payload?.session || null);
         }
       });
+      window.castClient.on('session:revoked', (payload) => {
+        const clientId = window.getPodwaffleClientId?.() || '';
+        if (payload?.targetClientId !== clientId) return;
+        window.player?.applyRemotePlaybackSession?.(payload.session || null);
+      });
       window.castClient.on('user:subscriptions', () => {
         const h = window.location.hash;
         if (!h || h === '#/' || h === '#/podcasts') handleRoute();
@@ -699,6 +649,7 @@ async function initApp() {
           window.player.hydrateQueueFromServer();
         }
       });
+      window.castClient.connect();
     }
     refreshProfileStateFromServer('startup');
 
@@ -709,9 +660,6 @@ async function initApp() {
       if (window.castClient && !window.castClient.isConnected()) {
         window.castClient.connect();
       }
-    });
-    window.addEventListener('focus', () => {
-      refreshProfileStateFromServer('window-focus');
     });
     await handleRoute();
 
@@ -724,18 +672,7 @@ async function initApp() {
         .catch(err => console.error('[SW] Registration failed:', err));
     }
 
-    // 7. Init pull-to-refresh gesture (DISABLED)
-    // initPullToRefresh();
-
-    // 8. Initialize background sync managers
-    if (window.backgroundSyncManager && typeof window.backgroundSyncManager.init === 'function') {
-      window.backgroundSyncManager.init();
-    }
-    if (window.feedRefreshScheduler && typeof window.feedRefreshScheduler.init === 'function') {
-      window.feedRefreshScheduler.init();
-    }
-
-    // 9. Capacitor native bridge (no-op in browser, active in native app)
+    // 7. Capacitor native bridge (no-op in browser, active in native app)
     _initCapacitorBridge();
 
   } catch (err) {
@@ -768,13 +705,6 @@ function _initCapacitorBridge() {
 
   // Hide the splash screen now that the app shell is ready
   Plugins.SplashScreen?.hide({ fadeOutDuration: 300 });
-
-  // Setup background tasks for feed refresh on Android
-  if (Plugins.BackgroundTasks && window.capacitorBackgroundTasks) {
-    window.capacitorBackgroundTasks.init().catch((err) => {
-      console.warn('[capacitor] Background task setup failed:', err);
-    });
-  }
 
   // Keep system bars visually aligned with app theme
   try {

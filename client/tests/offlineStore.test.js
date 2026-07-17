@@ -1,97 +1,84 @@
 'use strict';
 
-const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
 
-const storage = new Map();
-global.localStorage = {
-  getItem: (key) => storage.has(key) ? storage.get(key) : null,
-  setItem: (key, value) => storage.set(key, String(value)),
-  removeItem: (key) => storage.delete(key),
-};
-
-let online = true;
-const feedUrl = 'https://example.com/feed.xml';
-const feedId = 'server-feed-id';
-
-global.window = {
-  api: {
-    async getSubscriptions() {
-      return online
-        ? [{ feedId, feedUrl, title: 'Example Show', imageUrl: 'https://example.com/art.jpg' }]
-        : [feedUrl];
+function createRuntime() {
+  const storage = new Map();
+  let online = true;
+  const remoteProgress = [];
+  const noop = async () => ({ ok: true });
+  const api = {
+    getBootstrapSyncState: async () => ({ guid: 'sam', snapshot: { guid: 'sam', progress: {}, subscriptions: [] } }),
+    getUser: async () => ({ guid: 'sam', name: 'Sam', subscriptions: [], progress: {}, settings: {}, stats: {} }),
+    getSubscriptions: async () => [], getProgress: async () => ({}), getPlaybackSession: async () => null,
+    getQueue: async () => ({ queue: [] }), getHistory: async () => [], getStats: async () => ({}),
+    getPodcast: async () => ({ feedId: 'show', title: 'Show', episodes: [{ guid: 'one', audioUrl: 'https://media/one.mp3' }] }),
+    updateProgress: async (...args) => {
+      if (!online) throw new TypeError('offline');
+      remoteProgress.push(args);
+      return args[2];
     },
-    async getPodcast(_feedId, limit, offset) {
-      if (!online) throw new Error('offline');
-      const episodes = offset === 0
-        ? [{ guid: 'ep-1', title: 'One', audioUrl: 'https://example.com/1.mp3' }]
-        : [{ guid: 'ep-2', title: 'Two', audioUrl: 'https://example.com/2.mp3' }];
-      return {
-        feedId,
-        feedUrl,
-        title: 'Example Show',
-        imageUrl: 'https://example.com/art.jpg',
-        episodes: episodes.slice(0, limit),
-        totalEpisodes: 2,
-      };
-    },
-    async subscribe() { return { ok: true }; },
-    async unsubscribe() { return { ok: true }; },
-  },
-  cacheManager: {
-    _cacheIndex: {},
-    TTL_MS: 1,
-    _resolveUrl: (episode) => episode.audioUrl,
-    async downloadEpisode() { return 'cached'; },
-    async deleteEpisode() { return true; },
-    _isExpired: () => true,
-    isSupported: () => true,
-    async _getCache() {
-      return { keys: async () => [], delete: async () => true };
-    },
-    _setStatus() {},
-    _saveIndex() {},
-  },
-};
-
-const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'offlineStore.js'), 'utf8');
-vm.runInThisContext(source, { filename: 'offlineStore.js' });
-
-(async () => {
-  let subscriptions = await window.api.getSubscriptions('user-1');
-  assert.equal(subscriptions[0].title, 'Example Show');
-  assert.equal(subscriptions[0].feedId, feedId);
-
-  await window.api.getPodcast(feedId, 1, 0);
-  await window.api.getPodcast(feedId, 1, 1);
-
-  online = false;
-  subscriptions = await window.api.getSubscriptions('user-1');
-  assert.equal(subscriptions[0].title, 'Example Show');
-  assert.equal(subscriptions[0].feedId, feedId);
-
-  const firstPage = await window.api.getPodcast(feedId, 1, 0);
-  const secondPage = await window.api.getPodcast(feedId, 1, 1);
-  assert.equal(firstPage.episodes[0].guid, 'ep-1');
-  assert.equal(secondPage.episodes[0].guid, 'ep-2');
-
-  const episode = {
-    guid: 'ep-1',
-    feedId,
-    podcastTitle: 'Example Show',
-    audioUrl: 'https://example.com/1.mp3',
+    updateSettings: noop, subscribe: noop, unsubscribe: noop, reorderSubscriptions: noop,
+    updatePlaybackSession: noop, clearPlaybackSession: noop, updateQueue: noop, addHistory: noop,
+    updateStats: noop, markEpisodesSeen: noop,
   };
-  await window.cacheManager.downloadEpisode(episode);
-  assert.equal(window.offlineStore.isAudioPinned(episode.audioUrl), true);
-  assert.equal(window.cacheManager._isExpired(episode.audioUrl), false);
+  const listeners = {};
+  const root = {
+    api,
+    cacheManager: {
+      _resolveUrl: (episode) => episode.audioUrl,
+      downloadEpisode: async () => 'cached',
+      deleteEpisode: async () => true,
+      _isExpired: () => true,
+    },
+    addEventListener(type, handler) { listeners[type] = handler; },
+    dispatchEvent() {},
+  };
+  const context = {
+    window: root,
+    localStorage: {
+      getItem: (key) => storage.has(key) ? storage.get(key) : null,
+      setItem: (key, value) => storage.set(key, String(value)),
+    },
+    navigator: { onLine: true },
+    CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
+    console,
+    URL,
+    setTimeout,
+    clearTimeout,
+  };
+  root.window = root;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'offlineStore.js'), 'utf8'), context);
+  return { root, remoteProgress, setOnline(value) { online = value; context.navigator.onLine = value; } };
+}
 
-  await window.cacheManager.deleteEpisode(episode);
-  assert.equal(window.offlineStore.isAudioPinned(episode.audioUrl), false);
+test('caches server state and replays offline mutations through one outbox', async () => {
+  const runtime = createRuntime();
+  const user = await runtime.root.api.getUser('sam');
+  assert.equal(user.name, 'Sam');
 
-  console.log('offlineStore tests passed');
-})().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
+  runtime.setOnline(false);
+  await runtime.root.api.updateProgress('sam', 'episode-1', { position: 42, updatedAt: '2026-01-01T00:00:00Z' });
+  assert.equal(runtime.root.offlineStore.getStatus().queuedMutations, 1);
+  assert.equal(runtime.root.offlineStore.cachedProfile('sam').progress['episode-1'].position, 42);
+
+  runtime.setOnline(true);
+  await runtime.root.offlineStore.flushOutbox();
+  assert.equal(runtime.remoteProgress.length, 1);
+  assert.equal(runtime.root.offlineStore.getStatus().queuedMutations, 0);
+});
+
+test('explicit episode downloads remain pinned', async () => {
+  const { root } = createRuntime();
+  const episode = { guid: 'one', feedId: 'show', audioUrl: 'https://media/one.mp3' };
+  await root.cacheManager.downloadEpisode(episode);
+  assert.equal(root.offlineStore.isAudioPinned(episode.audioUrl), true);
+  assert.equal(root.cacheManager._isExpired(episode.audioUrl), false);
+  await root.cacheManager.deleteEpisode(episode);
+  assert.equal(root.offlineStore.isAudioPinned(episode.audioUrl), false);
 });

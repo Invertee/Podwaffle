@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Update the backend URL and, optionally, the existing profile GUID:
- *   node scripts/set-server.js http://192.168.1.50:3000 <profile-guid>
+ * Update the add-on URL and, optionally, the configured profile ID:
+ *   node scripts/set-server.js http://192.168.1.50:3000 <profile-id>
  *
  * Run npm run sync afterwards to rebuild the packaged web assets.
  */
@@ -10,10 +10,10 @@ const { readFileSync, writeFileSync, existsSync } = require('fs');
 const { resolve } = require('path');
 
 const backendUrl = process.argv[2];
-const profileGuid = process.argv[3];
+const profileId = process.argv[3];
 if (!backendUrl) {
-  console.error('Usage: node scripts/set-server.js <backendUrl> [profileGuid]');
-  console.error('Example: node scripts/set-server.js http://192.168.1.50:3000 01234567-89ab-4cde-8f01-23456789abcd');
+  console.error('Usage: node scripts/set-server.js <backendUrl> [profileId]');
+  console.error('Example: node scripts/set-server.js https://podcasts.example.com sam');
   process.exit(1);
 }
 
@@ -22,8 +22,8 @@ try { new URL(backendUrl); } catch {
   process.exit(1);
 }
 
-if (profileGuid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(profileGuid)) {
-  console.error('Invalid profile GUID:', profileGuid);
+if (profileId && !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(profileId)) {
+  console.error('Invalid profile ID:', profileId);
   process.exit(1);
 }
 
@@ -35,11 +35,12 @@ const existing = existsSync(configPath)
 const updated = {
   ...existing,
   backendUrl,
-  ...(profileGuid ? { profileGuid } : {}),
+  ...(profileId ? { profileId } : {}),
 };
 delete updated.serverUrl;
+delete updated.profileGuid;
 writeFileSync(configPath, JSON.stringify(updated, null, 2) + '\n');
 
 console.log(`server.config.json backendUrl updated -> ${backendUrl}`);
-if (profileGuid) console.log(`server.config.json profileGuid updated -> ${profileGuid}`);
+if (profileId) console.log(`server.config.json profileId updated -> ${profileId}`);
 console.log('Run "npm run sync" and rebuild the app to apply the change.');

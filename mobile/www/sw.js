@@ -1,4 +1,4 @@
-const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v7';
+const APP_SHELL_CACHE_NAME = 'podwaffle-shell-v8';
 const AUDIO_CACHE_NAME = 'podwaffle-audio-v3';
 const IMAGE_CACHE_NAME = 'podwaffle-images-v1';
 
@@ -15,17 +15,12 @@ const APP_SHELL_ASSETS = [
   './js/cacheManager.js',
   './js/castClient.js',
   './js/googleCastSender.js',
-  './js/syncManager.js',
   './js/offlineStore.js',
-  './js/backgroundSyncManager.js',
-  './js/feedRefreshScheduler.js',
-  './js/capacitorBackgroundTasks.js',
+  './js/firebaseSync.js',
   './js/player.js',
   './js/castRecovery.js',
   './js/layoutMetricsV2.js',
   './js/castVolumeControl.js',
-  './js/localFirstRuntime.js',
-  './js/subscriptionSyncRepair.js',
   './js/components/nav.js',
   './js/components/episodeRow.js',
   './js/components/playerBar.js',
@@ -50,14 +45,12 @@ const EXTERNAL_SHELL_ASSETS = [
   'https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
   'https://fonts.googleapis.com/css2?family=Playwrite+HR:wght@100..400&display=swap',
-  'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
 ];
 
 const EXTERNAL_STATIC_HOSTS = new Set([
   'cdn.jsdelivr.net',
   'fonts.googleapis.com',
   'fonts.gstatic.com',
-  'www.gstatic.com',
 ]);
 
 function isSameOrigin(url) {

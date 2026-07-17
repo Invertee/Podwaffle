@@ -14,9 +14,11 @@ const fetch = require('node-fetch');
  */
 function createApiRouter(feedService, userService, castService, broadcastWs, options = {}) {
   const router = express.Router();
-  const disableNewUserSessions = !!options.disableNewUserSessions;
   const pushService = options.pushService || null;
-  const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const profileRegistry = options.profileRegistry || null;
+  const diagnostics = options.diagnostics || null;
+  const realtimeSync = options.realtimeSync || null;
+  const GUID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
   // =========================================================================
   // UTILITY
@@ -39,6 +41,9 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const guid = normalizeGuid(value);
     if (!guid) {
       return sendError(res, 400, 'Invalid GUID');
+    }
+    if (profileRegistry && !profileRegistry.has(guid)) {
+      return sendError(res, 404, 'Profile not configured');
     }
     req.params.guid = guid;
     next();
@@ -98,6 +103,25 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   }
 
   router.param('guid', requireGuidParam);
+
+  router.get('/profiles', (_req, res) => {
+    res.json({
+      profiles: profileRegistry ? profileRegistry.list() : [],
+      serverTime: new Date().toISOString(),
+    });
+  });
+
+  router.get('/admin/status', async (_req, res) => {
+    const push = pushService?.getDiagnostics ? await pushService.getDiagnostics() : { configured: false, profiles: {} };
+    const profiles = (profileRegistry ? profileRegistry.list() : []).map((profile) => ({
+      ...profile,
+      sync: realtimeSync?.status ? realtimeSync.status(profile.id) : null,
+    }));
+    res.json(diagnostics?.snapshot ? diagnostics.snapshot({
+      profiles,
+      notifications: push,
+    }) : { profiles, notifications: push });
+  });
 
   // Firebase is initialized dynamically by the sideloaded Android app. Only
   // public app identifiers are returned here; service-account credentials stay
@@ -167,27 +191,6 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   // USERS
   // =========================================================================
 
-  // POST /users — create a new user
-  router.post('/users', async (req, res) => {
-    if (disableNewUserSessions) {
-      return sendError(
-        res,
-        403,
-        'New user sessions are disabled',
-        'User profile creation is currently locked by server configuration.'
-      );
-    }
-
-    console.log('[api] POST /users → creating new user');
-    try {
-      const profile = await userService.createUser();
-      console.log(`[api] POST /users → created user ${profile.guid}`);
-      res.status(201).json({ guid: profile.guid, profile });
-    } catch (err) {
-      sendError(res, 500, 'Failed to create user', err.message);
-    }
-  });
-
   // GET /users/:guid
   router.get('/users/:guid', async (req, res) => {
     const { guid } = req.params;
@@ -195,25 +198,10 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     try {
       const profile = await userService.getUser(guid);
       if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
-      res.json(profile);
+      const progress = await userService.getProgress(guid);
+      res.json({ ...profile, progress });
     } catch (err) {
       sendError(res, 500, 'Failed to get user', err.message);
-    }
-  });
-
-  // PUT /users/:guid — register/ensure a user profile for a client-supplied GUID
-  // Idempotent: creates the profile if it doesn't exist; no-ops if it already does.
-  // Used by the client on first connection so its locally-generated GUID gets a backend profile.
-  router.put('/users/:guid', async (req, res) => {
-    const { guid } = req.params;
-    console.log(`[api] PUT /users/${guid} → ensureUser`);
-    try {
-      const profile = await userService.ensureUser(guid);
-      // 201 if we just created it, 200 if it already existed
-      const created = !!(profile && profile._justCreated);
-      res.status(200).json({ guid: profile.guid, profile });
-    } catch (err) {
-      sendError(res, 500, 'Failed to ensure user', err.message);
     }
   });
 
@@ -224,26 +212,12 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     try {
       const settings = await userService.updateSettings(guid, req.body || {});
       res.json({ settings });
+      broadcastWs({ type: 'user:settings', data: { guid, settings } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
       }
       sendError(res, 500, 'Failed to update settings', err.message);
-    }
-  });
-
-  // GET /users/:guid/sync/snapshot
-  router.get('/users/:guid/sync/snapshot', async (req, res) => {
-    const { guid } = req.params;
-    console.log(`[api] GET /users/${guid}/sync/snapshot`);
-    try {
-      const snapshot = await userService.getSyncSnapshot(guid);
-      res.json({ ok: true, guid, snapshot });
-    } catch (err) {
-      if (err.message && err.message.includes('not found')) {
-        return sendError(res, 404, 'User not found', err.message);
-      }
-      sendError(res, 500, 'Failed to fetch sync snapshot', err.message);
     }
   });
 
@@ -253,55 +227,14 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     console.log(`[api] GET /users/${guid}/sync/bootstrap`);
     try {
       const payload = await userService.getBootstrapSyncState(guid);
-      res.json({ ok: true, guid, ...payload });
+      const subscriptions = payload?.snapshot?.subscriptions || [];
+      const feeds = await feedService.getCachedFeedsByUrls(subscriptions);
+      res.json({ ok: true, guid, ...payload, feeds });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
       }
       sendError(res, 500, 'Failed to fetch bootstrap sync state', err.message);
-    }
-  });
-
-  // POST /users/:guid/sync/push
-  router.post('/users/:guid/sync/push', async (req, res) => {
-    const { guid } = req.params;
-    const incomingState = req.body || {};
-    console.log(`[api] POST /users/${guid}/sync/push`);
-    try {
-      const merged = await userService.mergeAndSaveSyncState(guid, incomingState);
-      broadcastWs({
-        type: 'user:sync',
-        data: {
-          guid,
-          summary: merged.summary,
-        }
-      });
-      res.json({
-        ok: true,
-        guid,
-        summary: merged.summary,
-        snapshot: merged.snapshot,
-      });
-    } catch (err) {
-      if (err.message && err.message.includes('not found')) {
-        return sendError(res, 404, 'User not found', err.message);
-      }
-      sendError(res, 500, 'Failed to push sync state', err.message);
-    }
-  });
-
-  // POST /users/:guid/sync/pull
-  router.post('/users/:guid/sync/pull', async (req, res) => {
-    const { guid } = req.params;
-    console.log(`[api] POST /users/${guid}/sync/pull`);
-    try {
-      const snapshot = await userService.getSyncSnapshot(guid);
-      res.json({ ok: true, guid, snapshot });
-    } catch (err) {
-      if (err.message && err.message.includes('not found')) {
-        return sendError(res, 404, 'User not found', err.message);
-      }
-      sendError(res, 500, 'Failed to pull sync state', err.message);
     }
   });
 
@@ -454,6 +387,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
 
       const feedUrls = profile.subscriptions || [];
       const newEpisodesFound = {};
+      const refreshedFeeds = [];
       let feedsChecked = 0;
       let errors = [];
 
@@ -464,6 +398,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         try {
           feedsChecked++;
           const feedData = await feedService.fetchAndCacheFeed(feedUrl);
+          refreshedFeeds.push(feedData);
           const feedId = feedData.feedId;
 
           // Count new episodes since last refresh
@@ -493,14 +428,18 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         checkedAt: new Date().toISOString(),
       });
 
-      // Broadcast that feeds were refreshed
+      // Feed cache changes are server state too. Send the refreshed snapshots
+      // so every client updates without starting its own RSS request.
       broadcastWs({
-        type: 'feeds:refreshed',
+        type: 'feeds:updated',
         data: {
           guid,
           feedsChecked,
           newEpisodesFound,
           totalNewEpisodes,
+          updatedFeeds: refreshedFeeds.map((feed) => feed.feedId),
+          feeds: refreshedFeeds,
+          refreshedAt: new Date().toISOString(),
         },
       });
     } catch (err) {
@@ -529,15 +468,13 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { guid, episodeGuid } = req.params;
     console.log(`[api] PUT /users/${guid}/progress/${episodeGuid}`, req.body);
     try {
-      const { position, duration, played, feedId, skipStats, updatedAt } = req.body || {};
-      const parsedUpdatedAt = updatedAt ? new Date(updatedAt).getTime() : NaN;
+      const { position, duration, played, feedId, skipStats } = req.body || {};
       const progressData = {
         position: typeof position === 'number' ? position : parseFloat(position) || 0,
         duration: typeof duration === 'number' ? duration : parseFloat(duration) || 0,
         played: !!played,
         feedId: feedId || '',
-        skipStats: !!skipStats,
-        updatedAt: Number.isFinite(parsedUpdatedAt) ? new Date(parsedUpdatedAt).toISOString() : new Date().toISOString()
+        skipStats: !!skipStats
       };
       const updated = await userService.updateProgress(guid, episodeGuid, progressData);
       res.json(updated);
@@ -571,7 +508,33 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     console.log(`[api] PUT /users/${guid}/playback-session`, req.body);
     try {
       const session = await userService.updatePlaybackSession(guid, req.body || {});
+      if (session.ignoredNonOwner || session.ignoredStaleLease) {
+        diagnostics?.record?.('playback-update-rejected', {
+          profileId: guid,
+          requesterClientId: req.body?.ownerClientId || req.body?.clientId || '',
+          ownerClientId: session.ownerClientId || session.clientId || '',
+          reason: session.ignoredStaleLease ? 'stale-lease' : 'non-owner',
+        });
+        return res.status(409).json({ error: 'Playback lease is owned by another client', session });
+      }
+      const previousOwnerClientId = session.previousOwnerClientId || '';
+      delete session.previousOwnerClientId;
       res.json(session);
+      diagnostics?.record?.(previousOwnerClientId ? 'playback-takeover' : 'playback-updated', {
+        profileId: guid,
+        ownerClientId: session.ownerClientId || session.clientId || '',
+        previousOwnerClientId,
+        episodeGuid: session.episodeGuid || '',
+        isPlaying: !!session.isPlaying,
+        mode: session.mode || 'local',
+        position: session.position || 0,
+      });
+      if (previousOwnerClientId) {
+        broadcastWs({
+          type: 'session:revoked',
+          data: { guid, targetClientId: previousOwnerClientId, session },
+        });
+      }
       broadcastWs({ type: 'user:playback-session', data: { guid, session } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
@@ -587,7 +550,12 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { episodeGuid } = req.query;
     console.log(`[api] DELETE /users/${guid}/playback-session?episodeGuid=${episodeGuid || ''}`);
     try {
-      const session = await userService.clearPlaybackSession(guid, episodeGuid || undefined);
+      const requesterClientId = String(req.query.clientId || req.get('x-podwaffle-client') || '');
+      const session = await userService.clearPlaybackSession(guid, episodeGuid || undefined, requesterClientId);
+      if (session?.ignoredNonOwner || session?.ignoredEpisodeMismatch) {
+        return res.status(409).json({ error: 'Playback session was not cleared', session });
+      }
+      diagnostics?.record?.('playback-cleared', { profileId: guid, requesterClientId, episodeGuid: episodeGuid || '' });
       broadcastWs({ type: 'user:playback-session', data: { guid, session, episodeGuid: episodeGuid || null } });
       res.status(204).send();
     } catch (err) {
@@ -667,8 +635,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   router.get('/ha/users', async (req, res) => {
     console.log('[api] GET /ha/users');
     try {
-      const guids = await userService.getAllUserGuids();
-      res.json({ users: guids.map((guid) => ({ guid })) });
+      const profiles = profileRegistry ? profileRegistry.list() : (await userService.getAllUserGuids()).map((guid) => ({ id: guid, name: guid }));
+      res.json({ users: profiles.map((profile) => ({ guid: profile.id, name: profile.name })) });
     } catch (err) {
       sendError(res, 500, 'Failed to list users', err.message);
     }
@@ -704,8 +672,38 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     try {
       const profile = await userService.getUser(guid);
       if (!profile) return sendError(res, 404, 'User not found', `guid=${guid}`);
+      const playbackSession = await userService.getPlaybackSession(guid);
+      const resolvedTargetClientId = targetClientId
+        || playbackSession?.ownerClientId
+        || playbackSession?.clientId
+        || '';
 
-      // All media commands are broadcast as-is to connected browser clients for local/cast handling
+      if (playbackSession?.mode === 'cast' && castService.canControl(guid)) {
+        const castState = castService.getState();
+        const numeric = toNumber(position ?? volume ?? value, 0);
+        let result;
+        if (normalized === 'play') result = await castService.resume();
+        else if (normalized === 'pause') result = await castService.pause();
+        else if (normalized === 'play_pause') result = String(castState.status).toLowerCase() === 'playing' ? await castService.pause() : await castService.resume();
+        else if (normalized === 'stop') {
+          result = await castService.stop();
+          await userService.clearPlaybackSession(guid);
+          broadcastWs({ type: 'user:playback-session', data: { guid, session: null } });
+        } else if (normalized === 'seek') result = await castService.seek(Math.max(0, numeric));
+        else if (normalized === 'set_volume') result = await castService.setVolume(Math.max(0, Math.min(1, numeric)));
+        else if (normalized === 'next') result = await castService.seek(Math.max(0, toNumber(castState.position, 0) + toNumber(profile.settings?.skipForward, 45)));
+        else if (normalized === 'previous') result = await castService.seek(Math.max(0, toNumber(castState.position, 0) - toNumber(profile.settings?.skipBack, 15)));
+        else return sendError(res, 400, 'Unsupported command');
+        diagnostics?.record?.('cast-command', { profileId: guid, command: normalized });
+        return res.json({ accepted: true, command: normalized, transport: 'cast', result });
+      }
+
+      if (!resolvedTargetClientId) {
+        return sendError(res, 409, 'No local playback client currently owns this profile');
+      }
+
+      // Local controls are delivered only to the client holding the playback
+      // lease. Broadcasting to every profile client could start two players.
       broadcastWs({
         type: 'ha:command',
         data: {
@@ -714,7 +712,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           value,
           position,
           volume,
-          targetClientId: targetClientId || null,
+          targetClientId: resolvedTargetClientId || null,
           issuedAt: new Date().toISOString(),
         }
       });
@@ -726,12 +724,13 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           value: value == null ? '' : value,
           position: position == null ? '' : position,
           volume: volume == null ? '' : volume,
-          targetClientId: targetClientId || '',
+          targetClientId: resolvedTargetClientId,
           issuedAt: new Date().toISOString(),
         }).catch((err) => console.warn('[api] Background command delivery failed:', err.message));
       }
 
-      return res.json({ accepted: true, command: normalized });
+      diagnostics?.record?.('local-command', { profileId: guid, command: normalized, targetClientId: resolvedTargetClientId });
+      return res.json({ accepted: true, command: normalized, transport: 'client', targetClientId: resolvedTargetClientId || null });
     } catch (err) {
       sendError(res, 500, 'Failed to execute media command', err.message);
     }
@@ -763,8 +762,9 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       if (!req.body || !req.body.episodeGuid) {
         return sendError(res, 400, 'episodeGuid is required in the history entry');
       }
-      const entry = await userService.addHistoryEntry(guid, req.body);
-      res.status(201).json(entry);
+      const result = await userService.addHistoryEntry(guid, req.body);
+      res.status(result.duplicate ? 200 : 201).json(result.entry);
+      if (!result.duplicate) broadcastWs({ type: 'user:history', data: { guid, entry: result.entry } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
@@ -793,11 +793,12 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
   // PUT /users/:guid/stats
   router.put('/users/:guid/stats', async (req, res) => {
     const { guid } = req.params;
-    const { listenedDelta, skippedDelta } = req.body || {};
+    const { listenedDelta, skippedDelta, mutationId } = req.body || {};
     console.log(`[api] PUT /users/${guid}/stats`, { listenedDelta, skippedDelta });
     try {
-      const stats = await userService.updateStats(guid, listenedDelta || 0, skippedDelta || 0);
-      res.json(stats);
+      const result = await userService.updateStats(guid, listenedDelta || 0, skippedDelta || 0, mutationId || '');
+      res.json(result.stats);
+      if (!result.duplicate) broadcastWs({ type: 'user:stats', data: { guid, stats: result.stats } });
     } catch (err) {
       if (err.message && err.message.includes('not found')) {
         return sendError(res, 404, 'User not found', err.message);
@@ -852,12 +853,16 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
       if (!userGuid) {
         return sendError(res, 400, 'guid (user guid) is required');
       }
+      if (profileRegistry && !profileRegistry.has(userGuid)) {
+        return sendError(res, 404, 'Profile not configured');
+      }
       const seen = await userService.markEpisodesSeen(userGuid, feedId, episodeGuids);
 
       // Also clear the newEpisodesAvailable flag on the feed
       await feedService.clearNewFlag(feedId);
 
       res.json({ feedId, seenCount: seen.length });
+      broadcastWs({ type: 'user:seen', data: { guid: userGuid, feedId, seenCount: seen.length } });
     } catch (err) {
       sendError(res, 500, 'Failed to mark episodes seen', err.message);
     }
@@ -942,8 +947,38 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     if (!userGuid || !deviceId || !mediaUrl) {
       return sendError(res, 400, 'Missing required fields: userGuid, deviceId, mediaUrl');
     }
+    if (profileRegistry && !profileRegistry.has(userGuid)) {
+      return sendError(res, 404, 'Profile not configured');
+    }
+    const castLeaseClientId = `cast:${deviceId}`;
 
     try {
+      // Claim the playback lease before the potentially slow Cast connection.
+      // This pauses any previous online owner before receiver playback starts.
+      const claimedSession = await userService.updatePlaybackSession(userGuid, {
+        episodeGuid,
+        feedId: feedId || '',
+        title: title || '',
+        podcastTitle: podcastTitle || '',
+        audioUrl: mediaUrl,
+        podcastImageUrl: imageUrl || '',
+        imageUrl: imageUrl || '',
+        position: Number(startPosition) || 0,
+        duration: Number(duration) || 0,
+        isPlaying: true,
+        mode: 'cast',
+        transport: 'cast',
+        castDeviceId: deviceId,
+        clientId: castLeaseClientId,
+        forceTakeover: true,
+      });
+      const previousOwnerClientId = claimedSession.previousOwnerClientId || '';
+      delete claimedSession.previousOwnerClientId;
+      if (previousOwnerClientId) {
+        broadcastWs({ type: 'session:revoked', data: { guid: userGuid, targetClientId: previousOwnerClientId, session: claimedSession } });
+      }
+      broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session: claimedSession } });
+
       let lastCastProgressPersistAt = 0;
       let lastKnownCastPosition = typeof startPosition === 'number' ? startPosition : parseFloat(startPosition) || 0;
       let lastKnownCastDuration = typeof duration === 'number' ? duration : parseFloat(duration) || 0;
@@ -1024,7 +1059,8 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
             mode: 'cast',
             transport: 'cast',
             castDeviceId: deviceId || '',
-            clientId: '',
+            clientId: `cast:${deviceId}`,
+            ownerClientId: `cast:${deviceId}`,
             updatedAt: updateTimestamp,
           }).then((session) => {
             broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session } });
@@ -1044,8 +1080,17 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
         persistCastStatus,
         { episodeGuid, title, podcastTitle, imageUrl, duration, feedId }
       );
+      const activeLease = await userService.getPlaybackSession(userGuid);
+      const activeOwner = activeLease?.ownerClientId || activeLease?.clientId || '';
+      if (activeOwner !== castLeaseClientId) {
+        await castService.stop().catch(() => null);
+        throw new Error('Cast start was superseded by another playback owner');
+      }
+      diagnostics?.record?.('cast-started', { profileId: userGuid, deviceId, episodeGuid, previousOwnerClientId });
       res.json({ ok: true, message: 'Cast started' });
     } catch (err) {
+      const remainingSession = await userService.clearPlaybackSession(userGuid, episodeGuid, castLeaseClientId).catch(() => null);
+      broadcastWs({ type: 'user:playback-session', data: { guid: userGuid, session: remainingSession } });
       sendError(res, 500, 'Failed to start cast', err.message);
     }
   });
@@ -1055,6 +1100,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/pause user=${userGuid}`);
 
+    if (!userGuid || !castService.canControl(userGuid)) return sendError(res, 409, 'Profile does not own the active Cast session');
     try {
       const result = await castService.pause();
       res.json(result);
@@ -1068,6 +1114,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/resume user=${userGuid}`);
 
+    if (!userGuid || !castService.canControl(userGuid)) return sendError(res, 409, 'Profile does not own the active Cast session');
     try {
       const result = await castService.resume();
       res.json(result);
@@ -1084,6 +1131,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     if (!Number.isFinite(position)) {
       return sendError(res, 400, 'Missing or invalid position');
     }
+    if (!userGuid || !castService.canControl(userGuid)) return sendError(res, 409, 'Profile does not own the active Cast session');
 
     try {
       const result = await castService.seek(position);
@@ -1101,6 +1149,7 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     if (!Number.isFinite(level) || level < 0 || level > 1) {
       return sendError(res, 400, 'Invalid volume level (must be 0-1)');
     }
+    if (!userGuid || !castService.canControl(userGuid)) return sendError(res, 409, 'Profile does not own the active Cast session');
 
     try {
       const result = await castService.setVolume(level);
@@ -1115,8 +1164,11 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
     const { userGuid } = req.body || {};
     console.log(`[api] POST /cast/stop user=${userGuid}`);
 
+    if (!userGuid || !castService.canControl(userGuid)) return sendError(res, 409, 'Profile does not own the active Cast session');
     try {
       const result = await castService.stop();
+      await userService.clearPlaybackSession(userGuid).catch(() => null);
+      diagnostics?.record?.('cast-stopped', { profileId: userGuid });
       res.json(result);
     } catch (err) {
       sendError(res, 500, 'Failed to stop cast', err.message);

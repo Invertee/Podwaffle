@@ -1,8 +1,7 @@
 {
-  "_comment": "The public site is hosted on GitHub Pages. backendUrl is optional and should point only to a PodWaffle API server, never the GitHub Pages site.",
-  "siteUrl": "https://invertee.github.io/Podwaffle",
+  "_comment": "backendUrl points to the Home Assistant Podwaffle add-on (normally through HTTPS reverse proxy). The access key is entered in the app and is never bundled.",
   "backendUrl": "",
-  "profileGuid": "",
+  "profileId": "",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
 }

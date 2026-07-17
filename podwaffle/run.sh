@@ -2,11 +2,8 @@
 set -euo pipefail
 
 export PORT="${PORT:-3000}"
-export DISABLE_NEW_USER_SESSIONS="false"
-
-if bashio::config.true 'disable_new_user_sessions'; then
-	export DISABLE_NEW_USER_SESSIONS="true"
-fi
+export PODWAFFLE_PROFILES="$(bashio::config 'profiles' 2>/dev/null || echo Default)"
+export PODWAFFLE_ACCESS_KEY="$(bashio::config 'access_key' 2>/dev/null || true)"
 
 export FIREBASE_PROJECT_ID="$(bashio::config 'firebase_project_id' 2>/dev/null || true)"
 export FIREBASE_CLIENT_EMAIL="$(bashio::config 'firebase_client_email' 2>/dev/null || true)"
@@ -42,6 +39,10 @@ SERVER_HASH="$(sha256sum "${APP_DIR}/server/server.js" 2>/dev/null | awk '{print
 bashio::log.info "Deployed source commit: ${APP_COMMIT}"
 bashio::log.info "Deployed file fingerprints: client/js/app.js=${CLIENT_JS_HASH} client/css/app.css=${CLIENT_CSS_HASH} server/server.js=${SERVER_HASH}"
 
-bashio::log.info "Starting Podwaffle on port ${PORT} (data: ${DATA_DIR}, disable_new_user_sessions=${DISABLE_NEW_USER_SESSIONS})"
+ACCESS_KEY_STATUS="no"
+if [ -n "${PODWAFFLE_ACCESS_KEY}" ]; then
+	ACCESS_KEY_STATUS="yes"
+fi
+bashio::log.info "Starting Podwaffle on port ${PORT} (data: ${DATA_DIR}, profiles=${PODWAFFLE_PROFILES}, access_key_configured=${ACCESS_KEY_STATUS})"
 cd "${APP_DIR}/server"
 exec node -r ./services/castDeviceRegistryCleanup.js -r ./services/castSessionRecovery.js -r ./services/castVolumeSync.js server.js

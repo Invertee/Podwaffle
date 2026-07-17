@@ -7,6 +7,7 @@ const Parser = require('rss-parser');
 
 const _dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const PODCASTS_DIR = path.join(_dataRoot, 'podcasts');
+const activeFeedFetches = new Map();
 
 // ---------------------------------------------------------------------------
 // Directory bootstrap
@@ -140,11 +141,20 @@ async function getCachedFeedsByUrls(feedUrls) {
  */
 async function saveFeed(feedData) {
   const filePath = feedFilePath(feedData.feedId);
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   console.log(`[feedService] saveFeed(${feedData.feedId}) → writing to ${filePath}`);
   try {
-    await fs.promises.writeFile(filePath, JSON.stringify(feedData, null, 2), 'utf8');
+    await fs.promises.writeFile(tempPath, JSON.stringify(feedData, null, 2), 'utf8');
+    try {
+      await fs.promises.rename(tempPath, filePath);
+    } catch (err) {
+      if (err?.code !== 'EEXIST' && err?.code !== 'EPERM') throw err;
+      await fs.promises.unlink(filePath).catch(() => {});
+      await fs.promises.rename(tempPath, filePath);
+    }
     console.log(`[feedService] saveFeed(${feedData.feedId}) → saved OK`);
   } catch (err) {
+    await fs.promises.unlink(tempPath).catch(() => {});
     console.error(`[feedService] saveFeed(${feedData.feedId}) → write error:`, err);
     throw err;
   }
@@ -160,7 +170,7 @@ async function saveFeed(feedData) {
  *
  * Returns the updated feed cache object.
  */
-async function fetchAndCacheFeed(feedUrl) {
+async function fetchAndCacheFeedUnshared(feedUrl) {
   console.log(`[feedService] fetchAndCacheFeed() → fetching: ${feedUrl}`);
   const feedId = getFeedId(feedUrl);
 
@@ -279,6 +289,17 @@ async function fetchAndCacheFeed(feedUrl) {
   await saveFeed(feedData);
   console.log(`[feedService] fetchAndCacheFeed(${feedId}) → cached ${episodes.length} episodes, ${newGuids.length} new`);
   return feedData;
+}
+
+function fetchAndCacheFeed(feedUrl) {
+  const feedId = getFeedId(feedUrl);
+  const active = activeFeedFetches.get(feedId);
+  if (active) return active;
+  const task = fetchAndCacheFeedUnshared(feedUrl).finally(() => {
+    if (activeFeedFetches.get(feedId) === task) activeFeedFetches.delete(feedId);
+  });
+  activeFeedFetches.set(feedId, task);
+  return task;
 }
 
 // ---------------------------------------------------------------------------

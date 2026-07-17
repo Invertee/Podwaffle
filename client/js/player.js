@@ -41,6 +41,8 @@ const player = {
   _nativeMediaSyncTimer: null,
   _remoteSession: null,
   _remoteDeadReckoningTimer: null,
+  _lastServerSessionVersion: 0,
+  _serverLeaseToken: '',
 
   _toTimestamp(value) {
     if (!value) return 0;
@@ -98,6 +100,7 @@ const player = {
   applyRemotePlaybackSession(session) {
     const localClientId = this._getClientId();
     if (!session || !session.episodeGuid) {
+      this._serverLeaseToken = '';
       this._stopRemoteDeadReckoning();
       if (this._isRemoteSessionActive()) {
         this._remoteSession = null;
@@ -111,15 +114,16 @@ const player = {
       return;
     }
 
-    if (!session.clientId || session.clientId === localClientId) return;
+    const ownerClientId = session.ownerClientId || session.clientId || '';
+    const sessionVersion = Math.max(0, Number(session.sessionVersion || 0));
+    if (sessionVersion && sessionVersion < this._lastServerSessionVersion) return;
+    this._lastServerSessionVersion = Math.max(this._lastServerSessionVersion, sessionVersion);
+    this._serverLeaseToken = session.leaseToken || this._serverLeaseToken || '';
+    if (!ownerClientId || ownerClientId === localClientId) return;
     if (this.mode !== 'remote' && this.mode !== 'local') return;
     if (this.mode === 'local' && this.currentEpisode && (this.isPlaying || this.audio?.src)) {
-      let localUpdatedAt = 0;
-      try {
-        localUpdatedAt = this._toTimestamp(JSON.parse(localStorage.getItem('podwaffle_playback_session') || 'null')?.updatedAt);
-      } catch (_) {}
-      const incomingUpdatedAt = this._toTimestamp(session.updatedAt);
-      if (!incomingUpdatedAt || incomingUpdatedAt <= localUpdatedAt) return;
+      // The backend lease is authoritative even when the local device clock is
+      // ahead. This is what prevents two online players from continuing at once.
       this.audio.pause();
     }
 
@@ -658,6 +662,13 @@ const player = {
 
     this._setAudioSource(episode.audioUrl, safeStartPosition);
 
+    // Local playback always starts a durable device download as well. Playback
+    // is not blocked on the download, and cacheManager deduplicates this with
+    // explicit downloads or queue prefetches already in flight.
+    window.cacheManager?.downloadEpisode?.(episode).catch((err) => {
+      console.warn('[player] Background episode download failed:', err?.message || err);
+    });
+
     this._persistPlaybackSnapshot({ force: true });
     this._updateMediaSession();
     this._notifyStateChange();
@@ -903,13 +914,6 @@ const player = {
     });
   },
 
-  _clearEpisodeCache(episode) {
-    if (!window.cacheManager || !episode) return;
-    window.cacheManager.deleteEpisode(episode).catch((err) => {
-      console.warn('[player] Failed to clear episode cache:', err?.message || err);
-    });
-  },
-
   _enterIdleState() {
     this.isPlaying = false;
     this.position = 0;
@@ -1030,9 +1034,9 @@ const player = {
         feedId: episode.feedId,
         updatedAt: new Date().toISOString(),
       };
-      await api.updateProgress(guid, episode.guid, nextProgress);
+      const savedProgress = await api.updateProgress(guid, episode.guid, nextProgress);
       if (window.setEpisodeProgressState) {
-        window.setEpisodeProgressState(episode.guid, nextProgress);
+        window.setEpisodeProgressState(episode.guid, savedProgress || nextProgress);
       }
 
       await api.updatePlaybackSession(guid, this._buildPlaybackSnapshot({
@@ -1067,16 +1071,18 @@ const player = {
         feedId: episode.feedId,
         updatedAt: new Date().toISOString(),
       };
-      await api.updateProgress(guid, episode.guid, nextProgress);
+      const savedProgress = await api.updateProgress(guid, episode.guid, nextProgress);
 
+      const listenedAt = new Date().toISOString();
       await api.addHistory(guid, {
         episodeGuid: episode.guid,
         feedId: episode.feedId,
         title: episode.title,
         podcastTitle: episode.podcastTitle,
         imageUrl: episode.imageUrl,
-        listenedAt: new Date().toISOString(),
+        listenedAt,
         duration: finalDuration,
+        mutationId: `${this._getClientId()}:${episode.guid}:${listenedAt}`,
       });
 
       // Final stats update
@@ -1086,7 +1092,7 @@ const player = {
       }
       episode._markedPlayed = true;
       if (window.setEpisodeProgressState) {
-        window.setEpisodeProgressState(episode.guid, nextProgress);
+        window.setEpisodeProgressState(episode.guid, savedProgress || nextProgress);
       }
       await api.clearPlaybackSession(guid, episode.guid).catch((err) => {
         console.warn('[player] Failed to clear playback session after completion:', err);
@@ -1094,7 +1100,6 @@ const player = {
       this._clearPersistedPlaybackSession({ episodeGuid: episode.guid });
       this.lastSyncPosition = finalPosition;
       console.log('[player] Episode marked as played:', episode.title);
-      this._clearEpisodeCache(episode);
     } catch (err) {
       console.error('[player] _markPlayed error:', err);
     } finally {
@@ -1121,7 +1126,7 @@ const player = {
       isPlaying: this.isPlaying,
       mode: this.mode,
       clientId: this._getClientId(),
-      updatedAt: overrides.updatedAt || new Date().toISOString(),
+      leaseToken: this._serverLeaseToken || '',
     };
   },
 

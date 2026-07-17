@@ -31,7 +31,9 @@ const googleCastSender = {
   _resolveApiBaseUrl() {
     if (window.api && typeof window.api._getRemoteBaseOrigin === 'function') {
       const remoteOrigin = window.api._getRemoteBaseOrigin();
-      this._apiBaseUrl = remoteOrigin || '';
+      this._apiBaseUrl = remoteOrigin || (/^https?:$/i.test(location.protocol)
+        ? `${location.origin}${window.APP_BASE_PATH || ''}`
+        : '');
       return;
     }
 
@@ -232,15 +234,13 @@ const googleCastSender = {
     }
 
     this._resolveApiBaseUrl();
-    if (!this._apiBaseUrl) {
+    if (!window.api || typeof window.api.getCastSession !== 'function') {
       return null;
     }
 
     this._stateSyncPromise = (async () => {
       try {
-        const session = (window.api && typeof window.api.getCastSession === 'function')
-          ? await window.api.getCastSession()
-          : await fetch(`${this._apiBaseUrl}/api/cast/session`).then((res) => (res.ok ? res.json() : null));
+        const session = await window.api.getCastSession();
 
         const status = session?.session || session || null;
         const activeDeviceId = status?.activeDeviceId || status?.deviceId || null;
@@ -340,16 +340,18 @@ const googleCastSender = {
 
     console.log('[googleCastSender] loadEpisode → posting to server');
 
-    const response = await fetch(`${this._apiBaseUrl}/api/cast/play`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
+    await window.api.castPlay(
+      payload.deviceId,
+      payload.mediaUrl,
+      payload.startPosition,
+      payload.episodeGuid,
+      payload.userGuid,
+      payload.title,
+      payload.podcastTitle,
+      payload.imageUrl,
+      payload.duration,
+      payload.feedId
+    );
 
     return this.getCurrentDevice();
   },
@@ -367,18 +369,7 @@ const googleCastSender = {
       throw new Error('Not connected to a cast session');
     }
 
-    const response = await fetch(`${this._apiBaseUrl}/api/cast/resume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userGuid: this._userGuid }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return await response.json();
+    return window.api.castResume();
   },
 
   async pause() {
@@ -394,18 +385,7 @@ const googleCastSender = {
       throw new Error('Not connected to a cast session');
     }
 
-    const response = await fetch(`${this._apiBaseUrl}/api/cast/pause`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userGuid: this._userGuid }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return await response.json();
+    return window.api.castPause();
   },
 
   async seek(position) {
@@ -423,18 +403,7 @@ const googleCastSender = {
       throw new Error('Not connected to a cast session');
     }
 
-    const response = await fetch(`${this._apiBaseUrl}/api/cast/seek`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userGuid: this._userGuid, position: targetPosition }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return await response.json();
+    return window.api.castSeek(targetPosition);
   },
 
   async setVolume(level) {
@@ -452,37 +421,15 @@ const googleCastSender = {
       throw new Error('Not connected to a cast session');
     }
 
-    const response = await fetch(`${this._apiBaseUrl}/api/cast/setVolume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userGuid: this._userGuid, level: targetLevel }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return await response.json();
+    return window.api.setCastVolume(targetLevel);
   },
 
   async stop() {
     this._resolveApiBaseUrl();
 
     try {
-      if (this._apiBaseUrl) {
-        const response = await fetch(`${this._apiBaseUrl}/api/cast/stop`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userGuid: this._userGuid }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          throw new Error(error.error || `HTTP ${response.status}`);
-        }
-
-        await response.json().catch(() => null);
+      if (window.api?.castStop) {
+        await window.api.castStop();
       } else if (window.castClient && typeof window.castClient.send === 'function' && window.castClient.isConnected()) {
         const sent = window.castClient.send('cast:stop', {});
         if (!sent) {

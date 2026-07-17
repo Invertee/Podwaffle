@@ -112,23 +112,8 @@
       clearClientCastState('stop-requested');
 
       const stopRemotely = async () => {
-        if (this._apiBaseUrl && typeof fetch === 'function') {
-          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-          const timeout = setTimeout(() => controller?.abort(), STOP_TIMEOUT_MS);
-          try {
-            const response = await fetch(`${this._apiBaseUrl}/api/cast/stop`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userGuid: this._userGuid }),
-              ...(controller ? { signal: controller.signal } : {}),
-            });
-            if (!response.ok) {
-              const error = await response.json().catch(() => ({}));
-              throw new Error(error.error || `HTTP ${response.status}`);
-            }
-          } finally {
-            clearTimeout(timeout);
-          }
+        if (window.api?.castStop) {
+          await window.api.castStop();
           return;
         }
 

@@ -10,6 +10,7 @@ const devicesPath = path.join(dataRoot, 'push-devices.json');
 let accessToken = null;
 let accessTokenExpiresAt = 0;
 let writeQueue = Promise.resolve();
+const pendingSyncNotifications = new Map();
 
 function env(name) {
   return String(process.env[name] || '').trim();
@@ -45,31 +46,44 @@ async function loadDevices() {
   }
 }
 
-function saveDevices(devices) {
-  writeQueue = writeQueue.then(async () => {
-    await fs.promises.mkdir(path.dirname(devicesPath), { recursive: true });
-    const tempPath = `${devicesPath}.${process.pid}.tmp`;
-    await fs.promises.writeFile(tempPath, JSON.stringify(devices, null, 2), 'utf8');
-    await fs.promises.rename(tempPath, devicesPath);
+async function persistDevices(devices) {
+  await fs.promises.mkdir(path.dirname(devicesPath), { recursive: true });
+  const tempPath = `${devicesPath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.promises.writeFile(tempPath, JSON.stringify(devices, null, 2), 'utf8');
+  await fs.promises.rename(tempPath, devicesPath);
+}
+
+function mutateDevices(operation) {
+  const task = writeQueue.catch(() => {}).then(async () => {
+    const devices = await loadDevices();
+    const result = await operation(devices);
+    await persistDevices(devices);
+    return result;
   });
-  return writeQueue;
+  writeQueue = task.then(() => undefined, () => undefined);
+  return task;
+}
+
+async function readDevices() {
+  await writeQueue.catch(() => {});
+  return loadDevices();
 }
 
 async function registerDevice(guid, token, clientId = '') {
   if (!guid || !token) throw new Error('guid and token are required');
-  const devices = await loadDevices();
-  const current = Array.isArray(devices[guid]) ? devices[guid] : [];
-  const withoutToken = current.filter((item) => item && item.token !== token);
-  withoutToken.push({ token, clientId, platform: 'android', updatedAt: new Date().toISOString() });
-  devices[guid] = withoutToken.slice(-20);
-  await saveDevices(devices);
-  return { registered: true, devices: devices[guid].length };
+  return mutateDevices(async (devices) => {
+    const current = Array.isArray(devices[guid]) ? devices[guid] : [];
+    const withoutToken = current.filter((item) => item && item.token !== token);
+    withoutToken.push({ token, clientId, platform: 'android', updatedAt: new Date().toISOString() });
+    devices[guid] = withoutToken.slice(-20);
+    return { registered: true, devices: devices[guid].length };
+  });
 }
 
 async function unregisterDevice(guid, token) {
-  const devices = await loadDevices();
-  devices[guid] = (Array.isArray(devices[guid]) ? devices[guid] : []).filter((item) => item && item.token !== token);
-  await saveDevices(devices);
+  return mutateDevices(async (devices) => {
+    devices[guid] = (Array.isArray(devices[guid]) ? devices[guid] : []).filter((item) => item && item.token !== token);
+  });
 }
 
 function base64Url(value) {
@@ -115,7 +129,7 @@ function stringifyData(data) {
 
 async function sendToGuid(guid, data) {
   if (!isConfigured() || !guid) return { sent: 0, disabled: !isConfigured() };
-  const devices = await loadDevices();
+  const devices = await readDevices();
   const targets = Array.isArray(devices[guid]) ? devices[guid] : [];
   if (!targets.length) return { sent: 0 };
   const token = await getAccessToken();
@@ -139,10 +153,60 @@ async function sendToGuid(guid, data) {
     }
   }
   if (invalid.size) {
-    devices[guid] = targets.filter((device) => !invalid.has(device.token));
-    await saveDevices(devices);
+    await mutateDevices(async (currentDevices) => {
+      currentDevices[guid] = (Array.isArray(currentDevices[guid]) ? currentDevices[guid] : [])
+        .filter((device) => !invalid.has(device.token));
+    });
   }
   return { sent, registered: targets.length };
 }
 
-module.exports = { getPublicConfig, isConfigured, registerDevice, unregisterDevice, sendToGuid };
+function notifySyncChanged(guid, sync = {}, reason = 'state-changed') {
+  if (!guid || !isConfigured()) return;
+  const existing = pendingSyncNotifications.get(guid);
+  if (existing) {
+    existing.sync = sync;
+    existing.reason = reason;
+    return;
+  }
+
+  const pending = { sync, reason, timer: null };
+  pending.timer = setTimeout(() => {
+    pendingSyncNotifications.delete(guid);
+    sendToGuid(guid, {
+      type: 'sync_changed',
+      guid,
+      reason: pending.reason,
+      revision: pending.sync.userRevision ?? pending.sync.revision ?? 0,
+      changedAt: pending.sync.lastSyncAt || pending.sync.lastChangedAt || new Date().toISOString(),
+    }).catch((err) => console.warn('[push] Sync notification failed:', err.message));
+  }, 1500);
+  pending.timer.unref?.();
+  pendingSyncNotifications.set(guid, pending);
+}
+
+async function getDiagnostics() {
+  const devices = await readDevices();
+  const profiles = {};
+  for (const [guid, entries] of Object.entries(devices)) {
+    profiles[guid] = {
+      registeredDevices: Array.isArray(entries) ? entries.length : 0,
+      devices: (Array.isArray(entries) ? entries : []).map((entry) => ({
+        clientId: entry.clientId || '',
+        platform: entry.platform || 'android',
+        updatedAt: entry.updatedAt || null,
+      })),
+    };
+  }
+  return { configured: isConfigured(), profiles };
+}
+
+module.exports = {
+  getPublicConfig,
+  isConfigured,
+  registerDevice,
+  unregisterDevice,
+  sendToGuid,
+  notifySyncChanged,
+  getDiagnostics,
+};

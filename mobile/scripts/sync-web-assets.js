@@ -10,7 +10,6 @@ const targetDir = path.join(mobileRoot, 'www');
 const configPath = path.join(mobileRoot, 'server.config.json');
 const bulmaCachePath = path.join(mobileRoot, '.cache', 'bulma-1.0.2.min.css');
 const bulmaUrl = 'https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css';
-const defaultSiteUrl = 'https://invertee.github.io/Podwaffle';
 
 async function ensureBulma() {
   if (fs.existsSync(bulmaCachePath)) return bulmaCachePath;
@@ -43,16 +42,14 @@ async function main() {
   fs.mkdirSync(path.join(targetDir, 'css'), { recursive: true });
   fs.copyFileSync(bulmaSource, path.join(targetDir, 'css', 'bulma.min.css'));
 
-  const siteUrl = String(process.env.PODWAFFLE_SITE_URL || config.siteUrl || defaultSiteUrl).trim();
   const configuredBackendUrl = String(process.env.PODWAFFLE_BACKEND_URL || config.backendUrl || '').trim();
   const legacyServerUrl = String(config.serverUrl || '').trim();
   const backendUrl = configuredBackendUrl
     || (/github\.io/i.test(legacyServerUrl) ? '' : legacyServerUrl);
-  const profileGuid = String(config.profileGuid || '').trim();
+  const profileId = String(config.profileId || config.profileGuid || '').trim();
   const mobileConfig = {
-    siteUrl,
     backendUrl,
-    profileGuid,
+    profileId,
     generatedAt: new Date().toISOString(),
   };
 
@@ -63,8 +60,8 @@ async function main() {
   window.PODWAFFLE_MOBILE_CONFIG = config;
   window.IS_PODWAFFLE_MOBILE_BUILD = true;
 
-  if (config.profileGuid && !localStorage.getItem('podwaffle_guid')) {
-    localStorage.setItem('podwaffle_guid', config.profileGuid);
+  if (config.profileId && !localStorage.getItem('podwaffle_guid')) {
+    localStorage.setItem('podwaffle_guid', config.profileId);
   }
 
   const previousManagedUrl = localStorage.getItem(managedBackendKey) || '';
@@ -99,7 +96,9 @@ async function main() {
 
     if (legacyOrMissing || managedByPreviousBuild) {
       localStorage.setItem('podwaffle_server_connection', JSON.stringify({
+        ...(existing || {}),
         enabled: true,
+        baseUrl: url.href.replace(/\\\/+$/, ''),
         host: url.hostname,
         port: url.port || '',
         secure: url.protocol === 'https:',
@@ -133,9 +132,8 @@ async function main() {
   }
 
   console.log(`[mobile] Copied client assets to ${targetDir}`);
-  console.log(`[mobile] Public site: ${siteUrl || 'not configured'}`);
-  console.log(`[mobile] Backend bootstrap: ${backendUrl || 'not configured'}`);
-  console.log(`[mobile] Profile bootstrap: ${profileGuid || 'not configured'}`);
+  console.log(`[mobile] Add-on bootstrap: ${backendUrl || 'configured on first launch'}`);
+  console.log(`[mobile] Profile bootstrap: ${profileId || 'selected on first launch'}`);
 }
 
 main().catch((err) => {

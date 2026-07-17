@@ -7,9 +7,9 @@ Native Android/iOS wrapper for PodWaffle, built with Capacitor.
 The mobile app packages the complete PodWaffle client inside the APK/IPA. It no longer loads its user interface from a remote `server.url`.
 
 - The application shell, JavaScript, icons, app CSS, and Bulma CSS are local.
-- Subscriptions, podcast metadata, episode metadata, progress, queue state, and explicit downloads are available locally after they have been synced.
-- `backendUrl` is used only to refresh feeds and synchronise state between clients.
-- Explicitly downloaded episodes are pinned and are not removed by transient-cache expiry.
+- Subscriptions, podcast metadata, episode metadata, progress, queue state, and episode downloads are available locally after they have been synced.
+- `backendUrl` points to the Home Assistant add-on. Feed refresh and authoritative sync run on that backend.
+- Episodes played locally are downloaded in the background. Explicit and playback-triggered downloads are pinned until the user removes them.
 
 This means the app can launch and display previously synced content while the device is in airplane mode.
 
@@ -22,13 +22,13 @@ This means the app can launch and display previously synced content while the de
 | Java 17 | Bundled with Android Studio |
 | Xcode 15+ | Required for iOS builds |
 
-## Configure the backend and existing profile
+## Configure the add-on and profile
 
-The local mobile origin has separate browser storage from the older remote-wrapper build. To reconnect to the same server-side profile, configure both the backend URL and your existing PodWaffle profile GUID before the first build.
+The local mobile origin has its own durable cache. You can package the add-on URL and configured profile ID, or enter both from the app on first launch. The access key is deliberately not bundled and is entered in the app.
 
 ```bash
 cd mobile
-node scripts/set-server.js http://192.168.1.50:3000 YOUR-EXISTING-PROFILE-GUID
+node scripts/set-server.js https://podcasts.example.com sam
 ```
 
 You can also edit `server.config.json` directly:
@@ -36,7 +36,7 @@ You can also edit `server.config.json` directly:
 ```json
 {
   "backendUrl": "http://192.168.1.50:3000",
-  "profileGuid": "01234567-89ab-4cde-8f01-23456789abcd",
+  "profileId": "sam",
   "appId": "com.podwaffle.app",
   "appName": "PodWaffle"
 }
@@ -44,7 +44,7 @@ You can also edit `server.config.json` directly:
 
 Use HTTPS when the server is behind a TLS reverse proxy. Plain HTTP is supported for trusted local-network deployments.
 
-If `profileGuid` is omitted, the app creates a new local profile and registers it with the backend when connectivity is available.
+If `profileId` is omitted, the app asks the user to choose one of the profiles configured in the add-on. Clients never create server profiles.
 
 ## Build and run
 
@@ -60,7 +60,7 @@ npm run android:open
 1. Copies `../client` into `mobile/www`.
 2. Downloads and caches the pinned Bulma 1.0.2 stylesheet for local packaging.
 3. Removes remote Google Font dependencies from the mobile copy.
-4. Generates `mobile-config.js` with the backend URL and profile GUID.
+4. Generates `mobile-config.js` with the add-on URL and optional profile ID.
 5. Runs `npx cap sync` to copy the local web bundle into the native project.
 
 After the first successful run, the Bulma asset is reused from `mobile/.cache`.
@@ -79,7 +79,7 @@ npm run ios:open
 1. Install the rebuilt app and open it while online.
 2. Confirm that the expected profile and subscriptions have synchronised.
 3. Open the podcasts you want available offline so their episode metadata is stored.
-4. Explicitly download at least one episode.
+4. Play an episode locally (or use its explicit download control) and allow its download to finish.
 5. Fully close the app.
 6. Enable airplane mode and reopen it.
 
@@ -88,8 +88,8 @@ Expected results:
 - The full interface and styling load.
 - Subscription titles and artwork remain visible.
 - Previously opened podcast episode lists remain visible.
-- Explicitly downloaded episodes play.
-- Local progress and subscription changes remain on-device and synchronise when connectivity returns.
+- Downloaded episodes play.
+- Local progress and subscription changes remain in the durable outbox and synchronise when connectivity returns.
 
 ## Background audio — Android manifest
 

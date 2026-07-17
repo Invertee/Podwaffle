@@ -20,8 +20,8 @@ const castClient = {
   _resyncRequested: false,
   _idleTimer: null,
   _IDLE_TIMEOUT_MS: 20 * 60 * 1000, // 20 minutes
-  _HEALTH_CHECK_INTERVAL_MS: 15000,
-  _HEALTH_PONG_TIMEOUT_MS: 10000,
+  _HEALTH_CHECK_INTERVAL_MS: 30000,
+  _HEALTH_PONG_TIMEOUT_MS: 15000,
   _castState: {
     status: 'idle',
     position: 0,
@@ -68,12 +68,13 @@ const castClient = {
       clearTimeout(this._reconnectTimer);
       this._lastPongAt = Date.now();
       this._lastMessageAt = Date.now();
-      this._startStatePolling();
+      this._stopStatePolling();
       this._startHealthMonitoring();
       const guid = localStorage.getItem('podwaffle_guid') || '';
       const clientId = window.getPodwaffleClientId ? window.getPodwaffleClientId() : (localStorage.getItem('podwaffle_client_id') || '');
+      const accessKey = window.api?.getServerConnectionConfig?.().accessKey || '';
       if (guid) {
-        this.send('sync:hello', { guid, clientId, lastUserRevision: this._lastUserRevision });
+        this.send('sync:hello', { guid, clientId, accessKey, lastUserRevision: this._lastUserRevision });
       }
       this._dispatch('connected', {});
     });
@@ -91,7 +92,7 @@ const castClient = {
     this.ws.addEventListener('close', (event) => {
       console.warn(`[castClient] WebSocket closed (code=${event.code}). Intentional=${this._intentionalClose}`);
       this.ws = null;
-      this._stopStatePolling();
+      if (!this._intentionalClose) this._startStatePolling();
       this._stopHealthMonitoring();
       this._dispatch('disconnected', { code: event.code });
       if (!this._intentionalClose) {
@@ -172,7 +173,8 @@ const castClient = {
       }
     };
 
-    this._statePollTimer = setInterval(pollState, 15000);
+    // HTTP is only a low-frequency fallback while the WebSocket is down.
+    this._statePollTimer = setInterval(pollState, 60000);
     setTimeout(pollState, 1000);
   },
 
@@ -364,6 +366,25 @@ const castClient = {
     } catch (err) {
       console.error('[castClient] Failed to apply HA command:', commandData, err);
     }
+  },
+
+  requestSync(reason = 'client-request') {
+    if (!this.isConnected()) return false;
+    return this.send('sync:request', {
+      guid: localStorage.getItem('podwaffle_guid') || '',
+      reason,
+      lastUserRevision: this._lastUserRevision,
+    });
+  },
+
+  getTransportStatus() {
+    return {
+      method: this.isConnected() ? 'websocket' : (this._statePollTimer ? 'http-fallback' : 'offline'),
+      connected: this.isConnected(),
+      lastMessageAt: this._lastMessageAt ? new Date(this._lastMessageAt).toISOString() : null,
+      lastPongAt: this._lastPongAt ? new Date(this._lastPongAt).toISOString() : null,
+      userRevision: this._lastUserRevision,
+    };
   },
 
   _observeSync(sync) {

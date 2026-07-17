@@ -17,6 +17,9 @@ const castService = require('./services/castService');
 const scheduler = require('./services/scheduler');
 const realtimeSync = require('./services/realtimeSyncService');
 const pushService = require('./services/pushService');
+const authService = require('./services/authService');
+const profileRegistry = require('./services/profileRegistry');
+const diagnostics = require('./services/diagnosticsService');
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -27,11 +30,10 @@ const createApiRouter = require('./routes/api');
 // Configuration
 // ---------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const USERS_DIR = path.join(DATA_DIR, 'users');
 const PODCASTS_DIR = path.join(DATA_DIR, 'podcasts');
 const LOG_HTTP_REQUESTS = false;
-const DISABLE_NEW_USER_SESSIONS = String(process.env.DISABLE_NEW_USER_SESSIONS || '').toLowerCase() === 'true';
 
 // ---------------------------------------------------------------------------
 // Startup banner
@@ -48,7 +50,8 @@ function printBanner() {
   console.log('  🎙️  Podwaffle Server — Self-hosted podcast app');
   console.log(`  📡  Port      : ${PORT}`);
   console.log(`  📂  Data dir  : ${DATA_DIR}`);
-  console.log(`  🔐  New user sessions disabled: ${DISABLE_NEW_USER_SESSIONS ? 'yes' : 'no'}`);
+  console.log(`  👥  Profiles  : ${profileRegistry.list().map((profile) => `${profile.name} (${profile.id})`).join(', ')}`);
+  console.log(`  🔑  Access key: ${authService.isRequired() ? 'required' : 'not configured'}`);
   console.log('');
 }
 
@@ -80,13 +83,13 @@ app.set('trust proxy', true);
 // CORS — allow all origins (self-hosted local network use)
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Podwaffle-Key', 'X-Podwaffle-Client']
 }));
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
@@ -119,18 +122,25 @@ const wss = new WebSocketServer({ server });
  * @param {Object} msgObj
  */
 function broadcastWs(msgObj) {
-  const stamped = realtimeSync.stamp(msgObj, msgObj.type !== 'sync:clock');
+  const mutatesSyncState = msgObj.type === 'feeds:updated' || msgObj.type.startsWith('user:');
+  const stamped = realtimeSync.stamp(msgObj, mutatesSyncState);
   const payload = JSON.stringify(stamped);
   const targetGuid = stamped && stamped.data && stamped.data.guid ? String(stamped.data.guid) : null;
+  const targetClientId = stamped?.data?.targetClientId ? String(stamped.data.targetClientId) : null;
   let sent = 0;
   wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN && (!targetGuid || !client.guid || client.guid === targetGuid)) {
+    const profileMatches = !targetGuid || client.guid === targetGuid;
+    const clientMatches = !targetClientId || client.clientId === targetClientId;
+    if (client.authenticated && client.readyState === WebSocket.OPEN && profileMatches && clientMatches) {
       client.send(payload);
       sent++;
     }
   });
   if (sent > 0) {
     console.log(`[ws] Broadcast to ${sent} client(s): type=${msgObj.type}`);
+  }
+  if (targetGuid && mutatesSyncState) {
+    pushService.notifySyncChanged(targetGuid, stamped.sync, msgObj.type);
   }
 }
 
@@ -144,44 +154,43 @@ async function sendUserSyncState(ws, guid) {
   }, false)));
 }
 
+function sendInitialRealtimeState(ws) {
+  const devices = castService.getDevices();
+  ws.send(JSON.stringify({ type: 'cast:devices', data: devices }));
+  const session = castService.getSession();
+  if (!session || !(session.deviceId || session.activeDeviceId)) return;
+  ws.send(JSON.stringify({
+    type: 'cast:status',
+    data: {
+      activeDeviceId: session.activeDeviceId || session.deviceId || null,
+      deviceName: session.deviceName || null,
+      ownerGuid: session.ownerGuid || null,
+      mediaUrl: session.mediaUrl || null,
+      episodeGuid: session.episodeGuid || null,
+      title: session.title || null,
+      podcastTitle: session.podcastTitle || null,
+      imageUrl: session.imageUrl || null,
+      position: session.position || 0,
+      duration: session.duration || 0,
+      volume: session.volume != null ? session.volume : 1,
+      status: session.status || 'idle',
+    },
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress || 'unknown';
+  ws.authenticated = !authService.isRequired();
+  ws.socketId = diagnostics.connect('', { remoteAddress: clientIp, authenticated: ws.authenticated });
   console.log(`[ws] Client connected from ${clientIp}. Total clients: ${wss.clients.size}`);
 
-  // Send welcome ping
-  ws.send(JSON.stringify({ type: 'ping', data: { message: 'Welcome to Podwaffle' } }));
-
-  // Send initial cast device snapshot so newly-connected clients can render immediately
-  try {
-    const devices = castService.getDevices();
-    ws.send(JSON.stringify({ type: 'cast:devices', data: devices }));
-
-    const session = castService.getSession();
-    if (session && (session.deviceId || session.activeDeviceId)) {
-      ws.send(JSON.stringify({
-        type: 'cast:status',
-        data: {
-          activeDeviceId: session.activeDeviceId || session.deviceId || null,
-          deviceName: session.deviceName || null,
-          ownerGuid: session.ownerGuid || null,
-          mediaUrl: session.mediaUrl || null,
-          episodeGuid: session.episodeGuid || null,
-          title: session.title || null,
-          podcastTitle: session.podcastTitle || null,
-          imageUrl: session.imageUrl || null,
-          position: session.position || 0,
-          duration: session.duration || 0,
-          volume: session.volume != null ? session.volume : 1,
-          status: session.status || 'idle'
-        }
-      }));
-    }
-  } catch (err) {
-    console.error('[ws] Failed to send initial cast snapshot:', err.message);
-  }
+  const authenticationTimer = setTimeout(() => {
+    if (!ws.guid && ws.readyState === WebSocket.OPEN) ws.close(4401, 'Authentication timeout');
+  }, 10000);
+  authenticationTimer.unref?.();
 
   // Ping/pong keepalive
   ws.isAlive = true;
@@ -194,20 +203,32 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      console.log(`[ws] Message from ${clientIp}:`, msg);
+      diagnostics.touch(ws.socketId);
 
-      if (msg.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong' }));
-      } else if (msg.type === 'sync:hello') {
-        const guid = String(msg.guid || msg.data?.guid || '').trim();
-        if (!guid) {
-          ws.send(JSON.stringify({ type: 'sync:error', data: { error: 'guid is required' } }));
+      if (msg.type === 'sync:hello') {
+        if (!authService.matches(msg.accessKey || msg.data?.accessKey || '')) {
+          diagnostics.record('client-auth-failed', { remoteAddress: clientIp });
+          ws.close(4401, 'Invalid access key');
           return;
         }
+        const guid = String(msg.guid || msg.data?.guid || '').trim();
+        if (!profileRegistry.has(guid)) {
+          ws.close(4403, 'Profile not configured');
+          return;
+        }
+        clearTimeout(authenticationTimer);
+        ws.authenticated = true;
         ws.guid = guid;
         ws.clientId = String(msg.clientId || msg.data?.clientId || '').trim();
+        diagnostics.identify(ws.socketId, { profileId: guid, clientId: ws.clientId, authenticated: true });
+        diagnostics.record('client-connected', { profileId: guid, clientId: ws.clientId, transport: 'websocket' });
         await userService.ensureUser(guid);
+        sendInitialRealtimeState(ws);
         await sendUserSyncState(ws, guid);
+      } else if (!ws.authenticated || !ws.guid) {
+        ws.close(4401, 'Authenticate first');
+      } else if (msg.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
       } else if (msg.type === 'sync:request') {
         const guid = ws.guid || String(msg.guid || msg.data?.guid || '').trim();
         if (guid) await sendUserSyncState(ws, guid);
@@ -251,6 +272,8 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', (code, reason) => {
+    clearTimeout(authenticationTimer);
+    diagnostics.disconnect(ws.socketId, { code, reason: String(reason || '') });
     console.log(`[ws] Client disconnected from ${clientIp} (code=${code}). Remaining clients: ${wss.clients.size}`);
   });
 
@@ -276,9 +299,9 @@ const heartbeatInterval = setInterval(() => {
 // when the TCP connection itself appears healthy.
 const syncClockInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(realtimeSync.clock(ws.guid || '')));
+    if (ws.authenticated && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(realtimeSync.clock(ws.guid || '')));
   });
-}, 10000);
+}, 60000);
 
 wss.on('close', () => {
   clearInterval(heartbeatInterval);
@@ -289,10 +312,28 @@ wss.on('close', () => {
 // ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
+app.get('/api/status', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'podwaffle-server',
+    authRequired: authService.isRequired(),
+    serverTime: new Date().toISOString(),
+  });
+});
+app.use('/api', authService.requireHttpAccess);
 app.use('/api', createApiRouter(feedService, userService, castService, broadcastWs, {
-  disableNewUserSessions: DISABLE_NEW_USER_SESSIONS,
   pushService,
+  profileRegistry,
+  diagnostics,
+  realtimeSync,
 }));
+
+const CLIENT_DIR = path.join(__dirname, '..', 'client');
+app.use(express.static(CLIENT_DIR, { index: 'index.html', maxAge: '1h' }));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+  res.sendFile(path.join(CLIENT_DIR, 'index.html'));
+});
 
 // ---------------------------------------------------------------------------
 // Uncaught exception / rejection handlers
@@ -334,6 +375,7 @@ async function start() {
 
   // 1. Ensure all data directories exist
   await ensureDirectories();
+  await profileRegistry.ensureAll(userService);
 
   // 2. Start the feed refresh scheduler
   console.log('[server] Starting feed refresh scheduler...');
