@@ -13,7 +13,8 @@ let writeQueue = Promise.resolve();
 const pendingSyncNotifications = new Map();
 
 function env(name) {
-  return String(process.env[name] || '').trim();
+  const val = String(process.env[name] || '').trim();
+  return val === 'null' ? '' : val;
 }
 
 function getPublicConfig() {
@@ -90,6 +91,39 @@ function base64Url(value) {
   return Buffer.from(value).toString('base64url');
 }
 
+function normalizePrivateKey(rawKey) {
+  if (!rawKey) return '';
+  // Replace literal '\n' characters with actual newlines
+  let cleaned = rawKey.replace(/\\n/g, '\n').trim();
+
+  // Strip outer quotes if present (e.g. copied from service account JSON)
+  if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+    cleaned = cleaned.slice(1, -1).replace(/\\n/g, '\n').trim();
+  }
+
+  // Reconstruct standard 64-char wrapped PEM format if it lacks proper lines
+  // (e.g. if the UI flattened the key into spaces instead of newlines)
+  const headerMatch = cleaned.match(/-----BEGIN[^-]+-----/);
+  const footerMatch = cleaned.match(/-----END[^-]+-----/);
+
+  if (headerMatch && footerMatch) {
+    const header = headerMatch[0];
+    const footer = footerMatch[0];
+    const startIndex = cleaned.indexOf(header) + header.length;
+    const endIndex = cleaned.indexOf(footer);
+    if (endIndex > startIndex) {
+      const base64Content = cleaned.substring(startIndex, endIndex).replace(/\s+/g, '');
+      const lines = [];
+      for (let i = 0; i < base64Content.length; i += 64) {
+        lines.push(base64Content.substring(i, i + 64));
+      }
+      return `${header}\n${lines.join('\n')}\n${footer}\n`;
+    }
+  }
+
+  return cleaned;
+}
+
 async function getAccessToken() {
   if (accessToken && Date.now() < accessTokenExpiresAt - 60000) return accessToken;
   const now = Math.floor(Date.now() / 1000);
@@ -102,7 +136,7 @@ async function getAccessToken() {
     exp: now + 3600,
   }));
   const signingInput = `${header}.${claim}`;
-  const privateKey = env('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n');
+  const privateKey = normalizePrivateKey(env('FIREBASE_PRIVATE_KEY'));
   const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput), privateKey).toString('base64url');
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -209,4 +243,5 @@ module.exports = {
   sendToGuid,
   notifySyncChanged,
   getDiagnostics,
+  _normalizePrivateKey: normalizePrivateKey,
 };

@@ -112,3 +112,27 @@ test('concurrent Firebase registrations are not lost', async (t) => {
   const diagnostics = await push.getDiagnostics();
   assert.equal(diagnostics.profiles.sam.registeredDevices, 2);
 });
+
+test('Firebase private key normalization', () => {
+  const modulePath = require.resolve('../services/pushService');
+  delete require.cache[modulePath];
+  const push = require(modulePath);
+
+  // Standard valid PEM format with actual newlines
+  const validPem = `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ
+-----END PRIVATE KEY-----`;
+  assert.equal(push._normalizePrivateKey(validPem), validPem + '\n');
+
+  // Key flattened to spaces (e.g. from single-line UI inputs)
+  const flattenedKey = `-----BEGIN PRIVATE KEY----- MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ -----END PRIVATE KEY-----`;
+  assert.equal(push._normalizePrivateKey(flattenedKey), validPem + '\n');
+
+  // Key with escaped \\n sequences
+  const escapedKey = `-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ\\n-----END PRIVATE KEY-----`;
+  assert.equal(push._normalizePrivateKey(escapedKey), validPem + '\n');
+
+  // Key with outer double quotes
+  const quotedKey = `"-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ\\n-----END PRIVATE KEY-----\\n"`;
+  assert.equal(push._normalizePrivateKey(quotedKey), validPem + '\n');
+});

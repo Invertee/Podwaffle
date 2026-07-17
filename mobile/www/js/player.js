@@ -1039,10 +1039,13 @@ const player = {
         window.setEpisodeProgressState(episode.guid, savedProgress || nextProgress);
       }
 
-      await api.updatePlaybackSession(guid, this._buildPlaybackSnapshot({
+      const snapshot = this._buildPlaybackSnapshot({
         position: pos,
         duration: dur,
-      }));
+      });
+      if (snapshot) {
+        await api.updatePlaybackSession(guid, snapshot);
+      }
 
       // Listened stats are derived server-side from updateProgress deltas.
       // Only sync skipped time explicitly.

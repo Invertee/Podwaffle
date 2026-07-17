@@ -3,7 +3,8 @@
 const crypto = require('crypto');
 
 function configuredKey() {
-  return String(process.env.PODWAFFLE_ACCESS_KEY || '').trim();
+  const key = String(process.env.PODWAFFLE_ACCESS_KEY || '').trim();
+  return key === 'null' ? '' : key;
 }
 
 function isRequired() {

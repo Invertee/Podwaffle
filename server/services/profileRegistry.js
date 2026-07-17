@@ -12,7 +12,9 @@ function slugify(value) {
 }
 
 function parseProfiles(raw = process.env.PODWAFFLE_PROFILES) {
-  const names = String(raw || 'Default')
+  const value = String(raw || '').trim();
+  const cleaned = value === 'null' ? '' : value;
+  const names = (cleaned || 'Default')
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean);
