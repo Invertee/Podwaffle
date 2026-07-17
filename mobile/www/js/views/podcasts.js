@@ -2,7 +2,10 @@ async function renderPodcasts(container) {
   const VIEW_KEY = 'podwaffle_view_mode_podcasts';
   const getViewMode = () => localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
   const setViewMode = (mode) => localStorage.setItem(VIEW_KEY, mode === 'list' ? 'list' : 'grid');
-  const imageAttrs = 'loading="eager" decoding="async" draggable="false"';
+  // These images are the primary content of this view.  Decoding them
+  // asynchronously lets a cache hit still be painted a frame (or more) after
+  // its tile, which is visible as artwork popping in.
+  const imageAttrs = 'loading="eager" decoding="sync" fetchpriority="high" draggable="false"';
 
   container.innerHTML = `
     <div class="view-header"></div>
@@ -109,23 +112,20 @@ async function renderPodcasts(container) {
   }
 }
 
+const PODCAST_ARTWORK_PRELOAD_LIMIT = 80;
+const podcastArtworkPreloads = new Map();
+
 function _prewarmPodcastArtwork(subscriptions = []) {
   const urls = Array.from(new Set((subscriptions || [])
     .map((sub) => sub && sub.imageUrl)
-    .filter(Boolean)));
+    .filter(Boolean))).slice(0, PODCAST_ARTWORK_PRELOAD_LIMIT);
   if (!urls.length) return;
 
-  urls.slice(0, 80).forEach((url) => {
-    try {
-      const img = new Image();
-      img.decoding = 'async';
-      img.src = url;
-    } catch (_) {}
-  });
+  urls.forEach((url) => _decodePodcastArtwork(url));
 
   if (typeof caches === 'undefined') return;
   caches.open('podwaffle-images-v1').then((cache) => {
-    urls.slice(0, 80).forEach((url) => {
+    urls.forEach((url) => {
       cache.match(url).then((cached) => {
         if (!cached) {
           fetch(url, { mode: 'no-cors' })
@@ -139,6 +139,28 @@ function _prewarmPodcastArtwork(subscriptions = []) {
       }).catch(() => {});
     });
   }).catch(() => {});
+}
+
+function _decodePodcastArtwork(url) {
+  if (!url || podcastArtworkPreloads.has(url)) return podcastArtworkPreloads.get(url);
+
+  const image = new Image();
+  image.decoding = 'async';
+  image.fetchPriority = 'high';
+  const decoded = new Promise((resolve) => {
+    image.onload = () => {
+      // decode() makes the prewarm useful for the next DOM image, rather than
+      // only ensuring that its bytes are present in Cache Storage.
+      Promise.resolve(image.decode ? image.decode() : null).catch(() => null).then(resolve);
+    };
+    image.onerror = resolve;
+  });
+
+  // Keep the Image alive for the session so browsers do not immediately evict
+  // its decoded bitmap before the menu or detail view uses it.
+  podcastArtworkPreloads.set(url, { image, decoded });
+  image.src = url;
+  return podcastArtworkPreloads.get(url);
 }
 
 function _escapePodcastAttr(value) {
@@ -314,3 +336,4 @@ if (window.castClient) {
 }
 
 window.renderPodcasts = renderPodcasts;
+window.prewarmPodcastArtwork = _prewarmPodcastArtwork;

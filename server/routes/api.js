@@ -995,9 +995,14 @@ function createApiRouter(feedService, userService, castService, broadcastWs, opt
           : Math.max(0, Math.floor(lastKnownCastPosition || 0));
         const dur = Math.max(0, Math.floor(status.duration ?? lastKnownCastDuration ?? 0));
         const mappedStatus = String(status.status || '').toLowerCase();
+        const idleReason = String(status.idleReason || '').toUpperCase();
         const ratio = dur > 0 ? pos / dur : 0;
         const nearEnd = dur > 0 && pos >= dur - 15;
-        const shouldMarkPlayed = dur > 0 && (ratio >= 0.95 || nearEnd);
+        // Google Cast may reset currentTime to zero when it enters IDLE after
+        // natural completion. Its FINISHED idle reason is authoritative in
+        // that case; other idle reasons (stop, interruption, error) must not
+        // mark the episode as played.
+        const shouldMarkPlayed = idleReason === 'FINISHED' || (dur > 0 && (ratio >= 0.95 || nearEnd));
         const shouldPersistPosition = now - lastCastProgressPersistAt >= 15000;
         const shouldClearCastSession = mappedStatus === 'idle' || mappedStatus === 'error';
         const shouldPersistTerminal = shouldClearCastSession || shouldMarkPlayed;

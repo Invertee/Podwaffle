@@ -3,7 +3,7 @@
   const config = {
   "backendUrl": "",
   "profileId": "",
-  "generatedAt": "2026-07-17T11:56:15.270Z"
+  "generatedAt": "2026-07-17T14:11:29.135Z"
 };
   const managedBackendKey = 'podwaffle_mobile_managed_backend_url';
   window.PODWAFFLE_MOBILE_CONFIG = config;

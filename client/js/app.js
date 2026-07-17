@@ -452,6 +452,9 @@ async function initApp() {
     window.appState.user = user;
     window.appState.subscriptions = user.subscriptions || [];
     window.appState.progress = user.progress || {};
+    // Start decoding cached cover art while the rest of app startup runs. This
+    // avoids a delayed first paint when the Podcasts view is opened.
+    window.prewarmPodcastArtwork?.(window.appState.subscriptions);
 
     if (user.settings && window.player) {
       window.player.skipBackSecs = user.settings.skipBack || 15;

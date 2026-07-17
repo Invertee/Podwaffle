@@ -427,7 +427,15 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           broadcastState();
 
           if (typeof onStatusUpdate === 'function') {
-            _notifyStatusUpdate({ position: newPosition, duration: newDuration, status: mappedStatus });
+            // Cast receivers can report IDLE with currentTime reset to zero once
+            // media finishes. Preserve idleReason so the progress owner can
+            // distinguish a completed episode from a stopped/interrupted one.
+            _notifyStatusUpdate({
+              position: newPosition,
+              duration: newDuration,
+              status: mappedStatus,
+              idleReason: playerStatus.idleReason || null,
+            });
           }
         };
 

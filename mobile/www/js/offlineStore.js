@@ -250,6 +250,39 @@
     return rememberPodcast(await remote.getPodcast(feedId, limit, offset), offset);
   };
 
+  // A normal podcast read is cache-first so the app remains useful offline.
+  // Refresh is deliberately different: the user explicitly asked for the
+  // complete current feed, so bypass the cache and replace its metadata before
+  // the detail view is rendered again. Downloaded audio is managed separately
+  // by cacheManager and is not affected by this.
+  api.refreshPodcast = async function refreshPodcastOffline(feedId) {
+    const guid = localStorage.getItem('podwaffle_guid');
+    if (guid) await api.refreshUserFeeds(guid);
+    const pageSize = 500;
+    let offset = 0;
+    let podcast = null;
+    const episodes = [];
+    do {
+      const page = await remote.getPodcast(feedId, pageSize, offset);
+      podcast = { ...(podcast || {}), ...page };
+      const pageEpisodes = Array.isArray(page?.episodes) ? page.episodes : [];
+      episodes.push(...pageEpisodes);
+      offset += pageEpisodes.length;
+      if (pageEpisodes.length < pageSize) break;
+    } while (true);
+    podcast.episodes = episodes;
+    const cached = rememberPodcast(podcast, 0);
+    root.dispatchEvent(new CustomEvent('podwaffle:podcast-refreshed', {
+      detail: { feedId, podcast: cached, forced: true },
+    }));
+    return {
+      ok: true,
+      feedId,
+      refreshedAt: new Date().toISOString(),
+      episodeCount: podcast?.episodes?.length || 0,
+    };
+  };
+
   function installWrite(name, localUpdate, keyFor, reconcile) {
     api[name] = async (...args) => {
       const guid = args[0];

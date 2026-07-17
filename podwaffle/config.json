@@ -1,6 +1,6 @@
 {
   "name": "Podwaffle",
-  "version": "4.0.5",
+  "version": "4.0.8",
   "slug": "podwaffle",
   "description": "A Podcast app with multi-device Podcast syncing, Google Cast and home assistant integration",
   "url": "https://github.com/Invertee/Podwaffle",

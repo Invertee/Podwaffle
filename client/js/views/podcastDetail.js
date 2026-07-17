@@ -18,6 +18,9 @@ async function renderPodcastDetail(container, feedId) {
       window.api.getPodcast(feedId, 100, 0),
       window.api.getProgress(guid)
     ]);
+    // Usually this has already completed during startup/menu prewarming. For
+    // a directly opened podcast, begin it before creating the visible header.
+    window.prewarmPodcastArtwork?.([podcast]);
     window.replaceProgressState(progressData);
     
     // Clear new flag for this user
@@ -31,7 +34,7 @@ async function renderPodcastDetail(container, feedId) {
 
     const headerHtml = `
       <div class="podcast-detail-header">
-        <img src="${podcast.imageUrl}" class="podcast-artwork-large" onerror="this.src='icons/icon-192.png'">
+        <img src="${podcast.imageUrl || 'icons/icon-192.png'}" class="podcast-artwork-large" decoding="sync" fetchpriority="high" onerror="this.src='icons/icon-192.png'">
         <div class="podcast-detail-info">
           <h2>${podcast.title}</h2>
           <div class="pd-author">${podcast.author || ''}</div>
