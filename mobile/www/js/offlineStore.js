@@ -178,13 +178,15 @@
 
   api.getSubscriptions = async function getSubscriptionsOffline(guid) {
     const cached = read(profileKey(guid, 'subscriptions'), null);
-    if (cached) {
-      remote.getSubscriptions(guid).then((value) => write(profileKey(guid, 'subscriptions'), value)).catch(() => {});
-      return cached;
+    if (navigator.onLine === false && cached !== null) return cached;
+    try {
+      const value = await remote.getSubscriptions(guid);
+      write(profileKey(guid, 'subscriptions'), value);
+      return value;
+    } catch (err) {
+      if (cached !== null && networkFailure(err)) return cached;
+      throw err;
     }
-    const value = await remote.getSubscriptions(guid);
-    write(profileKey(guid, 'subscriptions'), value);
-    return value;
   };
 
   api.getProgress = async function getProgressOffline(guid) {
@@ -241,11 +243,28 @@
   api.getPodcast = async function getPodcastOffline(feedId, limit = 100, offset = 0) {
     const cached = read(podcastKey(feedId), null);
     if (cached) {
+      const cachedEpisodes = Array.isArray(cached.episodes) ? cached.episodes : [];
+      const knownEpisodeCount = Math.max(0, Number(cached.episodeCount) || 0);
+      const expectedPageSize = Math.min(limit, Math.max(0, knownEpisodeCount - offset) || limit);
+      const cachedPage = cachedEpisodes.slice(offset, offset + limit);
+
+      // Subscribing initially caches feed metadata, and downloaded episodes can
+      // leave a podcast cache containing only one item. Do not mistake that
+      // partial cache for the requested page while the server is reachable.
+      if (navigator.onLine !== false && cachedPage.length < expectedPageSize) {
+        try {
+          const remotePage = await remote.getPodcast(feedId, limit, offset);
+          rememberPodcast(remotePage, offset);
+          return remotePage;
+        } catch (err) {
+          if (!networkFailure(err)) throw err;
+        }
+      }
       remote.getPodcast(feedId, limit, offset).then((value) => {
         rememberPodcast(value, offset);
         root.dispatchEvent(new CustomEvent('podwaffle:podcast-refreshed', { detail: { feedId, podcast: value } }));
       }).catch(() => {});
-      return { ...cached, episodes: (cached.episodes || []).slice(offset, offset + limit) };
+      return { ...cached, episodes: cachedPage };
     }
     return rememberPodcast(await remote.getPodcast(feedId, limit, offset), offset);
   };

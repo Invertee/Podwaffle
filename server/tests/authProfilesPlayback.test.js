@@ -136,3 +136,83 @@ MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ
   const quotedKey = `"-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ\\n-----END PRIVATE KEY-----\\n"`;
   assert.equal(push._normalizePrivateKey(quotedKey), validPem + '\n');
 });
+
+test('Firebase configuration is discovered from add-on JSON files', async (t) => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'podwaffle-firebase-config-'));
+  const envNames = [
+    'ADDON_CONFIG_DIR', 'FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY',
+    'FIREBASE_API_KEY', 'FIREBASE_APP_ID', 'FIREBASE_SENDER_ID',
+    'FIREBASE_SERVICE_ACCOUNT_FILE', 'FIREBASE_GOOGLE_SERVICES_FILE',
+    'FIREBASE_SERVICE_ACCOUNT_JSON', 'FIREBASE_GOOGLE_SERVICES_JSON',
+  ];
+  const previous = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  for (const name of envNames) delete process.env[name];
+  process.env.ADDON_CONFIG_DIR = configDir;
+
+  fs.writeFileSync(path.join(configDir, 'podwaffle-test-key.json'), JSON.stringify({
+    type: 'service_account',
+    project_id: 'podwaffle-test',
+    client_email: 'firebase-admin@podwaffle-test.iam.gserviceaccount.com',
+    private_key: 'test-private-key',
+  }));
+  fs.writeFileSync(path.join(configDir, 'google-services.json'), JSON.stringify({
+    project_info: { project_number: '123456789', project_id: 'podwaffle-test' },
+    client: [{
+      client_info: {
+        mobilesdk_app_id: '1:123456789:android:abcdef',
+        android_client_info: { package_name: 'com.podwaffle.app' },
+      },
+      api_key: [{ current_key: 'test-api-key' }],
+    }],
+  }));
+
+  const modulePath = require.resolve('../services/pushService');
+  delete require.cache[modulePath];
+  const push = require(modulePath);
+  t.after(() => {
+    delete require.cache[modulePath];
+    for (const name of envNames) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  assert.deepEqual(push.getPublicConfig(), {
+    enabled: true,
+    projectId: 'podwaffle-test',
+    apiKey: 'test-api-key',
+    applicationId: '1:123456789:android:abcdef',
+    gcmSenderId: '123456789',
+  });
+  const diagnostics = await push.getDiagnostics();
+  assert.deepEqual(diagnostics.configurationErrors, []);
+  assert.deepEqual(diagnostics.configurationSources, {
+    serviceAccount: 'podwaffle-test-key.json',
+    googleServices: 'google-services.json',
+  });
+
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON = JSON.stringify({
+    type: 'service_account',
+    project_id: 'pasted-project',
+    client_email: 'firebase-admin@pasted-project.iam.gserviceaccount.com',
+    private_key: 'pasted-private-key',
+  });
+  process.env.FIREBASE_GOOGLE_SERVICES_JSON = JSON.stringify({
+    project_info: { project_number: '987654321', project_id: 'pasted-project' },
+    client: [{
+      client_info: {
+        mobilesdk_app_id: '1:987654321:android:fedcba',
+        android_client_info: { package_name: 'com.podwaffle.app' },
+      },
+      api_key: [{ current_key: 'pasted-api-key' }],
+    }],
+  });
+  const pasted = push._loadFirebaseConfiguration();
+  assert.equal(pasted.values.FIREBASE_PROJECT_ID, 'pasted-project');
+  assert.equal(pasted.values.FIREBASE_API_KEY, 'pasted-api-key');
+  assert.deepEqual(pasted.sources, {
+    serviceAccount: 'Home Assistant option',
+    googleServices: 'Home Assistant option',
+  });
+});

@@ -1,6 +1,6 @@
 {
   "name": "Podwaffle",
-  "version": "4.0.8",
+  "version": "4.1.2",
   "slug": "podwaffle",
   "description": "A Podcast app with multi-device Podcast syncing, Google Cast and home assistant integration",
   "url": "https://github.com/Invertee/Podwaffle",
@@ -27,7 +27,11 @@
     "firebase_private_key": "",
     "firebase_api_key": "",
     "firebase_app_id": "",
-    "firebase_sender_id": ""
+    "firebase_sender_id": "",
+    "firebase_service_account_file": "",
+    "firebase_google_services_file": "",
+    "firebase_service_account_json": "",
+    "firebase_google_services_json": ""
   },
   "schema": {
     "profiles": "str",
@@ -37,6 +41,10 @@
     "firebase_private_key": "password?",
     "firebase_api_key": "password?",
     "firebase_app_id": "str?",
-    "firebase_sender_id": "str?"
+    "firebase_sender_id": "str?",
+    "firebase_service_account_file": "str?",
+    "firebase_google_services_file": "str?",
+    "firebase_service_account_json": "password?",
+    "firebase_google_services_json": "password?"
   }
 }

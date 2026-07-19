@@ -19,7 +19,7 @@ test('client shell uses the single server API and offline store', () => {
     assert.doesNotMatch(index, new RegExp(removed));
     assert.doesNotMatch(worker, new RegExp(removed));
   }
-  assert.match(worker, /podwaffle-shell-v8/);
+  assert.match(worker, /podwaffle-shell-v9/);
 });
 
 test('server API defaults to same-origin and authenticates requests', () => {

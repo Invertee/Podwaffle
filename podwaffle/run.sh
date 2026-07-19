@@ -11,11 +11,16 @@ export FIREBASE_PRIVATE_KEY="$(bashio::config 'firebase_private_key' 2>/dev/null
 export FIREBASE_API_KEY="$(bashio::config 'firebase_api_key' 2>/dev/null || true)"
 export FIREBASE_APP_ID="$(bashio::config 'firebase_app_id' 2>/dev/null || true)"
 export FIREBASE_SENDER_ID="$(bashio::config 'firebase_sender_id' 2>/dev/null || true)"
+export FIREBASE_SERVICE_ACCOUNT_FILE="$(bashio::config 'firebase_service_account_file' 2>/dev/null || true)"
+export FIREBASE_GOOGLE_SERVICES_FILE="$(bashio::config 'firebase_google_services_file' 2>/dev/null || true)"
+export FIREBASE_SERVICE_ACCOUNT_JSON="$(bashio::config 'firebase_service_account_json' 2>/dev/null || true)"
+export FIREBASE_GOOGLE_SERVICES_JSON="$(bashio::config 'firebase_google_services_json' 2>/dev/null || true)"
 
 SRC_DIR="/opt/podwaffle/src"
 APP_DIR="/config/app"
 DATA_DIR="/config/data"
 export DATA_DIR
+export ADDON_CONFIG_DIR="/config"
 
 mkdir -p /config "${APP_DIR}" "${DATA_DIR}/users" "${DATA_DIR}/podcasts"
 

@@ -13,11 +13,45 @@ firebase_private_key: ""
 firebase_api_key: ""
 firebase_app_id: ""
 firebase_sender_id: ""
+firebase_service_account_file: ""
+firebase_google_services_file: ""
+firebase_service_account_json: ""
+firebase_google_services_json: ""
 ```
 
 - `profiles` is a comma-delimited list. Display names are converted to stable lowercase IDs, for example `Sam Smith` becomes `sam-smith`.
 - `access_key` protects all profile, podcast, Cast, and Home Assistant API routes. Set it whenever the add-on is reachable outside Home Assistant ingress.
 - Firebase values are optional. When configured, Android devices receive data-only sync notifications. WebSocket remains the live transport and Android fallback.
+- `firebase_project_id` must be the Firebase/Google Cloud **Project ID** (for example `my-podwaffle-123`), not the numeric project number, app ID, private-key ID, or a service-account key fingerprint. Enable the Firebase Cloud Messaging API for that same project, and use a service-account email/private key issued by it. The API key, app ID, and sender ID come from the Android app configuration for the same Firebase project.
+
+### Firebase JSON files
+
+As an alternative to entering the six Firebase values separately, copy these files into the root of the add-on's data/config folder (the directory mounted as `/config` inside the add-on):
+
+- `google-services.json`, downloaded for the `com.podwaffle.app` Android app.
+- A service-account key JSON. Its generated filename can be left unchanged; Podwaffle identifies it by its `service_account` content and prefers a file whose project matches `google-services.json`.
+
+Restart the add-on after copying the files. Podwaffle reads the credentials at startup, verifies that both files use the same project, and sends only the public Android identifiers to the mobile client. The private key remains on the server. The Admin diagnostics response reports the selected filenames and any configuration error, but never returns secret values.
+
+If the files have different names or are stored in a subfolder, set paths relative to the add-on config root:
+
+```yaml
+firebase_service_account_file: firebase/podwaffle-service-account.json
+firebase_google_services_file: firebase/google-services.json
+```
+
+Individually configured Firebase fields take precedence over values loaded from the files.
+
+You can instead paste the complete contents of both files directly into the add-on YAML using block strings:
+
+```yaml
+firebase_service_account_json: |-
+  { "type": "service_account", "project_id": "...", ... }
+firebase_google_services_json: |-
+  { "project_info": { ... }, "client": [ ... ] }
+```
+
+The pasted JSON options take precedence over discovered or explicitly named files. The original six individual fields take precedence over both JSON-loading methods, so clear any old or incorrect individual Firebase values when switching to file/JSON configuration.
 
 Restart the add-on after changing profiles or the access key. Removing a profile from the list makes its API inaccessible but does not delete its stored data.
 

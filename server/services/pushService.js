@@ -6,15 +6,139 @@ const path = require('path');
 const fetch = require('node-fetch');
 
 const dataRoot = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
+const configRoot = process.env.ADDON_CONFIG_DIR || dataRoot;
 const devicesPath = path.join(dataRoot, 'push-devices.json');
 let accessToken = null;
 let accessTokenExpiresAt = 0;
 let writeQueue = Promise.resolve();
 const pendingSyncNotifications = new Map();
 
-function env(name) {
+function rawEnv(name) {
   const val = String(process.env[name] || '').trim();
   return val === 'null' ? '' : val;
+}
+
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function parseJson(value) {
+  try {
+    return JSON.parse(String(value || ''));
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveConfigFile(configuredName, defaultName) {
+  const name = String(configuredName || defaultName || '').trim();
+  if (!name) return null;
+  return path.isAbsolute(name) ? name : path.join(configRoot, name);
+}
+
+function selectAndroidClient(googleServices) {
+  const clients = Array.isArray(googleServices?.client) ? googleServices.client : [];
+  return clients.find((client) => client?.client_info?.android_client_info?.package_name === 'com.podwaffle.app')
+    || clients[0]
+    || null;
+}
+
+function discoverServiceAccount(projectId) {
+  const explicitPath = resolveConfigFile(rawEnv('FIREBASE_SERVICE_ACCOUNT_FILE'));
+  if (explicitPath) return { filePath: explicitPath, json: readJson(explicitPath), explicit: true };
+
+  let names = [];
+  try {
+    names = fs.readdirSync(configRoot).filter((name) => name.toLowerCase().endsWith('.json'));
+  } catch (_) {
+    return { filePath: null, json: null, explicit: false };
+  }
+  const candidates = names
+    .filter((name) => name.toLowerCase() !== 'google-services.json')
+    .map((name) => {
+      const filePath = path.join(configRoot, name);
+      return { filePath, json: readJson(filePath), explicit: false };
+    })
+    .filter((candidate) => candidate.json?.type === 'service_account');
+  return candidates.find((candidate) => projectId && candidate.json?.project_id === projectId)
+    || candidates.find((candidate) => /^podwaffle.*\.json$/i.test(path.basename(candidate.filePath)))
+    || candidates[0]
+    || { filePath: null, json: null, explicit: false };
+}
+
+function loadFirebaseConfiguration() {
+  const googleJsonOption = rawEnv('FIREBASE_GOOGLE_SERVICES_JSON');
+  const serviceJsonOption = rawEnv('FIREBASE_SERVICE_ACCOUNT_JSON');
+  const googlePath = resolveConfigFile(rawEnv('FIREBASE_GOOGLE_SERVICES_FILE'), 'google-services.json');
+  const googleServices = googleJsonOption ? parseJson(googleJsonOption) : readJson(googlePath);
+  const googleProject = String(googleServices?.project_info?.project_id || '').trim();
+  const serviceAccount = serviceJsonOption
+    ? { filePath: null, json: parseJson(serviceJsonOption), explicit: true, option: true }
+    : discoverServiceAccount(googleProject);
+  const androidClient = selectAndroidClient(googleServices);
+  const serviceProject = String(serviceAccount.json?.project_id || '').trim();
+  const configuredProject = rawEnv('FIREBASE_PROJECT_ID');
+  const effectiveProject = configuredProject || serviceProject || googleProject;
+  const errors = [];
+
+  if (googleJsonOption && !googleServices) {
+    errors.push('Unable to parse firebase_google_services_json');
+  } else if (rawEnv('FIREBASE_GOOGLE_SERVICES_FILE') && !googleServices) {
+    errors.push(`Unable to read Firebase Android config: ${path.basename(googlePath)}`);
+  }
+  if (serviceAccount.explicit && !serviceAccount.json) {
+    errors.push(serviceAccount.option
+      ? 'Unable to parse firebase_service_account_json'
+      : `Unable to read Firebase service account: ${path.basename(serviceAccount.filePath)}`);
+  }
+  if (googleProject && serviceProject && googleProject !== serviceProject) {
+    errors.push(`Firebase project mismatch: google-services.json uses ${googleProject}, service account uses ${serviceProject}`);
+  }
+  if (configuredProject && googleProject && configuredProject !== googleProject) {
+    errors.push(`Firebase project mismatch: firebase_project_id uses ${configuredProject}, google-services.json uses ${googleProject}`);
+  } else if (configuredProject && serviceProject && configuredProject !== serviceProject) {
+    errors.push(`Firebase project mismatch: firebase_project_id uses ${configuredProject}, service account uses ${serviceProject}`);
+  }
+  if (effectiveProject && !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(effectiveProject)) {
+    errors.push(`Invalid Firebase project ID: ${effectiveProject}`);
+  }
+
+  return {
+    values: {
+      FIREBASE_PROJECT_ID: serviceProject || googleProject,
+      FIREBASE_CLIENT_EMAIL: String(serviceAccount.json?.client_email || '').trim(),
+      FIREBASE_PRIVATE_KEY: String(serviceAccount.json?.private_key || '').trim(),
+      FIREBASE_API_KEY: String(androidClient?.api_key?.[0]?.current_key || '').trim(),
+      FIREBASE_APP_ID: String(androidClient?.client_info?.mobilesdk_app_id || '').trim(),
+      FIREBASE_SENDER_ID: String(googleServices?.project_info?.project_number || '').trim(),
+    },
+    errors,
+    sources: {
+      serviceAccount: serviceAccount.option
+        ? 'Home Assistant option'
+        : (serviceAccount.filePath ? path.basename(serviceAccount.filePath) : null),
+      googleServices: googleJsonOption && googleServices
+        ? 'Home Assistant option'
+        : (googleServices ? path.basename(googlePath) : null),
+    },
+  };
+}
+
+const firebaseConfiguration = loadFirebaseConfiguration();
+if (firebaseConfiguration.errors.length) {
+  firebaseConfiguration.errors.forEach((error) => console.warn(`[push] Firebase configuration error: ${error}`));
+} else if (firebaseConfiguration.sources.serviceAccount || firebaseConfiguration.sources.googleServices) {
+  console.log(
+    `[push] Firebase configuration loaded (service_account=${firebaseConfiguration.sources.serviceAccount || 'not found'}, google_services=${firebaseConfiguration.sources.googleServices || 'not found'})`
+  );
+}
+
+function env(name) {
+  return rawEnv(name) || firebaseConfiguration.values[name] || '';
 }
 
 function getPublicConfig() {
@@ -28,7 +152,7 @@ function getPublicConfig() {
 }
 
 function isConfigured() {
-  return !!(
+  return firebaseConfiguration.errors.length === 0 && !!(
     env('FIREBASE_PROJECT_ID')
     && env('FIREBASE_CLIENT_EMAIL')
     && env('FIREBASE_PRIVATE_KEY')
@@ -232,7 +356,12 @@ async function getDiagnostics() {
       })),
     };
   }
-  return { configured: isConfigured(), profiles };
+  return {
+    configured: isConfigured(),
+    configurationErrors: [...firebaseConfiguration.errors],
+    configurationSources: { ...firebaseConfiguration.sources },
+    profiles,
+  };
 }
 
 module.exports = {
@@ -244,4 +373,5 @@ module.exports = {
   notifySyncChanged,
   getDiagnostics,
   _normalizePrivateKey: normalizePrivateKey,
+  _loadFirebaseConfiguration: loadFirebaseConfiguration,
 };
