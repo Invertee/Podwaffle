@@ -140,7 +140,11 @@
 
       recoveryState.transitionPromise = (async () => {
         const stopCast = options.stopCast !== false;
-        const autoplay = options.autoplay === true;
+        // An explicit stop-casting action is a transport handoff. Preserve the
+        // current play/pause state unless a recovery caller overrides it.
+        const autoplay = options.autoplay === undefined
+          ? !!this.isPlaying
+          : options.autoplay === true;
         const reason = options.reason || 'switch-to-local';
         const wasCast = this.mode === 'cast';
         const resumeAt = Math.max(0, Math.floor(this.position || 0));
@@ -186,7 +190,7 @@
         this._scheduleQueueSync?.({ immediate: true });
         this._notifyStateChange?.();
 
-        console.log('[castRecovery] Switched to local playback without autoplay:', reason);
+        console.log(`[castRecovery] Switched to local playback (${autoplay ? 'playing' : 'paused'}):`, reason);
         return { status: 'idle', mode: 'local', autoplay };
       })().finally(() => {
         player._castStopInProgress = false;

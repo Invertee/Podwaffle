@@ -29,6 +29,7 @@ const state = {
   idleTimeoutTimer: null,
   lastSessionActivityAt: 0,
   lastProgressAt: 0,
+  mediaLoadInProgress: false,
   onStatusUpdate: null,
   ownerGuid: null, // The user GUID who initiated the cast session
   broadcastFn: null // Callback to broadcast state to WS clients
@@ -191,7 +192,8 @@ function _notifyStatusUpdate(status = {}) {
       podcastTitle: state.podcastTitle,
       imageUrl: state.imageUrl,
       volume: state.volume,
-      reason: status.reason || null
+      reason: status.reason || null,
+      idleReason: status.idleReason || null
     });
   } catch (err) {
     console.warn('[castService] status update callback failed:', err.message);
@@ -275,6 +277,7 @@ function _resetState() {
   state.ownerGuid = null;
   state.lastSessionActivityAt = 0;
   state.lastProgressAt = 0;
+  state.mediaLoadInProgress = false;
 }
 
 function _disconnectClient() {
@@ -313,6 +316,69 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
     throw new Error(msg);
   }
 
+  // Keep the Cast application connected when replacing media on the same
+  // receiver. Closing the client here creates an IDLE gap that clients can
+  // mistake for the end of the whole Cast session.
+  if (
+    state.activeDeviceId === deviceId
+    && state.ownerGuid === userGuid
+    && state.client
+    && state.player
+  ) {
+    state.mediaUrl = mediaUrl;
+    state.episodeGuid = metadata.episodeGuid || null;
+    state.title = metadata.title || null;
+    state.podcastTitle = metadata.podcastTitle || null;
+    state.imageUrl = metadata.imageUrl || null;
+    state.position = startPosition;
+    state.duration = Number(metadata.duration || 0);
+    state.status = 'connecting';
+    state.onStatusUpdate = typeof onStatusUpdate === 'function' ? onStatusUpdate : null;
+    state.mediaLoadInProgress = true;
+    _touchSessionActivity(false);
+    _clearIdleTimeoutTimer();
+    device.status = 'connecting';
+    devices.set(deviceId, device);
+    broadcastState('media-replaced');
+
+    const mediaInfo = {
+      contentId: mediaUrl,
+      contentType: 'audio/mpeg',
+      streamType: 'BUFFERED',
+      duration: state.duration > 0 ? state.duration : undefined,
+      metadata: {
+        type: 3,
+        metadataType: 0,
+        title: metadata.title || 'Podwaffle',
+        subtitle: metadata.podcastTitle || 'Podwaffle',
+        images: metadata.imageUrl ? [{ url: metadata.imageUrl }] : [],
+      },
+    };
+    const loadOptions = { autoplay: true };
+    if (startPosition > 0) loadOptions.currentTime = startPosition;
+
+    return new Promise((resolve, reject) => {
+      state.player.load(mediaInfo, loadOptions, (loadErr) => {
+        state.mediaLoadInProgress = false;
+        if (loadErr) {
+          state.status = 'error';
+          device.status = 'error';
+          devices.set(deviceId, device);
+          broadcastState();
+          reject(new Error(`Failed to replace media on ${device.name}: ${loadErr.message}`));
+          return;
+        }
+
+        state.status = 'playing';
+        device.status = 'playing';
+        devices.set(deviceId, device);
+        _touchSessionActivity(true);
+        broadcastState('media-replaced');
+        resolve({ status: 'playing', deviceId, mediaUrl, reusedSession: true });
+      });
+    });
+  }
+
   // Disconnect any existing session
   _disconnectClient();
 
@@ -324,6 +390,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
   state.podcastTitle = metadata.podcastTitle || null;
   state.imageUrl = metadata.imageUrl || null;
   state.position = startPosition;
+  state.duration = Number(metadata.duration || 0);
   state.status = 'connecting';
   state.onStatusUpdate = typeof onStatusUpdate === 'function' ? onStatusUpdate : null;
   _touchSessionActivity(false);
@@ -386,6 +453,11 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
         const applyPlayerStatus = (playerStatus) => {
           if (!playerStatus) return;
 
+          const statusContentId = playerStatus.media && playerStatus.media.contentId;
+          if (statusContentId && state.mediaUrl && statusContentId !== state.mediaUrl) {
+            return;
+          }
+
           const newPosition = playerStatus.currentTime || 0;
           const newDuration = (playerStatus.media && playerStatus.media.duration) || state.duration || 0;
           const playerState = playerStatus.playerState || 'IDLE';
@@ -400,6 +472,10 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
             case 'BUFFERING':mappedStatus = 'playing';  break;
             case 'IDLE':     mappedStatus = 'idle';     break;
             default:         mappedStatus = 'idle';
+          }
+
+          if (state.mediaLoadInProgress && mappedStatus === 'idle') {
+            return;
           }
 
           const progressChanged = newPosition > previousPosition + 0.25;
@@ -424,7 +500,10 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
 
           console.log(`[castService] player status → state=${playerState}, pos=${newPosition.toFixed(1)}s, dur=${newDuration.toFixed(1)}s`);
           
-          broadcastState();
+          const idleReason = playerStatus.idleReason || null;
+          const completedNaturally = mappedStatus === 'idle'
+            && String(idleReason || '').toUpperCase() === 'FINISHED';
+          broadcastState(completedNaturally ? 'finished' : null);
 
           if (typeof onStatusUpdate === 'function') {
             // Cast receivers can report IDLE with currentTime reset to zero once
@@ -434,7 +513,7 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
               position: newPosition,
               duration: newDuration,
               status: mappedStatus,
-              idleReason: playerStatus.idleReason || null,
+              idleReason,
             });
           }
         };
@@ -487,7 +566,9 @@ async function castTo(deviceId, userGuid, mediaUrl, startPosition = 0, onStatusU
           loadOptions.currentTime = startPosition;
         }
 
+        state.mediaLoadInProgress = true;
         player.load(mediaInfo, loadOptions, (loadErr, status) => {
+          state.mediaLoadInProgress = false;
           if (loadErr) {
             const msg = `Failed to load media on ${device.name}: ${loadErr.message}`;
             console.error('[castService] castTo() →', msg);

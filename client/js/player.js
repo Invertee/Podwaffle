@@ -410,6 +410,12 @@ const player = {
       return;
     }
 
+    // A receiver can briefly report IDLE for the previous item while the next
+    // episode is loading. The pending load owns that transition.
+    if (this._castStartInFlight && nextStatus === 'idle') {
+      return;
+    }
+
     const terminalIdleReasons = new Set(['timeout', 'health-reset', 'device-lost', 'poll', 'stopped']);
     if (nextStatus === 'idle' && terminalIdleReasons.has(reason)) {
       this.switchToLocal().catch((err) => {

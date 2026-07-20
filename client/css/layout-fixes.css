@@ -56,6 +56,10 @@
 }
 
 @media (max-width: 768px) {
+  .main-content {
+    padding-bottom: calc(var(--player-stack-height) + 24px);
+  }
+
   .view-mode-toggle {
     right: 18px !important;
   }

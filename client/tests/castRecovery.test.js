@@ -147,6 +147,20 @@ test('switching back to local restores position but remains paused', async () =>
   assert.equal(googleCastSender._currentSession, null);
 });
 
+test('stopping an active cast continues playback on the local player', async () => {
+  const { player, audio, googleCastSender } = createContext();
+  player.isPlaying = true;
+  await player.switchToLocal();
+
+  assert.equal(player.mode, 'local');
+  assert.equal(player.isPlaying, true);
+  assert.equal(player._activeCastDeviceId, null);
+  assert.equal(audio.src, 'https://media.example/episode.mp3');
+  assert.equal(audio.currentTime, 321);
+  assert.equal(audio.playCalls, 1);
+  assert.equal(googleCastSender._currentSession, null);
+});
+
 test('terminal cast status clears the sender and returns player to local paused mode', async () => {
   const { player, audio, castClient, googleCastSender } = createContext();
 

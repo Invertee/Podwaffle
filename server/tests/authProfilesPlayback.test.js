@@ -113,6 +113,33 @@ test('concurrent Firebase registrations are not lost', async (t) => {
   assert.equal(diagnostics.profiles.sam.registeredDevices, 2);
 });
 
+test('Firebase startup access check explains incomplete configuration without making a request', async (t) => {
+  const envNames = [
+    'FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY',
+    'FIREBASE_API_KEY', 'FIREBASE_APP_ID', 'FIREBASE_SENDER_ID',
+    'FIREBASE_SERVICE_ACCOUNT_FILE', 'FIREBASE_GOOGLE_SERVICES_FILE',
+    'FIREBASE_SERVICE_ACCOUNT_JSON', 'FIREBASE_GOOGLE_SERVICES_JSON',
+  ];
+  const previous = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  for (const name of envNames) delete process.env[name];
+  const modulePath = require.resolve('../services/pushService');
+  delete require.cache[modulePath];
+  const push = require(modulePath);
+  t.after(() => {
+    delete require.cache[modulePath];
+    for (const name of envNames) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  });
+
+  const status = await push.checkServiceAccess();
+  assert.equal(status.configured, false);
+  assert.equal(status.accessible, false);
+  assert.deepEqual(status.errors, []);
+  assert.deepEqual(status.missing, envNames.slice(0, 6));
+});
+
 test('Firebase private key normalization', () => {
   const modulePath = require.resolve('../services/pushService');
   delete require.cache[modulePath];

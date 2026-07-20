@@ -377,6 +377,10 @@ async function start() {
   await ensureDirectories();
   await profileRegistry.ensureAll(userService);
 
+  // Verify at startup that the configured service account can obtain an FCM
+  // OAuth token. This checks real Firebase access without sending a message.
+  await pushService.logStartupStatus();
+
   // 2. Start the feed refresh scheduler
   console.log('[server] Starting feed refresh scheduler...');
   scheduler.startScheduler(feedService, userService, broadcastWs);

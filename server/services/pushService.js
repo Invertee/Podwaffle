@@ -162,6 +162,17 @@ function isConfigured() {
   );
 }
 
+function missingConfigurationFields() {
+  return [
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PRIVATE_KEY',
+    'FIREBASE_API_KEY',
+    'FIREBASE_APP_ID',
+    'FIREBASE_SENDER_ID',
+  ].filter((name) => !env(name));
+}
+
 async function loadDevices() {
   try {
     return JSON.parse(await fs.promises.readFile(devicesPath, 'utf8')) || {};
@@ -262,19 +273,78 @@ async function getAccessToken() {
   const signingInput = `${header}.${claim}`;
   const privateKey = normalizePrivateKey(env('FIREBASE_PRIVATE_KEY'));
   const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput), privateKey).toString('base64url');
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: `${signingInput}.${signature}`,
-    }).toString(),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  let response;
+  try {
+    response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: `${signingInput}.${signature}`,
+      }).toString(),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const body = await response.json();
   if (!response.ok || !body.access_token) throw new Error(body.error_description || `OAuth HTTP ${response.status}`);
   accessToken = body.access_token;
   accessTokenExpiresAt = Date.now() + (Number(body.expires_in || 3600) * 1000);
   return accessToken;
+}
+
+async function checkServiceAccess() {
+  const missing = missingConfigurationFields();
+  if (firebaseConfiguration.errors.length || missing.length) {
+    return {
+      configured: false,
+      accessible: false,
+      projectId: env('FIREBASE_PROJECT_ID') || null,
+      missing,
+      errors: [...firebaseConfiguration.errors],
+    };
+  }
+
+  try {
+    await getAccessToken();
+    return {
+      configured: true,
+      accessible: true,
+      projectId: env('FIREBASE_PROJECT_ID'),
+      missing: [],
+      errors: [],
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      accessible: false,
+      projectId: env('FIREBASE_PROJECT_ID'),
+      missing: [],
+      errors: [error?.message || String(error)],
+    };
+  }
+}
+
+async function logStartupStatus() {
+  const status = await checkServiceAccess();
+  const diagnostics = await getDiagnostics();
+  const registeredDevices = Object.values(diagnostics.profiles)
+    .reduce((total, profile) => total + profile.registeredDevices, 0);
+
+  if (!status.configured) {
+    const details = status.errors.length
+      ? status.errors.join('; ')
+      : `missing ${status.missing.join(', ')}`;
+    console.warn(`[push] Firebase startup check: DISABLED (${details})`);
+  } else if (!status.accessible) {
+    console.error(`[push] Firebase startup check: FAILED (project=${status.projectId}, OAuth access denied: ${status.errors.join('; ')})`);
+  } else {
+    console.log(`[push] Firebase startup check: OK (project=${status.projectId}, OAuth access verified, registered_devices=${registeredDevices})`);
+  }
+  return { ...status, registeredDevices };
 }
 
 function stringifyData(data) {
@@ -372,6 +442,8 @@ module.exports = {
   sendToGuid,
   notifySyncChanged,
   getDiagnostics,
+  checkServiceAccess,
+  logStartupStatus,
   _normalizePrivateKey: normalizePrivateKey,
   _loadFirebaseConfiguration: loadFirebaseConfiguration,
 };
