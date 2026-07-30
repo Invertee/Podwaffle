@@ -166,12 +166,16 @@ export function createApp(dependencies: AppDependencies): Express {
         response.cookie(DEVICE_COOKIE, applied.result.token, {
           httpOnly: true,
           sameSite: "lax",
-          secure: request.secure,
+          secure:
+            request.secure ||
+            request.header("x-forwarded-proto")?.split(",")[0]?.trim() ===
+              "https",
           path: "/",
           maxAge: 365 * 24 * 60 * 60 * 1000,
         });
         response.status(201).json({
           session: sessionFor(updatedProfile, applied.result.device),
+          token: applied.result.token,
         });
       } else {
         response.status(201).json({
@@ -315,6 +319,7 @@ export function createApp(dependencies: AppDependencies): Express {
     process.env.PODWAFFLE_WEB_DIST ??
     resolve(import.meta.dirname, "../../web/dist");
   if (existsSync(webDistPath)) {
+    app.use(express.static(webDistPath, { index: false, maxAge: 0 }));
     app.use(
       "/assets",
       express.static(resolve(webDistPath, "assets"), {
