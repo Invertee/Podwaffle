@@ -1,25 +1,30 @@
-FROM node:24-alpine AS build
-WORKDIR /workspace
-RUN corepack enable
+ARG BUILD_VERSION=local
+ARG BUILD_ARCH=local
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY packages/contracts/package.json packages/contracts/
-COPY apps/server/package.json apps/server/
-COPY apps/web/package.json apps/web/
+# Home Assistant builds an add-on with only the add-on directory as context.
+# Fetch the application source instead of trying to COPY files from the
+# repository root, which is outside that context.
+FROM node:24-alpine AS build
+ARG BUILD_VERSION
+ARG PODWAFFLE_REF=main
+WORKDIR /workspace
+RUN echo "Building Podwaffle ${BUILD_VERSION} from ${PODWAFFLE_REF}" \
+ && apk add --no-cache git \
+ && git init \
+ && git remote add origin https://github.com/Invertee/Podwaffle.git \
+ && git fetch --depth 1 origin "${PODWAFFLE_REF}" \
+ && git checkout --detach FETCH_HEAD \
+ && corepack enable
 RUN pnpm install --frozen-lockfile \
     --filter . \
     --filter @podwaffle/server... \
     --filter @podwaffle/web...
-
-COPY packages/contracts packages/contracts
-COPY apps/server apps/server
-COPY apps/web apps/web
 RUN pnpm build \
  && pnpm --filter @podwaffle/server deploy --prod --legacy /production/server
 
 FROM node:24-alpine
-ARG BUILD_VERSION=local
-ARG BUILD_ARCH=local
+ARG BUILD_VERSION
+ARG BUILD_ARCH
 ENV NODE_ENV=production \
     PODWAFFLE_DATA_DIR=/data \
     PODWAFFLE_OPTIONS_PATH=/data/options.json \
@@ -29,11 +34,11 @@ LABEL io.hass.type="app" \
       io.hass.arch="${BUILD_ARCH}" \
       org.opencontainers.image.title="Podwaffle" \
       org.opencontainers.image.description="Self-hosted podcast server and web client" \
-      org.opencontainers.image.source="https://github.com/podwaffle/podwaffle"
+      org.opencontainers.image.source="https://github.com/Invertee/Podwaffle"
 WORKDIR /app
 COPY --from=build /production/server apps/server
 COPY --from=build /workspace/apps/web/dist apps/web/dist
-COPY podwaffle/run.sh /run.sh
+COPY run.sh /run.sh
 RUN chmod 0755 /run.sh && mkdir -p /data
 EXPOSE 3000
 VOLUME ["/data"]
