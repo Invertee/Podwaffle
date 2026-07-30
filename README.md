@@ -1,10 +1,6 @@
 # Podwaffle
 
-Podwaffle is a self-hosted podcast system for Home Assistant. This repository
-currently delivers Phase 1 through Milestone 11: Home Assistant packaging,
-profile/device enrolment, durable synchronisation, podcast discovery and RSS
-ingestion, episode state, a shared persistent queue, browser playback, and
-listening statistics, and Google Cast Web Sender playback.
+Podwaffle is a self-hosted podcast system for the Web and Android clients, hostable in Home Assistant (and elsewhere). 
 
 ## Requirements
 
@@ -69,7 +65,7 @@ migrations are recorded in `schema_migrations`.
 
 ## Home Assistant and reverse proxy
 
-Build from the monorepo root:
+For a local container build from the monorepo root:
 
 ```sh
 docker build -f podwaffle/Dockerfile -t podwaffle:local .

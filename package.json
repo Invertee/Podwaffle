@@ -7,13 +7,13 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @podwaffle/contracts build && pnpm --filter @podwaffle/web build && pnpm --filter @podwaffle/server build",
     "dev": "pnpm --parallel --filter @podwaffle/server --filter @podwaffle/web dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint .",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @podwaffle/contracts build && pnpm -r test",
+    "lint": "eslint apps/server apps/web packages/contracts",
+    "typecheck": "pnpm --parallel --filter @podwaffle/contracts --filter @podwaffle/server --filter @podwaffle/web typecheck",
+    "test": "pnpm --filter @podwaffle/contracts build && pnpm --parallel --filter @podwaffle/server --filter @podwaffle/web test",
     "test:integration": "pnpm --filter @podwaffle/server test:integration"
   },
   "devDependencies": {

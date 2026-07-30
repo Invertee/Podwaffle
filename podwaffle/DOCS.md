@@ -14,18 +14,23 @@ join_code: "a-long-private-code"
 All durable state is stored below `/data`. Removing a configured profile disables
 it without deleting its state; adding the same name later enables it again.
 
-Home Assistant builds an add-on using only this directory as its Docker build
-context. The Dockerfile therefore fetches the Podwaffle revision pinned in
-`build.yaml`; update `PODWAFFLE_REF` whenever the add-on version is released.
+Home Assistant pulls the pre-built multi-architecture image whose tag matches
+the `version` in `config.yaml`. GitHub Actions publishes that image from the
+repository source, so installation does not need GitHub credentials or compile
+the application on the Home Assistant host.
 
 The equivalent local build command is:
 
 ```sh
-docker build -t podwaffle:local podwaffle
+docker build -f podwaffle/Dockerfile -t podwaffle:local .
 ```
 
-The image supports `amd64` and `aarch64` through Docker Buildx. For a local
-Home Assistant app repository, publish the resulting architecture images and set
-the repository metadata to those images, or use the release packaging workflow.
+When releasing an update, change `version` in `config.yaml` in the same commit as
+the application changes. The publish workflow creates both that version tag and
+`latest` for `amd64` and `aarch64`.
+
+After the workflow publishes the package for the first time, set the
+`podwaffle` container package visibility to **Public** in GitHub. Home Assistant
+pulls the image anonymously, even when the source repository itself is private.
 
 See the root README for backup, restore and reverse-proxy details.

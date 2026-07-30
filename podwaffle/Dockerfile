@@ -1,35 +1,39 @@
-# Home Assistant supplies this add-on directory, rather than the repository
-# root, as the Docker build context. Fetch the pinned source revision instead
-# of trying to COPY files which are outside that context.
 FROM node:24-alpine AS build
-ARG PODWAFFLE_REF=716df5271398bc30c6bcf7d8cccd6e1ab329354b
 WORKDIR /workspace
-RUN apk add --no-cache git \
- && git init \
- && git remote add origin https://github.com/podwaffle/podwaffle.git \
- && git fetch --depth 1 origin "${PODWAFFLE_REF}" \
- && git checkout --detach FETCH_HEAD \
- && corepack enable
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @podwaffle/contracts build \
- && pnpm --filter @podwaffle/web build \
- && pnpm --filter @podwaffle/server build \
- && pnpm prune --prod
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/contracts/package.json packages/contracts/
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile \
+    --filter . \
+    --filter @podwaffle/server... \
+    --filter @podwaffle/web...
+
+COPY packages/contracts packages/contracts
+COPY apps/server apps/server
+COPY apps/web apps/web
+RUN pnpm build \
+ && pnpm --filter @podwaffle/server deploy --prod --legacy /production/server
 
 FROM node:24-alpine
+ARG BUILD_VERSION=local
+ARG BUILD_ARCH=local
 ENV NODE_ENV=production \
     PODWAFFLE_DATA_DIR=/data \
     PODWAFFLE_OPTIONS_PATH=/data/options.json \
     PODWAFFLE_WEB_DIST=/app/apps/web/dist
+LABEL io.hass.type="app" \
+      io.hass.version="${BUILD_VERSION}" \
+      io.hass.arch="${BUILD_ARCH}" \
+      org.opencontainers.image.title="Podwaffle" \
+      org.opencontainers.image.description="Self-hosted podcast server and web client" \
+      org.opencontainers.image.source="https://github.com/podwaffle/podwaffle"
 WORKDIR /app
-COPY --from=build /workspace/node_modules node_modules
-COPY --from=build /workspace/apps/server/dist apps/server/dist
-COPY --from=build /workspace/apps/server/node_modules apps/server/node_modules
-COPY --from=build /workspace/apps/server/package.json apps/server/package.json
+COPY --from=build /production/server apps/server
 COPY --from=build /workspace/apps/web/dist apps/web/dist
-COPY --from=build /workspace/packages/contracts/dist packages/contracts/dist
-COPY --from=build /workspace/packages/contracts/package.json packages/contracts/package.json
-COPY run.sh /run.sh
+COPY podwaffle/run.sh /run.sh
 RUN chmod 0755 /run.sh && mkdir -p /data
 EXPOSE 3000
 VOLUME ["/data"]

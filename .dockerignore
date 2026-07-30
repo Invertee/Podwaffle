@@ -1,6 +1,14 @@
 .git
+.github
+.agents
+.codex
 node_modules
 **/node_modules
 **/dist
-coverage
-*.sqlite*
+**/coverage
+apps/android
+docs/android-setup.md
+*.tsbuildinfo
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

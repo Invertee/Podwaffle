@@ -1,5 +1,5 @@
 name: Podwaffle
-version: "5.0.2"
+version: "5.0.3"
 slug: podwaffle
 description: Self-hosted, synchronised podcast listening
 url: https://github.com/podwaffle/podwaffle

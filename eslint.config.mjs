@@ -4,7 +4,16 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/coverage/**", "**/node_modules/**"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "**/coverage/**",
+      "**/node_modules/**",
+      "apps/android/android/**",
+      "apps/android/ios/**",
+      "**/*.json",
+    ],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   prettier,
@@ -26,7 +35,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.config.*", "**/scripts/**", "**/tests/**"],
+    files: ["**/*.config.*", "**/*.js", "**/scripts/**", "**/tests/**"],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
   },
 );

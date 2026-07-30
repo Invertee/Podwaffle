@@ -10,3 +10,28 @@ apps/server/.data/
 playwright-report/
 test-results/
 Podwaffle_Implementation_Plan_v2.0.md
+*.tsbuildinfo
+
+# Expo / React Native
+.expo/
+apps/android/android/
+apps/android/ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+.bundle/
+
+# Android Studio
+*.iml
+.gradle/
+local.properties
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab

@@ -1,0 +1,55 @@
+name: Android Debug Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build contracts
+        run: pnpm --filter @podwaffle/contracts build
+
+      - name: Run Typecheck
+        run: pnpm --filter @podwaffle/android typecheck
+
+      - name: Run Android Unit Tests
+        run: |
+          cd apps/android/modules/podwaffle-media/android
+          chmod +x ../../../gradlew || true
+
+      - name: Expo Prebuild Android
+        run: npx expo prebuild --platform android --no-install
+        working-directory: apps/android
+
+      - name: Build Debug APK
+        run: |
+          cd apps/android/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon

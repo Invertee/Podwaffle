@@ -1,0 +1,7 @@
+{
+  "name": "podwaffle-media",
+  "platforms": ["android"],
+  "android": {
+    "modules": ["com.podwaffle.media.PodwaffleMediaModule"]
+  }
+}

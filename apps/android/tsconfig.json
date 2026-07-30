@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Override base — React Native uses Bundler resolution, not NodeNext
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // Relax some base strictness that conflicts with React Native / Expo codegen
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
+    "paths": {
+      "@podwaffle/contracts": ["../../packages/contracts/src/index.ts"]
+    }
+  },
+  "include": ["src", "app.config.ts", "modules/podwaffle-media/src"],
+  "exclude": ["node_modules", "android", "ios", ".expo"]
+}
