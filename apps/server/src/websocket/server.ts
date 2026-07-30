@@ -137,6 +137,11 @@ export class PodwaffleWebSocketServer {
     const cookie = parseCookies(request.headers.cookie)[DEVICE_COOKIE];
     const auth = authenticateToken(this.database, bearer ?? cookie);
     if (!auth) return undefined;
+
+    // Reverse proxies commonly omit the external port from X-Forwarded-Host.
+    // Compare hostnames rather than complete host:port values so a public URL
+    // such as https://example:8443 can upgrade through an internal :3000
+    // upstream without weakening the cross-origin check.
     const forwardedHost = request.headers["x-forwarded-host"];
     const publicHost =
       (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) ??
@@ -144,8 +149,12 @@ export class PodwaffleWebSocketServer {
     const origin = request.headers.origin;
     if (origin && publicHost) {
       try {
-        if (new URL(origin).host !== publicHost.split(",")[0]?.trim())
-          return undefined;
+        const originHostname = new URL(origin).hostname.toLowerCase();
+        const forwardedValue = publicHost.split(",")[0]?.trim() ?? "";
+        const publicHostname = new URL(
+          `http://${forwardedValue}`,
+        ).hostname.toLowerCase();
+        if (originHostname !== publicHostname) return undefined;
       } catch {
         return undefined;
       }
