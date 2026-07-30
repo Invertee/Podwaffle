@@ -1,5 +1,5 @@
 # Build with the monorepo root as context:
-# docker build -f home-assistant/podwaffle/Dockerfile -t podwaffle:local .
+# docker build -f podwaffle/Dockerfile -t podwaffle:local .
 FROM node:24-alpine AS build
 WORKDIR /workspace
 RUN corepack enable
@@ -29,7 +29,7 @@ COPY --from=build /workspace/apps/server/package.json apps/server/package.json
 COPY --from=build /workspace/apps/web/dist apps/web/dist
 COPY --from=build /workspace/packages/contracts/dist packages/contracts/dist
 COPY --from=build /workspace/packages/contracts/package.json packages/contracts/package.json
-COPY home-assistant/podwaffle/run.sh /run.sh
+COPY podwaffle/run.sh /run.sh
 RUN chmod 0755 /run.sh && mkdir -p /data
 EXPOSE 3000
 VOLUME ["/data"]

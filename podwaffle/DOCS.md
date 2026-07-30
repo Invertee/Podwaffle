@@ -17,7 +17,7 @@ it without deleting its state; adding the same name later enables it again.
 The monorepo-root build command is:
 
 ```sh
-docker build -f home-assistant/podwaffle/Dockerfile -t podwaffle:local .
+docker build -f podwaffle/Dockerfile -t podwaffle:local .
 ```
 
 The image supports `amd64` and `aarch64` through Docker Buildx. For a local

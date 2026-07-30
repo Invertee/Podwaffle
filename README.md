@@ -72,7 +72,7 @@ migrations are recorded in `schema_migrations`.
 Build from the monorepo root:
 
 ```sh
-docker build -f home-assistant/podwaffle/Dockerfile -t podwaffle:local .
+docker build -f podwaffle/Dockerfile -t podwaffle:local .
 ```
 
 The service listens on plain HTTP at `0.0.0.0:3000`. TLS belongs at Home Assistant
