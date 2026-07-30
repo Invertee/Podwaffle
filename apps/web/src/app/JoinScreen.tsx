@@ -1,6 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import type { Session } from "@podwaffle/contracts";
+import { ApiClientError, api } from "../api/client";
+
+interface JoinResult {
+  session: Session;
+  token: string;
+}
 
 export function JoinScreen() {
   const queryClient = useQueryClient();
@@ -12,7 +18,31 @@ export function JoinScreen() {
     return mobile ? "Mobile browser" : "Web browser";
   });
   const join = useMutation({
-    mutationFn: api.join,
+    mutationFn: async (body: {
+      profileId: string;
+      joinCode: string;
+      deviceName: string;
+      platform: "web";
+    }): Promise<JoinResult> => {
+      const response = await fetch("/api/v1/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        let errorBody: ConstructorParameters<typeof ApiClientError>[1];
+        try {
+          errorBody = (await response.json()) as ConstructorParameters<
+            typeof ApiClientError
+          >[1];
+        } catch {
+          errorBody = undefined;
+        }
+        throw new ApiClientError(response.status, errorBody);
+      }
+      return (await response.json()) as JoinResult;
+    },
     onSuccess: async (result) => {
       const secure = location.protocol === "https:" ? "; Secure" : "";
       document.cookie = `pw_device=${encodeURIComponent(result.token)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
