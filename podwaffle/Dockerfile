@@ -1,16 +1,16 @@
-# Build with the monorepo root as context:
-# docker build -f podwaffle/Dockerfile -t podwaffle:local .
+# Home Assistant supplies this add-on directory, rather than the repository
+# root, as the Docker build context. Fetch the pinned source revision instead
+# of trying to COPY files which are outside that context.
 FROM node:24-alpine AS build
+ARG PODWAFFLE_REF=716df5271398bc30c6bcf7d8cccd6e1ab329354b
 WORKDIR /workspace
-RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY apps/server/package.json apps/server/package.json
-COPY apps/web/package.json apps/web/package.json
-COPY packages/contracts/package.json packages/contracts/package.json
+RUN apk add --no-cache git \
+ && git init \
+ && git remote add origin https://github.com/podwaffle/podwaffle.git \
+ && git fetch --depth 1 origin "${PODWAFFLE_REF}" \
+ && git checkout --detach FETCH_HEAD \
+ && corepack enable
 RUN pnpm install --frozen-lockfile
-COPY apps/server apps/server
-COPY apps/web apps/web
-COPY packages/contracts packages/contracts
 RUN pnpm --filter @podwaffle/contracts build \
  && pnpm --filter @podwaffle/web build \
  && pnpm --filter @podwaffle/server build \
@@ -29,7 +29,7 @@ COPY --from=build /workspace/apps/server/package.json apps/server/package.json
 COPY --from=build /workspace/apps/web/dist apps/web/dist
 COPY --from=build /workspace/packages/contracts/dist packages/contracts/dist
 COPY --from=build /workspace/packages/contracts/package.json packages/contracts/package.json
-COPY podwaffle/run.sh /run.sh
+COPY run.sh /run.sh
 RUN chmod 0755 /run.sh && mkdir -p /data
 EXPOSE 3000
 VOLUME ["/data"]

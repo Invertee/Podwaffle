@@ -14,10 +14,14 @@ join_code: "a-long-private-code"
 All durable state is stored below `/data`. Removing a configured profile disables
 it without deleting its state; adding the same name later enables it again.
 
-The monorepo-root build command is:
+Home Assistant builds an add-on using only this directory as its Docker build
+context. The Dockerfile therefore fetches the Podwaffle revision pinned in
+`build.yaml`; update `PODWAFFLE_REF` whenever the add-on version is released.
+
+The equivalent local build command is:
 
 ```sh
-docker build -f podwaffle/Dockerfile -t podwaffle:local .
+docker build -t podwaffle:local podwaffle
 ```
 
 The image supports `amd64` and `aarch64` through Docker Buildx. For a local

@@ -13,7 +13,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm --filter @podwaffle/contracts build && pnpm -r test",
     "test:integration": "pnpm --filter @podwaffle/server test:integration"
   },
   "devDependencies": {
