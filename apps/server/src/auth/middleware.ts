@@ -60,14 +60,22 @@ export function authenticateToken(
 }
 
 export function requireAuth(database: PodwaffleDatabase) {
-  return (request: Request, _response: Response, next: NextFunction): void => {
+  return (request: Request, response: Response, next: NextFunction): void => {
     const token = tokenFromRequest(request);
     if (!token) {
+      if (request.path === "/me") {
+        response.status(204).end();
+        return;
+      }
       next(new ApiError(401, "AUTH_REQUIRED", "Authentication is required"));
       return;
     }
     const auth = authenticateToken(database, token);
     if (!auth) {
+      if (request.path === "/me") {
+        response.status(204).end();
+        return;
+      }
       next(
         new ApiError(
           401,
