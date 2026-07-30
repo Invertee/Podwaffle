@@ -1,0 +1,7 @@
+{
+  "profiles": "Developer,Guest",
+  "join_code": "podwaffle-dev",
+  "port": 3000,
+  "feed_refresh_minutes": 30,
+  "log_level": "debug"
+}

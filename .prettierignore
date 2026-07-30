@@ -1,0 +1,5 @@
+dist
+coverage
+node_modules
+pnpm-lock.yaml
+Podwaffle_Implementation_Plan_v2.0.md

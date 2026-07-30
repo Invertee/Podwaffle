@@ -1,7 +1,0 @@
-{
-  "_comment": "backendUrl points to the Home Assistant Podwaffle add-on (normally through HTTPS reverse proxy). The access key is entered in the app and is never bundled.",
-  "backendUrl": "",
-  "profileId": "",
-  "appId": "com.podwaffle.app",
-  "appName": "PodWaffle"
-}

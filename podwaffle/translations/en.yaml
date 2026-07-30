@@ -1,0 +1,9 @@
+configuration:
+  profiles:
+    name: Profiles
+    description: Comma-separated profile names.
+  join_code:
+    name: Join code
+    description: Secret code used to enrol a new device.
+network:
+  3000/tcp: Podwaffle internal HTTP server
