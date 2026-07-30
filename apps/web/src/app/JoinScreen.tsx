@@ -13,7 +13,10 @@ export function JoinScreen() {
   });
   const join = useMutation({
     mutationFn: api.join,
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      const secure = location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `pw_device=${encodeURIComponent(result.token)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+      queryClient.setQueryData(["session"], result.session);
       await queryClient.invalidateQueries({ queryKey: ["session"] });
     },
   });
