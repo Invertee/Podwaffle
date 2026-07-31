@@ -1,19 +1,16 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { getDefaultConfig } = require("expo/metro-config");
-const path = require("path");
 
 const projectRoot = __dirname;
-const monorepoRoot = path.resolve(projectRoot, "../..");
-
 const config = getDefaultConfig(projectRoot);
 
-// Allow Metro to resolve packages from the monorepo root node_modules
-config.watchFolders = [monorepoRoot];
-
-config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, "node_modules"),
-  path.resolve(monorepoRoot, "node_modules"),
-];
+// Expo SDK 52 detects the pnpm workspace automatically. Explicitly adding the
+// repository root as a watch folder makes embedded release bundling resolve
+// the app entry relative to the wrong directory.
+// Keep Metro's HTTP/server root at the app, too. Expo's workspace default is
+// useful for web URLs but makes Gradle's `export:embed` look for index.js at
+// the repository root instead of apps/android.
+config.server.unstable_serverRoot = projectRoot;
 
 // Allow importing .ts files from shared packages
 config.resolver.sourceExts = [
