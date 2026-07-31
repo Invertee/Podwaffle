@@ -12,7 +12,6 @@ test-results/
 Podwaffle_Implementation_Plan_v2.0.md
 *.tsbuildinfo
 
-# Expo / React Native
 .expo/
 apps/android/android/
 apps/android/ios/
@@ -25,7 +24,6 @@ apps/android/ios/
 web-build/
 .bundle/
 
-# Android Studio
 *.iml
 .gradle/
 local.properties
@@ -33,5 +31,14 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+*.apk
+*.aab
+apps/android/android/
+apps/android/ios/
+
+.idea/
+*.iml
+local.properties
+
 *.apk
 *.aab
