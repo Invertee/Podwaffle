@@ -194,6 +194,7 @@ export function Dashboard({ session }: { session: Session }) {
       queryClient.invalidateQueries({ queryKey: ["in-progress"] }),
       queryClient.invalidateQueries({ queryKey: ["history"] }),
       queryClient.invalidateQueries({ queryKey: ["queue"] }),
+      queryClient.invalidateQueries({ queryKey: ["discovery"] }),
     ]);
   };
   const subscribe = useMutation({
@@ -298,10 +299,17 @@ export function Dashboard({ session }: { session: Session }) {
   return (
     <div className="workspace">
       <aside className="sidebar">
-        <div className="brand-lockup">
+        <button
+          className="brand-lockup"
+          aria-label="Go to podcasts"
+          onClick={() => {
+            setPage("library");
+            setSelectedPodcast(null);
+          }}
+        >
           <img src="/icon-512.png" alt="" />
           <span>Podwaffle</span>
-        </div>
+        </button>
         <nav aria-label="Primary">
           {(
             [
@@ -429,12 +437,6 @@ export function Dashboard({ session }: { session: Session }) {
                 <p className="eyebrow">{selected.author}</p>
                 <h2>{selected.title}</h2>
                 <p>{selected.description}</p>
-                <button
-                  className="danger"
-                  onClick={() => unsubscribe.mutate(selected.id)}
-                >
-                  Unsubscribe
-                </button>
               </div>
             </div>
             <EpisodeList
@@ -452,8 +454,6 @@ export function Dashboard({ session }: { session: Session }) {
 
         {page === "discover" && (
           <section>
-            <p className="eyebrow">Apple Podcasts</p>
-            <h2>Discover something worth hearing</h2>
             <form
               className="search"
               onSubmit={(event) => {
@@ -481,12 +481,31 @@ export function Dashboard({ session }: { session: Session }) {
                     <h3>{item.title}</h3>
                     <p>{item.author}</p>
                   </div>
-                  <button
-                    disabled={item.subscribed || subscribe.isPending}
-                    onClick={() => subscribe.mutate(item)}
-                  >
-                    {item.subscribed ? "Subscribed" : "Subscribe"}
-                  </button>
+                  {item.subscribed ? (
+                    <button
+                      className="unsubscribe-button"
+                      disabled={unsubscribe.isPending}
+                      onClick={() => {
+                        const subscription = subscriptions.data?.find(
+                          (podcast) =>
+                            podcast.feedUrl === item.feedUrl ||
+                            (item.appleCollectionId !== null &&
+                              podcast.appleCollectionId ===
+                                item.appleCollectionId),
+                        );
+                        if (subscription) unsubscribe.mutate(subscription.id);
+                      }}
+                    >
+                      Unsubscribe
+                    </button>
+                  ) : (
+                    <button
+                      disabled={subscribe.isPending}
+                      onClick={() => subscribe.mutate(item)}
+                    >
+                      Subscribe
+                    </button>
+                  )}
                 </article>
               ))}
             </div>
@@ -495,8 +514,6 @@ export function Dashboard({ session }: { session: Session }) {
 
         {page === "progress" && (
           <section>
-            <p className="eyebrow">Continue listening</p>
-            <h2>In progress</h2>
             <EpisodeList
               episodes={inProgress.data ?? []}
               revision={revision}
@@ -512,8 +529,6 @@ export function Dashboard({ session }: { session: Session }) {
 
         {page === "history" && (
           <section>
-            <p className="eyebrow">Recently heard</p>
-            <h2>History</h2>
             <EpisodeList
               episodes={history.data ?? []}
               revision={revision}

@@ -77,7 +77,7 @@ button {
 .eyebrow {
   margin: 1.5rem 0 0.45rem;
   color: var(--accent);
-  font-size: 0.72rem;
+  font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -127,8 +127,8 @@ input,
 select {
   width: 100%;
   padding: 0.82rem 0.9rem;
-  color: #fff;
-  background: #121115;
+  color: #000000;
+  background: #ffffff;
   border: 1px solid #403b45;
   border-radius: 0.7rem;
   outline: none;
@@ -706,7 +706,7 @@ header .eyebrow,
   display: grid;
   gap: 0.35rem;
   padding: 1rem;
-  background: #121115;
+  background: #ffffff;
   border: 1px solid #322e35;
   border-radius: 0.8rem;
 }
@@ -1014,6 +1014,12 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font: inherit;
   min-height: 3.4rem;
   padding: 0 0.75rem 1.15rem;
   border-bottom: 1px solid #2c3c59;

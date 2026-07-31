@@ -91,7 +91,8 @@ class PodwaffleMediaModule : Module() {
         }
 
         AsyncFunction("skipForward") {
-            val player = PodwaffleMediaService.instance?.getPlayer() ?: return@AsyncFunction
+            val player = PodwaffleMediaService.instance?.getPlayer()
+                ?: return@AsyncFunction null
             val newPos = (player.currentPosition + 30000L).coerceAtMost(player.duration.coerceAtLeast(0L))
             player.seekTo(newPos)
             val posMap = MediaStateMapper.mapPositionToMap(player)
@@ -99,7 +100,8 @@ class PodwaffleMediaModule : Module() {
         }
 
         AsyncFunction("skipBackward") {
-            val player = PodwaffleMediaService.instance?.getPlayer() ?: return@AsyncFunction
+            val player = PodwaffleMediaService.instance?.getPlayer()
+                ?: return@AsyncFunction null
             val newPos = (player.currentPosition - 15000L).coerceAtLeast(0L)
             player.seekTo(newPos)
             val posMap = MediaStateMapper.mapPositionToMap(player)

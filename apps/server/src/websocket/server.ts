@@ -20,6 +20,7 @@ import {
   playbackState,
   type StoredPlaybackCommand,
 } from "../playback/service.js";
+import { setEpisodeProgress } from "../podcasts/service.js";
 
 interface Client {
   socket: WebSocket;
@@ -214,8 +215,22 @@ export class PodwaffleWebSocketServer {
         profileId,
         "playback.cast.updated",
         (db) => {
+          // Cast position is kept in playback_state while the receiver owns
+          // playback. Persist its last confirmed value before clearing the
+          // session so the episode does not reopen from stale (often zero)
+          // progress after the idle timeout.
+          const current = playbackState(db, profileId, "");
           if (!expireIdleCast(db, profileId, now))
             return { result: false, payload: {} };
+          const episode = current.episode
+            ? setEpisodeProgress(
+                db,
+                profileId,
+                current.episode.id,
+                current.positionMs,
+                current.durationMs,
+              )
+            : null;
           db.prepare(
             `UPDATE playback_commands SET status = 'cancelled', completed_at = ?
              WHERE profile_id = ? AND status = 'pending'`,
@@ -225,6 +240,7 @@ export class PodwaffleWebSocketServer {
             payload: {
               reason: "cast_idle_timeout",
               playback: playbackState(db, profileId, ""),
+              episode,
             },
           };
         },

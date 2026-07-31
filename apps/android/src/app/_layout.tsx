@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useCallback } from "react";
-import { View, StyleSheet } from "react-native";
+import { AppState, View, StyleSheet } from "react-native";
 import { Stack } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
@@ -18,6 +18,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PodwaffleMediaModule, MEDIA_EVENTS } from "../native-media/index";
 import type { NativePlaybackState } from "../native-media/index";
 import { useNativeMediaStore } from "../stores/nativeMedia";
+import { useAuthStore } from "../stores/auth";
 import { colors } from "../styles/tokens";
 
 const queryClient = new QueryClient({
@@ -78,6 +79,20 @@ function NativeMediaBinder() {
 }
 
 export default function RootLayout() {
+  const restore = useAuthStore((state) => state.restore);
+  const refresh = useAuthStore((state) => state.refresh);
+
+  useEffect(() => {
+    void restore();
+  }, [restore]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refresh();
+    });
+    return () => subscription.remove();
+  }, [refresh]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>

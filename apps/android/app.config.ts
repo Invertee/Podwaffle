@@ -44,6 +44,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-router",
     "expo-secure-store",
     [
+      "expo-build-properties",
+      {
+        android: {
+          minSdkVersion: 26,
+          // Media3 1.5 requires API 35 at compile time. Runtime targeting
+          // remains Android 14 / API 34 until the release hardening pass.
+          compileSdkVersion: 35,
+          targetSdkVersion: 34,
+        },
+      },
+    ],
+    [
       "expo-splash-screen",
       {
         image: "./assets/splash-icon.png",

@@ -22,10 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 import { PodwaffleMediaModule } from "../native-media/index";
-import {
-  useNativeMediaStore,
-  selectIsPlaying,
-} from "../stores/nativeMedia";
+import { useNativeMediaStore, selectIsPlaying } from "../stores/nativeMedia";
 import {
   colors,
   spacing,
@@ -52,8 +49,7 @@ function ProgressBar({
   positionMs: number;
   durationMs: number | null;
 }) {
-  const progress =
-    durationMs && durationMs > 0 ? positionMs / durationMs : 0;
+  const progress = durationMs && durationMs > 0 ? positionMs / durationMs : 0;
   return (
     <View style={pbStyles.track}>
       <View style={[pbStyles.fill, { flex: progress }]} />
@@ -225,15 +221,14 @@ export default function NowPlayingScreen() {
           <Text style={styles.debugText}>
             Lease: {String(mediaState.hasLease)}
           </Text>
-          <Text style={styles.debugText}>
-            Rate: {mediaState.playbackRate}x
-          </Text>
+          <Text style={styles.debugText}>Rate: {mediaState.playbackRate}x</Text>
           <Text style={styles.debugText}>
             Queue: {mediaState.queueIndex + 1}/{mediaState.queueLength}
           </Text>
           {mediaState.lastError && (
             <Text style={[styles.debugText, styles.debugError]}>
-              Error: {mediaState.lastError.code} — {mediaState.lastError.message}
+              Error: {mediaState.lastError.code} —{" "}
+              {mediaState.lastError.message}
             </Text>
           )}
         </View>

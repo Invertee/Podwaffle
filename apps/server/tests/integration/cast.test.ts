@@ -153,6 +153,13 @@ describe("cross-client Google Cast control", () => {
       castSessionId: null,
       positionMs: 20_000,
     });
+    expect(
+      created.runtime.database.db
+        .prepare(
+          "SELECT position_ms FROM episode_state WHERE profile_id = ? AND episode_id = ?",
+        )
+        .get((await owner.get("/api/v1/snapshot")).body.profile.id, episodeId),
+    ).toEqual({ position_ms: 20_000 });
   });
 
   it("lets another profile device clear a Cast session after its owner lease expires", async () => {

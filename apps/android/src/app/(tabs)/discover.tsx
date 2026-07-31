@@ -8,10 +8,7 @@ import { colors, spacing, fontSizes, fontWeights } from "../../styles/tokens";
 
 export default function DiscoverScreen() {
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-    >
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Discover</Text>
       </View>

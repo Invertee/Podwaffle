@@ -11,7 +11,7 @@ if (expoModulesCorePlugin.exists()) {
 
 android {
   namespace "com.podwaffle.media"
-  compileSdkVersion 34
+  compileSdkVersion 35
 
   defaultConfig {
     minSdkVersion 26
