@@ -1,24 +1,15 @@
-/**
- * Root layout for the Podwaffle Android app.
- *
- * Responsibilities:
- * - Provides QueryClient (TanStack Query)
- * - Binds to the native MediaSessionService on startup
- * - Subscribes to native media events and feeds them into Zustand
- * - Handles the splash screen
- */
-
-import React, { useEffect, useCallback } from "react";
-import { AppState, View, StyleSheet } from "react-native";
-import { Stack } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import React, { useCallback, useEffect } from "react";
+import { AppState, StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { PodwaffleMediaModule, MEDIA_EVENTS } from "../native-media/index";
+import { MEDIA_EVENTS, PodwaffleMediaModule } from "../native-media/index";
 import type { NativePlaybackState } from "../native-media/index";
-import { useNativeMediaStore } from "../stores/nativeMedia";
+import { playbackController } from "../playback/controller";
 import { useAuthStore } from "../stores/auth";
+import { useNativeMediaStore } from "../stores/nativeMedia";
 import { colors } from "../styles/tokens";
 
 const queryClient = new QueryClient({
@@ -39,6 +30,7 @@ function NativeMediaBinder() {
     try {
       const initialState = await PodwaffleMediaModule.bind();
       updateState(initialState);
+      playbackController.handleNativeState(initialState);
       setBound(true);
     } catch (err) {
       console.warn("[NativeMediaBinder] Failed to bind to media service:", err);
@@ -49,23 +41,29 @@ function NativeMediaBinder() {
   }, [setBinding, updateState, setBound]);
 
   useEffect(() => {
-    // Bind to the service on mount
     void bindToService();
 
-    // Subscribe to state change events (full state updates)
     const stateSub = PodwaffleMediaModule.addListener(
       MEDIA_EVENTS.STATE_CHANGED,
       (data: unknown) => {
-        updateState(data as NativePlaybackState);
+        const state = data as NativePlaybackState;
+        updateState(state);
+        playbackController.handleNativeState(state);
       },
     );
 
-    // Subscribe to high-frequency position events (position-only updates)
     const posSub = PodwaffleMediaModule.addListener(
       MEDIA_EVENTS.POSITION_CHANGED,
       (data: unknown) => {
-        const d = data as { positionMs: number; bufferedPositionMs: number };
-        updatePosition(d.positionMs, d.bufferedPositionMs);
+        const position = data as {
+          positionMs: number;
+          bufferedPositionMs: number;
+        };
+        updatePosition(position.positionMs, position.bufferedPositionMs);
+        playbackController.handleNativePosition(
+          position.positionMs,
+          position.bufferedPositionMs,
+        );
       },
     );
 
@@ -89,6 +87,7 @@ export default function RootLayout() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void refresh();
+      else void playbackController.flush();
     });
     return () => subscription.remove();
   }, [refresh]);
@@ -111,11 +110,13 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen
               name="join"
-              options={{
-                headerShown: false,
-                animation: "fade",
-              }}
+              options={{ headerShown: false, animation: "fade" }}
             />
+            <Stack.Screen
+              name="podcast/[podcastId]"
+              options={{ title: "Podcast" }}
+            />
+            <Stack.Screen name="queue" options={{ title: "Queue" }} />
             <Stack.Screen
               name="now-playing"
               options={{
@@ -132,8 +133,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.bgPrimary,
-  },
+  root: { flex: 1, backgroundColor: colors.bgPrimary },
 });

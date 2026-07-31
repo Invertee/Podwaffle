@@ -3,16 +3,21 @@ package com.podwaffle.media
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
 
 class PodwaffleMediaModule : Module() {
 
     private val context: Context
         get() = requireNotNull(appContext.reactContext) { "ReactContext is null" }
+
+    private var skipBackwardMs = 15_000L
+    private var skipForwardMs = 30_000L
 
     override fun definition() = ModuleDefinition {
         Name("PodwaffleMedia")
@@ -43,20 +48,21 @@ class PodwaffleMediaModule : Module() {
         }
 
         AsyncFunction("configure") { config: Map<String, Any?> ->
-            // Store configuration for server sync / lease renewal in future milestones
+            skipBackwardMs = ((config["skipBackSeconds"] as? Number)?.toLong() ?: 15L)
+                .coerceIn(1L, 120L) * 1_000L
+            skipForwardMs = ((config["skipForwardSeconds"] as? Number)?.toLong() ?: 30L)
+                .coerceIn(1L, 120L) * 1_000L
             true
         }
 
         AsyncFunction("bind") {
             ensureServiceStarted()
-            val service = PodwaffleMediaService.instance
-            val player = service?.getPlayer()
+            val player = PodwaffleMediaService.instance?.getPlayer()
             MediaStateMapper.mapStateToMap(player)
         }
 
         AsyncFunction("getState") {
-            val service = PodwaffleMediaService.instance
-            val player = service?.getPlayer()
+            val player = PodwaffleMediaService.instance?.getPlayer()
             MediaStateMapper.mapStateToMap(player)
         }
 
@@ -65,107 +71,141 @@ class PodwaffleMediaModule : Module() {
             val player = PodwaffleMediaService.instance?.getPlayer()
             player?.playWhenReady = true
             player?.play()
-            val stateMap = MediaStateMapper.mapStateToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.state.changed", stateMap)
+            emitState(player)
         }
 
         AsyncFunction("pause") {
             val player = PodwaffleMediaService.instance?.getPlayer()
             player?.pause()
-            val stateMap = MediaStateMapper.mapStateToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.state.changed", stateMap)
+            emitState(player)
         }
 
         AsyncFunction("stop") {
             val player = PodwaffleMediaService.instance?.getPlayer()
             player?.stop()
-            val stateMap = MediaStateMapper.mapStateToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.state.changed", stateMap)
+            player?.clearMediaItems()
+            emitState(player)
         }
 
         AsyncFunction("seekTo") { positionMs: Long ->
             val player = PodwaffleMediaService.instance?.getPlayer()
             player?.seekTo(positionMs.coerceAtLeast(0L))
-            val posMap = MediaStateMapper.mapPositionToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.position.changed", posMap)
+            emitPosition(player)
         }
 
         AsyncFunction("skipForward") {
             val player = PodwaffleMediaService.instance?.getPlayer()
                 ?: return@AsyncFunction null
-            val newPos = (player.currentPosition + 30000L).coerceAtMost(player.duration.coerceAtLeast(0L))
-            player.seekTo(newPos)
-            val posMap = MediaStateMapper.mapPositionToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.position.changed", posMap)
+            val requested = (player.currentPosition + skipForwardMs).coerceAtLeast(0L)
+            val newPosition = if (player.duration > 0L) {
+                requested.coerceAtMost(player.duration)
+            } else {
+                requested
+            }
+            player.seekTo(newPosition)
+            emitPosition(player)
         }
 
         AsyncFunction("skipBackward") {
             val player = PodwaffleMediaService.instance?.getPlayer()
                 ?: return@AsyncFunction null
-            val newPos = (player.currentPosition - 15000L).coerceAtLeast(0L)
-            player.seekTo(newPos)
-            val posMap = MediaStateMapper.mapPositionToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.position.changed", posMap)
+            player.seekTo((player.currentPosition - skipBackwardMs).coerceAtLeast(0L))
+            emitPosition(player)
         }
 
         AsyncFunction("setPlaybackRate") { rate: Float ->
             val player = PodwaffleMediaService.instance?.getPlayer()
-            player?.playbackParameters = PlaybackParameters(rate)
-            val stateMap = MediaStateMapper.mapStateToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.state.changed", stateMap)
+            player?.playbackParameters = PlaybackParameters(rate.coerceIn(0.5f, 4f))
+            emitState(player)
         }
 
         AsyncFunction("playEpisode") { input: Map<String, Any?>, startPositionMs: Long ->
             ensureServiceStarted()
-            val player = PodwaffleMediaService.instance?.getPlayer() ?: return@AsyncFunction
+            val player = PodwaffleMediaService.instance?.getPlayer()
+                ?: throw IllegalStateException("The media service is not ready")
 
-            val episodeId = input["episodeId"] as? String ?: "episode"
+            val episodeId = input["episodeId"] as? String
+                ?: throw IllegalArgumentException("episodeId is required")
+            val podcastId = input["podcastId"] as? String
             val title = input["title"] as? String ?: "Episode"
             val podcastTitle = input["podcastTitle"] as? String ?: "Podcast"
-            val enclosureUrl = input["enclosureUrl"] as? String ?: ""
+            val enclosureUrl = input["enclosureUrl"] as? String
+            val localDownloadPath = input["localDownloadPath"] as? String
             val artworkUrl = input["artworkUrl"] as? String
+            val queueItemId = input["queueItemId"] as? String
 
+            val mediaUri = when {
+                !localDownloadPath.isNullOrBlank() -> Uri.fromFile(File(localDownloadPath))
+                !enclosureUrl.isNullOrBlank() -> Uri.parse(enclosureUrl)
+                else -> throw IllegalArgumentException("A playable enclosure URL is required")
+            }
+            val extras = Bundle().apply {
+                podcastId?.let { putString("podcastId", it) }
+                queueItemId?.let { putString("queueItemId", it) }
+                putString(
+                    "source",
+                    if (localDownloadPath.isNullOrBlank()) "stream" else "download"
+                )
+            }
+            val metadata = MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(podcastTitle)
+                .setAlbumTitle(podcastTitle)
+                .setArtworkUri(artworkUrl?.let { Uri.parse(it) })
+                .setExtras(extras)
+                .build()
             val mediaItem = MediaItem.Builder()
                 .setMediaId(episodeId)
-                .setUri(Uri.parse(enclosureUrl))
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(title)
-                        .setArtist(podcastTitle)
-                        .setArtworkUri(artworkUrl?.let { Uri.parse(it) })
-                        .build()
-                )
+                .setUri(mediaUri)
+                .setMediaMetadata(metadata)
                 .build()
 
-            player.setMediaItem(mediaItem, startPositionMs)
+            player.setMediaItem(mediaItem, startPositionMs.coerceAtLeast(0L))
             player.prepare()
             player.playWhenReady = true
             player.play()
-
-            val stateMap = MediaStateMapper.mapStateToMap(player)
-            this@PodwaffleMediaModule.sendEvent("media.state.changed", stateMap)
+            emitState(player)
         }
 
-        // Stubs for future milestone interfaces (Cast / Downloads / Queue)
+        // Queue, Cast, and downloads are delivered by later milestones.
         AsyncFunction("setQueue") { input: Map<String, Any?> -> true }
         AsyncFunction("showCastPicker") { true }
         AsyncFunction("stopCast") { input: Map<String, Any?> -> true }
-        AsyncFunction("getCastState") { mapOf("connected" to false, "session" to null, "availableDevices" to emptyList<String>()) }
+        AsyncFunction("getCastState") {
+            mapOf(
+                "connected" to false,
+                "session" to null,
+                "availableDevices" to emptyList<String>()
+            )
+        }
         AsyncFunction("setCastVolume") { volume: Float -> true }
         AsyncFunction("addDownload") { input: Map<String, Any?>, reason: String -> true }
         AsyncFunction("removeDownload") { episodeId: String -> true }
         AsyncFunction("getDownloads") { emptyList<Map<String, Any?>>() }
-        AsyncFunction("runDownloadMaintenance") { mapOf("removedCount" to 0, "freedBytes" to 0L, "errors" to emptyList<String>()) }
+        AsyncFunction("runDownloadMaintenance") {
+            mapOf(
+                "removedCount" to 0,
+                "freedBytes" to 0L,
+                "errors" to emptyList<String>()
+            )
+        }
+    }
+
+    private fun emitState(player: androidx.media3.common.Player?) {
+        val stateMap = MediaStateMapper.mapStateToMap(player)
+        sendEvent("media.state.changed", stateMap)
+    }
+
+    private fun emitPosition(player: androidx.media3.common.Player?) {
+        val positionMap = MediaStateMapper.mapPositionToMap(player)
+        sendEvent("media.position.changed", positionMap)
     }
 
     private fun ensureServiceStarted() {
         if (PodwaffleMediaService.instance == null) {
-            val intent = Intent(context, PodwaffleMediaService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            // Commands originate while the app is foregrounded. MediaSessionService
+            // promotes itself when playback starts and owns the notification.
+            context.startService(Intent(context, PodwaffleMediaService::class.java))
         }
     }
 }

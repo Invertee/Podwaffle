@@ -1,69 +1,158 @@
-/**
- * In Progress screen — Milestone 17 will implement the full in-progress list.
- */
-
+import { useQuery } from "@tanstack/react-query";
 import React from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
-import { colors, spacing, fontSizes, fontWeights } from "../../styles/tokens";
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import { api } from "../../api/client";
+import { EpisodeCard } from "../../components/EpisodeCard";
+import { useEpisodeActions } from "../../hooks/useEpisodeActions";
+import { useAuthStore } from "../../stores/auth";
+import {
+  colors,
+  fontSizes,
+  fontWeights,
+  spacing,
+} from "../../styles/tokens";
 
 export default function InProgressScreen() {
+  const credentials = useAuthStore((state) => state.credentials);
+  const connection = useAuthStore((state) => state.connection);
+  const refreshProfile = useAuthStore((state) => state.refresh);
+  const episodes = useQuery({
+    queryKey: ["android-in-progress"],
+    queryFn: () =>
+      api.inProgress(credentials!.serverUrl, credentials!.token),
+    enabled: Boolean(credentials),
+  });
+  const actions = useEpisodeActions(async () => {
+    await episodes.refetch();
+  });
+
+  async function refresh() {
+    await Promise.all([refreshProfile(), episodes.refetch()]);
+  }
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>In Progress</Text>
-      </View>
-
-      <View style={styles.placeholder}>
-        <Text style={styles.placeholderEmoji}>▶️</Text>
-        <Text style={styles.placeholderTitle}>Episodes in progress</Text>
-        <Text style={styles.placeholderBody}>
-          Episodes with partial progress, sorted by most recently played, will
-          appear here in Milestone 17.
+        <Text style={styles.headerBody}>
+          Resume partially played episodes, most recent first.
         </Text>
-        <Text style={styles.milestoneBadge}>Milestone 17</Text>
       </View>
-    </ScrollView>
+      {episodes.isLoading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={styles.loadingText}>Loading listening progress…</Text>
+        </View>
+      ) : episodes.error ? (
+        <View style={styles.centered}>
+          <Text style={styles.errorTitle}>Progress could not be loaded</Text>
+          <Text style={styles.errorBody}>
+            {episodes.error instanceof Error
+              ? episodes.error.message
+              : "Pull down to try again."}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={episodes.data ?? []}
+          keyExtractor={(episode) => episode.id}
+          contentContainerStyle={[
+            styles.content,
+            (episodes.data?.length ?? 0) === 0 && styles.emptyContent,
+          ]}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          refreshing={episodes.isRefetching || connection === "checking"}
+          onRefresh={() => void refresh()}
+          renderItem={({ item }) => (
+            <EpisodeCard
+              episode={item}
+              busy={actions.busyEpisodeId === item.id}
+              onPlay={actions.playEpisode}
+              onTogglePlayed={actions.togglePlayed}
+              onAddQueue={actions.addQueue}
+            />
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptySymbol}>▶</Text>
+              <Text style={styles.emptyTitle}>Nothing waiting to resume</Text>
+              <Text style={styles.emptyBody}>
+                Start an episode from a podcast and its progress will appear here.
+              </Text>
+            </View>
+          }
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
-  content: { padding: spacing.md, flexGrow: 1 },
-  header: { marginBottom: spacing.lg },
+  header: { padding: spacing.md, paddingBottom: spacing.sm, gap: spacing.xs },
   headerTitle: {
     color: colors.textPrimary,
     fontSize: fontSizes.xxl,
     fontWeight: fontWeights.bold,
   },
-  placeholder: {
+  headerBody: { color: colors.textSecondary, fontSize: fontSizes.sm },
+  content: { padding: spacing.md, paddingTop: spacing.sm, paddingBottom: 150 },
+  emptyContent: { flexGrow: 1 },
+  separator: { height: spacing.md },
+  centered: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.xxl,
     gap: spacing.md,
+    padding: spacing.xl,
   },
-  placeholderEmoji: { fontSize: 56 },
-  placeholderTitle: {
+  loadingText: { color: colors.textSecondary, fontSize: fontSizes.sm },
+  errorTitle: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.lg,
+    fontWeight: fontWeights.semibold,
+    textAlign: "center",
+  },
+  errorBody: {
+    color: colors.error,
+    fontSize: fontSizes.sm,
+    textAlign: "center",
+  },
+  empty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+    padding: spacing.xl,
+  },
+  emptySymbol: {
+    width: 72,
+    height: 72,
+    textAlign: "center",
+    textAlignVertical: "center",
+    borderRadius: 36,
+    overflow: "hidden",
+    backgroundColor: colors.accentDim,
+    color: colors.accent,
+    fontSize: 30,
+  },
+  emptyTitle: {
     color: colors.textPrimary,
     fontSize: fontSizes.xl,
-    fontWeight: fontWeights.semibold,
+    fontWeight: fontWeights.bold,
     textAlign: "center",
   },
-  placeholderBody: {
+  emptyBody: {
     color: colors.textSecondary,
     fontSize: fontSizes.md,
-    textAlign: "center",
     lineHeight: 22,
-    maxWidth: 300,
-  },
-  milestoneBadge: {
-    color: colors.accent,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.semibold,
-    backgroundColor: colors.accentDim,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: 12,
-    overflow: "hidden",
+    textAlign: "center",
   },
 });

@@ -1,11 +1,8 @@
 package com.podwaffle.media
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -28,11 +25,12 @@ class PodwaffleMediaService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-
         NotificationHelper.createNotificationChannel(this)
 
-        val player = ExoPlayer.Builder(this).build()
-        this.exoPlayer = player
+        val player = ExoPlayer.Builder(this).build().apply {
+            setHandleAudioBecomingNoisy(true)
+        }
+        exoPlayer = player
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -47,30 +45,20 @@ class PodwaffleMediaService : MediaSessionService() {
                 notifyStateChanged()
             }
 
+            override fun onPlaybackParametersChanged(
+                playbackParameters: androidx.media3.common.PlaybackParameters
+            ) {
+                notifyStateChanged()
+            }
+
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                notifyStateChanged(error = Pair(error.errorCodeName, error.message ?: "Playback error"))
+                notifyStateChanged(
+                    error = Pair(error.errorCodeName, error.message ?: "Playback error")
+                )
             }
         })
 
-        // Create MediaSession
         mediaSession = MediaSession.Builder(this, player).build()
-
-        // Load default test media for Milestone 14 spike
-        val testMediaItem = MediaItem.Builder()
-            .setMediaId("test-episode-m14")
-            .setUri(Uri.parse("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"))
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle("Test Episode (Milestone 14 Spike)")
-                    .setArtist("Podwaffle Android Native")
-                    .setAlbumTitle("Podwaffle Feasibility Test")
-                    .build()
-            )
-            .build()
-
-        player.setMediaItem(testMediaItem)
-        player.prepare()
-
         startPositionUpdates()
     }
 
@@ -81,8 +69,7 @@ class PodwaffleMediaService : MediaSessionService() {
     fun getPlayer(): ExoPlayer? = exoPlayer
 
     fun notifyStateChanged(error: Pair<String, String>? = null) {
-        val player = exoPlayer ?: return
-        val map = MediaStateMapper.mapStateToMap(player, lastError = error)
+        val map = MediaStateMapper.mapStateToMap(exoPlayer, lastError = error)
         eventEmitter?.invoke("media.state.changed", map)
     }
 
@@ -91,22 +78,29 @@ class PodwaffleMediaService : MediaSessionService() {
             override fun run() {
                 val player = exoPlayer
                 if (player != null && player.isPlaying) {
-                    val posMap = MediaStateMapper.mapPositionToMap(player)
-                    eventEmitter?.invoke("media.position.changed", posMap)
+                    eventEmitter?.invoke(
+                        "media.position.changed",
+                        MediaStateMapper.mapPositionToMap(player)
+                    )
                 }
-                handler.postDelayed(this, 1000L)
+                handler.postDelayed(this, 1_000L)
             }
         }
         handler.post(positionNotifierRunnable!!)
     }
 
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        // Keep the MediaSessionService alive while audio is playing. If playback
+        // is paused or stopped, allow Android to reclaim it with the task.
+        if (exoPlayer?.isPlaying != true) stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         positionNotifierRunnable?.let { handler.removeCallbacks(it) }
-        mediaSession?.run {
-            player.release()
-            release()
-            mediaSession = null
-        }
+        mediaSession?.release()
+        mediaSession = null
+        exoPlayer?.release()
         exoPlayer = null
         instance = null
         super.onDestroy()

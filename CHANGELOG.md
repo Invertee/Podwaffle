@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Completed Android Milestones 14–18: secure joining and cached sync, tile/list
+  library ordering, podcast and episode browsing, Apple discovery, in-progress
+  playback, profile statistics/device controls, a durable queue, and real Media3
+  streaming with server playback leases, progress, movement and telemetry updates.
 - Added Milestone 11 Google Cast Web Sender support with receiver metadata,
   transport/volume controls, local handoff, speaker reselection, owner-relayed
   cross-client commands, confirmed-result persistence and idle fallback.

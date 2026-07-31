@@ -1,14 +1,25 @@
-import React from "react";
+import type { Device } from "@podwaffle/contracts";
+import { useQuery } from "@tanstack/react-query";
+import Constants from "expo-constants";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
-import Constants from "expo-constants";
 
+import { api } from "../../api/client";
+import {
+  authenticatedConnection,
+  refreshProfile,
+  withProfileRevision,
+} from "../../api/profileMutations";
+import { playbackController } from "../../playback/controller";
 import { useAuthStore } from "../../stores/auth";
 import {
   colors,
@@ -17,6 +28,16 @@ import {
   radii,
   spacing,
 } from "../../styles/tokens";
+
+type StatsPeriod = "today" | "7d" | "30d" | "year" | "all";
+
+function formatListeningTime(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours < 24) return `${hours}h ${totalMinutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
 
 export default function ProfileScreen() {
   const session = useAuthStore((state) => state.session);
@@ -27,7 +48,83 @@ export default function ProfileScreen() {
   const error = useAuthStore((state) => state.error);
   const refresh = useAuthStore((state) => state.refresh);
   const logout = useAuthStore((state) => state.logout);
+  const skipBackwardSeconds = useAuthStore(
+    (state) => state.skipBackwardSeconds,
+  );
+  const skipForwardSeconds = useAuthStore((state) => state.skipForwardSeconds);
+  const setSkipDurations = useAuthStore((state) => state.setSkipDurations);
   const profile = session?.profile ?? snapshot?.profile;
+  const [period, setPeriod] = useState<StatsPeriod>("30d");
+  const [backwardInput, setBackwardInput] = useState(
+    String(skipBackwardSeconds),
+  );
+  const [forwardInput, setForwardInput] = useState(String(skipForwardSeconds));
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
+
+  useEffect(() => setBackwardInput(String(skipBackwardSeconds)), [skipBackwardSeconds]);
+  useEffect(() => setForwardInput(String(skipForwardSeconds)), [skipForwardSeconds]);
+
+  const stats = useQuery({
+    queryKey: ["android-stats", period],
+    queryFn: () =>
+      api.stats(credentials!.serverUrl, credentials!.token, period),
+    enabled: Boolean(credentials),
+  });
+  const devices = useQuery<Device[]>({
+    queryKey: ["android-devices"],
+    queryFn: () => api.devices(credentials!.serverUrl, credentials!.token),
+    enabled: Boolean(credentials),
+    initialData: snapshot?.devices,
+  });
+
+  async function saveSkipSettings() {
+    setSavingSettings(true);
+    try {
+      await setSkipDurations(Number(backwardInput), Number(forwardInput));
+      const current = useAuthStore.getState();
+      setBackwardInput(String(current.skipBackwardSeconds));
+      setForwardInput(String(current.skipForwardSeconds));
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  function confirmRevoke(device: Device) {
+    Alert.alert(
+      `Disconnect ${device.name}?`,
+      "The device token will stop working immediately.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Disconnect",
+          style: "destructive",
+          onPress: () => void revokeDevice(device),
+        },
+      ],
+    );
+  }
+
+  async function revokeDevice(device: Device) {
+    setRevokingDeviceId(device.id);
+    try {
+      const { serverUrl, token } = authenticatedConnection();
+      await withProfileRevision((revision) =>
+        api.revoke(serverUrl, token, device.id, revision),
+      );
+      await refreshProfile();
+      await devices.refetch();
+    } catch (revokeError) {
+      Alert.alert(
+        "Disconnect failed",
+        revokeError instanceof Error
+          ? revokeError.message
+          : "The device could not be disconnected.",
+      );
+    } finally {
+      setRevokingDeviceId(null);
+    }
+  }
 
   function confirmLogout() {
     Alert.alert(
@@ -38,7 +135,14 @@ export default function ProfileScreen() {
         {
           text: "Disconnect",
           style: "destructive",
-          onPress: () => void logout(),
+          onPress: () =>
+            void (async () => {
+              await playbackController.stop().catch(() =>
+                playbackController.flush().catch(() => undefined),
+              );
+              playbackController.reset();
+              await logout();
+            })(),
         },
       ],
     );
@@ -46,13 +150,192 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>
-          {(profile?.displayName ?? "P").slice(0, 1).toUpperCase()}
-        </Text>
+      <View style={styles.identity}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {(profile?.displayName ?? "P").slice(0, 1).toUpperCase()}
+          </Text>
+        </View>
+        <View style={styles.identityCopy}>
+          <Text style={styles.title}>{profile?.displayName ?? "Podwaffle"}</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {credentials?.serverUrl}
+          </Text>
+          <Text style={styles.timezone}>
+            Timezone · {profile?.timezone ?? "Not configured"}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.title}>{profile?.displayName ?? "Podwaffle"}</Text>
-      <Text style={styles.subtitle}>{credentials?.serverUrl}</Text>
+
+      <View style={styles.card}>
+        <View style={styles.cardHeading}>
+          <View>
+            <Text style={styles.eyebrow}>PLAYBACK</Text>
+            <Text style={styles.cardTitle}>Skip intervals</Text>
+          </View>
+          {savingSettings ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : null}
+        </View>
+        <Text style={styles.cardDescription}>
+          Used by the mini-player, Now Playing screen, and notification controls.
+        </Text>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingLabel}>Skip backward</Text>
+          <View style={styles.numberField}>
+            <TextInput
+              value={backwardInput}
+              onChangeText={setBackwardInput}
+              onBlur={() => void saveSkipSettings()}
+              keyboardType="number-pad"
+              selectTextOnFocus
+              style={styles.numberInput}
+              accessibilityLabel="Skip backward seconds"
+            />
+            <Text style={styles.numberSuffix}>sec</Text>
+          </View>
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingLabel}>Skip forward</Text>
+          <View style={styles.numberField}>
+            <TextInput
+              value={forwardInput}
+              onChangeText={setForwardInput}
+              onBlur={() => void saveSkipSettings()}
+              keyboardType="number-pad"
+              selectTextOnFocus
+              style={styles.numberInput}
+              accessibilityLabel="Skip forward seconds"
+            />
+            <Text style={styles.numberSuffix}>sec</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.cardHeading}>
+          <View>
+            <Text style={styles.eyebrow}>YOUR LISTENING</Text>
+            <Text style={styles.cardTitle}>Statistics</Text>
+          </View>
+          {stats.isFetching ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : null}
+        </View>
+        <View style={styles.periods}>
+          {(
+            [
+              ["today", "Today"],
+              ["7d", "7 days"],
+              ["30d", "30 days"],
+              ["year", "Year"],
+              ["all", "All"],
+            ] as const
+          ).map(([value, label]) => (
+            <Pressable
+              key={value}
+              onPress={() => setPeriod(value)}
+              style={[
+                styles.periodButton,
+                period === value && styles.periodButtonActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: period === value }}
+            >
+              <Text
+                style={[
+                  styles.periodText,
+                  period === value && styles.periodTextActive,
+                ]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {stats.error ? (
+          <Text style={styles.error}>
+            {stats.error instanceof Error
+              ? stats.error.message
+              : "Statistics could not be loaded."}
+          </Text>
+        ) : (
+          <View style={styles.statGrid}>
+            <Stat
+              value={formatListeningTime(stats.data?.listenedMs ?? 0)}
+              label="Listening time"
+            />
+            <Stat
+              value={String(stats.data?.episodesCompleted ?? 0)}
+              label="Episodes completed"
+            />
+            <Stat
+              value={`${stats.data?.currentStreak ?? 0}d`}
+              label="Current streak"
+            />
+            <Stat
+              value={`${stats.data?.longestStreak ?? 0}d`}
+              label="Longest streak"
+            />
+            <Stat
+              value={String(stats.data?.activeListeningDays ?? 0)}
+              label="Active days"
+            />
+            <Stat
+              value={formatListeningTime(stats.data?.skippedForwardMs ?? 0)}
+              label="Skipped forward"
+            />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.cardHeading}>
+          <View>
+            <Text style={styles.eyebrow}>SECURITY</Text>
+            <Text style={styles.cardTitle}>Connected devices</Text>
+          </View>
+          <Text style={styles.deviceCount}>{devices.data?.length ?? 0}</Text>
+        </View>
+        {devices.data?.map((device) => (
+          <View style={styles.device} key={device.id}>
+            <View style={styles.deviceIcon}>
+              <Text style={styles.deviceIconText}>
+                {device.platform === "android" ? "A" : "W"}
+              </Text>
+            </View>
+            <View style={styles.deviceCopy}>
+              <Text style={styles.deviceName} numberOfLines={1}>
+                {device.name}
+              </Text>
+              <Text style={styles.deviceMeta} numberOfLines={1}>
+                {device.current
+                  ? "This device"
+                  : `${device.platform} · seen ${new Date(device.lastSeenAt).toLocaleDateString()}`}
+              </Text>
+            </View>
+            {!device.current ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.revokeButton,
+                  pressed && styles.pressed,
+                  revokingDeviceId === device.id && styles.disabled,
+                ]}
+                disabled={revokingDeviceId === device.id}
+                onPress={() => confirmRevoke(device)}
+                accessibilityRole="button"
+                accessibilityLabel={`Disconnect ${device.name}`}
+              >
+                {revokingDeviceId === device.id ? (
+                  <ActivityIndicator size="small" color={colors.error} />
+                ) : (
+                  <Text style={styles.revokeText}>Disconnect</Text>
+                )}
+              </Pressable>
+            ) : null}
+          </View>
+        ))}
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Connection</Text>
@@ -67,10 +350,7 @@ export default function ProfileScreen() {
           }
           valueColor={connection === "online" ? colors.success : colors.warning}
         />
-        <Row
-          label="Cached revision"
-          value={String(snapshot?.revision ?? "None")}
-        />
+        <Row label="Cached revision" value={String(snapshot?.revision ?? "None")} />
         <Row
           label="Last sync"
           value={lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Not yet"}
@@ -81,28 +361,12 @@ export default function ProfileScreen() {
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
-          style={({ pressed }) => [
-            styles.refreshButton,
-            pressed && styles.pressed,
-          ]}
-          onPress={() => void refresh()}
+          style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}
+          onPress={() => void Promise.all([refresh(), stats.refetch(), devices.refetch()])}
           accessibilityRole="button"
         >
           <Text style={styles.refreshText}>Sync now</Text>
         </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>This device</Text>
-        <Row label="Name" value={session?.device.name ?? "Android device"} />
-        <Row
-          label="Device ID"
-          value={session?.device.id.slice(0, 8) ?? "Unavailable"}
-        />
-        <Text style={styles.securityNote}>
-          Your device token is kept in Android encrypted storage and is never
-          displayed here.
-        </Text>
       </View>
 
       <Pressable
@@ -116,6 +380,15 @@ export default function ProfileScreen() {
         <Text style={styles.disconnectText}>Disconnect this device</Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -140,16 +413,18 @@ function Row({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: 150,
+  content: { padding: spacing.md, paddingBottom: 150, gap: spacing.md },
+  identity: {
+    flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
+    paddingVertical: spacing.sm,
   },
+  identityCopy: { flex: 1, gap: 3 },
   avatar: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
@@ -165,8 +440,8 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
   },
   subtitle: { color: colors.textSecondary, fontSize: fontSizes.sm },
+  timezone: { color: colors.textMuted, fontSize: fontSizes.xs },
   card: {
-    width: "100%",
     padding: spacing.md,
     gap: spacing.sm,
     backgroundColor: colors.bgSurface,
@@ -174,12 +449,114 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  cardHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  eyebrow: {
+    color: colors.accent,
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.bold,
+    letterSpacing: 1,
+  },
   cardTitle: {
     color: colors.textPrimary,
     fontSize: fontSizes.lg,
     fontWeight: fontWeights.bold,
-    marginBottom: spacing.xs,
   },
+  cardDescription: { color: colors.textSecondary, fontSize: fontSizes.sm, lineHeight: 19 },
+  settingRow: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  settingLabel: { color: colors.textSecondary, fontSize: fontSizes.md },
+  numberField: {
+    width: 100,
+    height: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgElevated,
+  },
+  numberInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.semibold,
+    textAlign: "right",
+    paddingHorizontal: spacing.sm,
+  },
+  numberSuffix: { color: colors.textMuted, fontSize: fontSizes.xs, paddingRight: spacing.sm },
+  periods: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  periodButton: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 7,
+    borderRadius: radii.full,
+    backgroundColor: colors.bgElevated,
+  },
+  periodButtonActive: { backgroundColor: colors.accentDim },
+  periodText: { color: colors.textSecondary, fontSize: fontSizes.xs },
+  periodTextActive: { color: colors.accent, fontWeight: fontWeights.bold },
+  statGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  stat: {
+    width: "48%",
+    minHeight: 82,
+    padding: spacing.md,
+    justifyContent: "center",
+    borderRadius: radii.md,
+    backgroundColor: colors.bgElevated,
+  },
+  statValue: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.xl,
+    fontWeight: fontWeights.bold,
+  },
+  statLabel: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 4 },
+  deviceCount: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.full,
+    backgroundColor: colors.bgElevated,
+  },
+  device: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    paddingTop: spacing.sm,
+  },
+  deviceIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgElevated,
+  },
+  deviceIconText: { color: colors.accent, fontWeight: fontWeights.bold },
+  deviceCopy: { flex: 1 },
+  deviceName: { color: colors.textPrimary, fontSize: fontSizes.sm, fontWeight: fontWeights.semibold },
+  deviceMeta: { color: colors.textMuted, fontSize: fontSizes.xs, marginTop: 3 },
+  revokeButton: {
+    minHeight: 38,
+    paddingHorizontal: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.md,
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+  },
+  revokeText: { color: colors.error, fontSize: fontSizes.xs, fontWeight: fontWeights.semibold },
   row: {
     minHeight: 34,
     flexDirection: "row",
@@ -195,12 +572,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.medium,
   },
   error: { color: colors.error, fontSize: fontSizes.sm, lineHeight: 19 },
-  securityNote: {
-    color: colors.textMuted,
-    fontSize: fontSizes.xs,
-    lineHeight: 17,
-    marginTop: spacing.xs,
-  },
   refreshButton: {
     minHeight: 44,
     alignItems: "center",
@@ -210,24 +581,15 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     marginTop: spacing.sm,
   },
-  refreshText: {
-    color: colors.accent,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.semibold,
-  },
+  refreshText: { color: colors.accent, fontSize: fontSizes.sm, fontWeight: fontWeights.semibold },
   disconnectButton: {
-    width: "100%",
     minHeight: 50,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.md,
     backgroundColor: "rgba(239, 68, 68, 0.12)",
-    marginTop: spacing.sm,
   },
-  disconnectText: {
-    color: colors.error,
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.semibold,
-  },
+  disconnectText: { color: colors.error, fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
   pressed: { opacity: 0.7 },
+  disabled: { opacity: 0.5 },
 });

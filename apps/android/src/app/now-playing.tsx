@@ -1,111 +1,97 @@
-/**
- * Now Playing screen — the M14 feasibility spike screen.
- *
- * This screen binds to NativePlaybackState from Zustand and renders
- * real native media state and controls. It proves the React Native ↔ Kotlin
- * bridge works before full UI is implemented in Milestone 21.
- *
- * See spec §35.10
- */
-
-import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-} from "react-native";
 import { Image } from "expo-image";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import React, { useRef } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { PodwaffleMediaModule } from "../native-media/index";
-import { useNativeMediaStore, selectIsPlaying } from "../stores/nativeMedia";
+import { playbackController } from "../playback/controller";
+import { useAuthStore } from "../stores/auth";
+import {
+  selectIsPlaying,
+  useNativeMediaStore,
+} from "../stores/nativeMedia";
 import {
   colors,
-  spacing,
   fontSizes,
   fontWeights,
   radii,
+  spacing,
 } from "../styles/tokens";
 
-function formatMs(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+const PLAYBACK_RATES = [1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
-function ProgressBar({
-  positionMs,
-  durationMs,
-}: {
-  positionMs: number;
-  durationMs: number | null;
-}) {
-  const progress = durationMs && durationMs > 0 ? positionMs / durationMs : 0;
-  return (
-    <View style={pbStyles.track}>
-      <View style={[pbStyles.fill, { flex: progress }]} />
-      <View style={{ flex: 1 - progress }} />
-    </View>
-  );
+function formatTime(ms: number | null): string {
+  if (!ms || ms < 0 || !Number.isFinite(ms)) return "0:00";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
+        .toString()
+        .padStart(2, "0")}`
+    : `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
-
-const pbStyles = StyleSheet.create({
-  track: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.bgElevated,
-    flexDirection: "row",
-    overflow: "hidden",
-  },
-  fill: {
-    backgroundColor: colors.accent,
-  },
-});
 
 export default function NowPlayingScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const mediaState = useNativeMediaStore((s) => s.state);
+  const insets = useSafeAreaInsets();
+  const state = useNativeMediaStore((store) => store.state);
   const isPlaying = useNativeMediaStore(selectIsPlaying);
+  const skipBackwardSeconds = useAuthStore(
+    (store) => store.skipBackwardSeconds,
+  );
+  const skipForwardSeconds = useAuthStore((store) => store.skipForwardSeconds);
+  const progressWidth = useRef(1);
 
-  async function handlePlayPause() {
-    try {
-      if (isPlaying) {
-        await PodwaffleMediaModule.pause();
-      } else {
-        await PodwaffleMediaModule.play();
-      }
-    } catch (err) {
-      console.warn("[NowPlaying] play/pause error:", err);
-    }
+  if (!state?.episodeId) {
+    return (
+      <View style={[styles.empty, { paddingBottom: insets.bottom + spacing.lg }]}>
+        <View style={styles.emptyArtwork}>
+          <Text style={styles.emptyArtworkText}>PW</Text>
+        </View>
+        <Text style={styles.emptyTitle}>Nothing is playing</Text>
+        <Text style={styles.emptyBody}>
+          Choose an episode from a podcast or the In Progress screen.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+        >
+          <Text style={styles.closeButtonText}>Back to podcasts</Text>
+        </Pressable>
+      </View>
+    );
   }
 
-  async function handleSkipBackward() {
-    try {
-      await PodwaffleMediaModule.skipBackward();
-    } catch (err) {
-      console.warn("[NowPlaying] skip backward error:", err);
-    }
+  const mediaState = state;
+  const progress =
+    mediaState.durationMs && mediaState.durationMs > 0
+      ? Math.max(0, Math.min(1, mediaState.positionMs / mediaState.durationMs))
+      : 0;
+  const isBuffering = mediaState.playbackStatus === "buffering";
+
+  function seekFromPress(locationX: number) {
+    if (!mediaState.durationMs || mediaState.durationMs <= 0) return;
+    const fraction = Math.max(0, Math.min(1, locationX / progressWidth.current));
+    void playbackController.seekTo(Math.round(mediaState.durationMs * fraction));
   }
 
-  async function handleSkipForward() {
-    try {
-      await PodwaffleMediaModule.skipForward();
-    } catch (err) {
-      console.warn("[NowPlaying] skip forward error:", err);
-    }
+  function cycleRate() {
+    const currentIndex = PLAYBACK_RATES.findIndex(
+      (rate) => Math.abs(rate - mediaState.playbackRate) < 0.01,
+    );
+    const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length] ?? 1;
+    void playbackController.setPlaybackRate(nextRate);
   }
-
-  const isBuffering = mediaState?.playbackStatus === "buffering";
 
   return (
     <ScrollView
@@ -115,274 +101,346 @@ export default function NowPlayingScreen() {
         { paddingBottom: insets.bottom + spacing.xl },
       ]}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.closeBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        >
-          <Text style={styles.closeText}>✕</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerLabel}>NOW PLAYING</Text>
-        <View style={styles.closeBtn} />
-      </View>
-
-      {/* Artwork */}
-      <View style={styles.artworkContainer}>
-        {mediaState?.artworkUrl ? (
+      <View style={styles.artworkFrame}>
+        {mediaState.artworkUrl ? (
           <Image
             source={{ uri: mediaState.artworkUrl }}
             style={styles.artwork}
             contentFit="cover"
-            accessibilityIgnoresInvertColors
+            cachePolicy="memory-disk"
           />
         ) : (
-          <View style={styles.artworkPlaceholder}>
-            <Text style={styles.artworkPlaceholderText}>🎙️</Text>
-          </View>
+          <Text style={styles.artworkFallback}>PW</Text>
         )}
       </View>
 
-      {/* Titles */}
-      <View style={styles.titles}>
-        <Text style={styles.episodeTitle} numberOfLines={2}>
-          {mediaState?.title ?? "Test Audio (Milestone 14)"}
-        </Text>
-        <Text style={styles.podcastTitle} numberOfLines={1}>
-          {mediaState?.podcastTitle ?? "Podwaffle Native Spike"}
+      <View style={styles.metadata}>
+        <Text style={styles.title}>{mediaState.title ?? "Unknown episode"}</Text>
+        <Text style={styles.podcastTitle}>
+          {mediaState.podcastTitle ?? "Unknown podcast"}
         </Text>
       </View>
 
-      {/* Progress */}
-      <View style={styles.progressSection}>
-        <ProgressBar
-          positionMs={mediaState?.positionMs ?? 0}
-          durationMs={mediaState?.durationMs ?? null}
-        />
-        <View style={styles.timestamps}>
-          <Text style={styles.timestamp}>
-            {formatMs(mediaState?.positionMs ?? 0)}
-          </Text>
-          <Text style={styles.timestamp}>
-            {mediaState?.durationMs
-              ? `-${formatMs(mediaState.durationMs - mediaState.positionMs)}`
-              : "--:--"}
-          </Text>
+      <View style={styles.timeline}>
+        <Pressable
+          style={styles.progressTouchTarget}
+          onLayout={(event) => {
+            progressWidth.current = Math.max(1, event.nativeEvent.layout.width);
+          }}
+          onPress={(event) => seekFromPress(event.nativeEvent.locationX)}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Playback position"
+          accessibilityValue={{
+            min: 0,
+            max: mediaState.durationMs ?? 0,
+            now: mediaState.positionMs,
+            text: `${formatTime(mediaState.positionMs)} of ${formatTime(mediaState.durationMs)}`,
+          }}
+        >
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.bufferedFill,
+                {
+                  width: `${
+                    mediaState.durationMs && mediaState.durationMs > 0
+                      ? Math.min(
+                          100,
+                          (mediaState.bufferedPositionMs / mediaState.durationMs) * 100,
+                        )
+                      : 0
+                  }%`,
+                },
+              ]}
+            />
+            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+          </View>
+        </Pressable>
+        <View style={styles.timeRow}>
+          <Text style={styles.time}>{formatTime(mediaState.positionMs)}</Text>
+          <Text style={styles.time}>{formatTime(mediaState.durationMs)}</Text>
         </View>
       </View>
 
-      {/* Transport controls */}
       <View style={styles.controls}>
-        <TouchableOpacity
-          style={styles.skipBtn}
-          onPress={handleSkipBackward}
+        <Pressable
+          style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
+          onPress={() => void playbackController.skipBackward()}
           accessibilityRole="button"
-          accessibilityLabel="Skip backward"
+          accessibilityLabel={`Skip backward ${skipBackwardSeconds} seconds`}
         >
-          <Text style={styles.skipText}>⏮</Text>
-        </TouchableOpacity>
+          <Text style={styles.skipSymbol}>↶</Text>
+          <Text style={styles.skipSeconds}>{skipBackwardSeconds}</Text>
+        </Pressable>
 
-        <TouchableOpacity
-          style={styles.playBtn}
-          onPress={handlePlayPause}
+        <Pressable
+          style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
+          onPress={() =>
+            void (isPlaying
+              ? playbackController.pause()
+              : playbackController.play())
+          }
           accessibilityRole="button"
           accessibilityLabel={isPlaying ? "Pause" : "Play"}
         >
           {isBuffering ? (
             <ActivityIndicator size="large" color={colors.textOnAccent} />
           ) : (
-            <Text style={styles.playText}>{isPlaying ? "⏸" : "▶"}</Text>
+            <Text style={styles.playSymbol}>{isPlaying ? "Ⅱ" : "▶"}</Text>
           )}
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
-          style={styles.skipBtn}
-          onPress={handleSkipForward}
+        <Pressable
+          style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
+          onPress={() => void playbackController.skipForward()}
           accessibilityRole="button"
-          accessibilityLabel="Skip forward"
+          accessibilityLabel={`Skip forward ${skipForwardSeconds} seconds`}
         >
-          <Text style={styles.skipText}>⏭</Text>
-        </TouchableOpacity>
+          <Text style={styles.skipSymbol}>↷</Text>
+          <Text style={styles.skipSeconds}>{skipForwardSeconds}</Text>
+        </Pressable>
       </View>
 
-      {/* Debug panel — shows raw native state in M14 for verification */}
-      {__DEV__ && mediaState && (
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugTitle}>Native State (dev only)</Text>
-          <Text style={styles.debugText}>
-            Status: {mediaState.playbackStatus}
+      <View style={styles.secondaryControls}>
+        <Pressable
+          style={({ pressed }) => [styles.rateButton, pressed && styles.pressed]}
+          onPress={cycleRate}
+          accessibilityRole="button"
+          accessibilityLabel={`Playback speed ${mediaState.playbackRate} times`}
+        >
+          <Text style={styles.rateText}>{mediaState.playbackRate}×</Text>
+        </Pressable>
+        <View style={styles.statusPill}>
+          <View
+            style={[
+              styles.statusDot,
+              {
+                backgroundColor:
+                  mediaState.lastError !== null
+                    ? colors.error
+                    : isBuffering
+                      ? colors.warning
+                      : colors.success,
+              },
+            ]}
+          />
+          <Text style={styles.statusText}>
+            {mediaState.lastError
+              ? "Playback error"
+              : isBuffering
+                ? "Buffering"
+                : isPlaying
+                  ? "Playing on this device"
+                  : "Paused"}
           </Text>
-          <Text style={styles.debugText}>
-            PlayWhenReady: {String(mediaState.playWhenReady)}
-          </Text>
-          <Text style={styles.debugText}>Source: {mediaState.source}</Text>
-          <Text style={styles.debugText}>
-            Lease: {String(mediaState.hasLease)}
-          </Text>
-          <Text style={styles.debugText}>Rate: {mediaState.playbackRate}x</Text>
-          <Text style={styles.debugText}>
-            Queue: {mediaState.queueIndex + 1}/{mediaState.queueLength}
-          </Text>
-          {mediaState.lastError && (
-            <Text style={[styles.debugText, styles.debugError]}>
-              Error: {mediaState.lastError.code} —{" "}
-              {mediaState.lastError.message}
-            </Text>
-          )}
         </View>
-      )}
+        <Pressable
+          style={({ pressed }) => [styles.stopButton, pressed && styles.pressed]}
+          onPress={() => void playbackController.stop()}
+          accessibilityRole="button"
+          accessibilityLabel="Stop playback"
+        >
+          <Text style={styles.stopText}>Stop</Text>
+        </Pressable>
+      </View>
+
+      {mediaState.lastError ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorTitle}>{mediaState.lastError.code}</Text>
+          <Text style={styles.errorBody}>{mediaState.lastError.message}</Text>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bgPrimary,
-  },
+  container: { flex: 1, backgroundColor: colors.bgPrimary },
   content: {
-    padding: spacing.lg,
     alignItems: "center",
+    padding: spacing.lg,
     gap: spacing.lg,
   },
-  header: {
+  artworkFrame: {
     width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.sm,
-  },
-  headerLabel: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.xs,
-    fontWeight: fontWeights.bold,
-    letterSpacing: 1.5,
-  },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeText: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.lg,
-  },
-  artworkContainer: {
-    width: "100%",
+    maxWidth: 420,
     aspectRatio: 1,
-    borderRadius: radii.lg,
+    borderRadius: radii.xl,
     overflow: "hidden",
-    backgroundColor: colors.bgElevated,
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-  },
-  artwork: {
-    width: "100%",
-    height: "100%",
-  },
-  artworkPlaceholder: {
-    width: "100%",
-    height: "100%",
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.bgElevated,
   },
-  artworkPlaceholderText: {
-    fontSize: 80,
-  },
-  titles: {
-    width: "100%",
-    gap: spacing.xs,
-  },
-  episodeTitle: {
-    color: colors.textPrimary,
-    fontSize: fontSizes.xl,
+  artwork: { width: "100%", height: "100%" },
+  artworkFallback: {
+    color: colors.accent,
+    fontSize: 72,
     fontWeight: fontWeights.bold,
-    lineHeight: 26,
+  },
+  metadata: { width: "100%", maxWidth: 520, gap: spacing.xs },
+  title: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.xxl,
+    fontWeight: fontWeights.bold,
+    lineHeight: 30,
+    textAlign: "center",
   },
   podcastTitle: {
     color: colors.accent,
     fontSize: fontSizes.md,
-    fontWeight: fontWeights.medium,
+    textAlign: "center",
   },
-  progressSection: {
-    width: "100%",
-    gap: spacing.xs,
+  timeline: { width: "100%", maxWidth: 520 },
+  progressTouchTarget: { paddingVertical: spacing.md },
+  progressTrack: {
+    height: 7,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: colors.bgElevated,
   },
-  timestamps: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  bufferedFill: {
+    position: "absolute",
+    height: "100%",
+    backgroundColor: colors.textMuted,
+    opacity: 0.4,
   },
-  timestamp: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.medium,
-    fontVariant: ["tabular-nums"],
-  },
+  progressFill: { height: "100%", backgroundColor: colors.accent },
+  timeRow: { flexDirection: "row", justifyContent: "space-between" },
+  time: { color: colors.textSecondary, fontSize: fontSizes.xs },
   controls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xl,
-    marginTop: spacing.sm,
   },
-  skipBtn: {
-    width: 56,
-    height: 56,
+  skipButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.skipDim,
-    borderRadius: radii.full,
   },
-  skipText: {
-    fontSize: 24,
+  skipSymbol: { color: colors.skip, fontSize: 30, lineHeight: 32 },
+  skipSeconds: {
+    position: "absolute",
     color: colors.skip,
-  },
-  playBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-  },
-  playText: {
-    fontSize: 28,
-    color: colors.textOnAccent,
-  },
-  debugPanel: {
-    width: "100%",
-    padding: spacing.md,
-    backgroundColor: colors.bgElevated,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.xs,
-    marginTop: spacing.md,
-  },
-  debugTitle: {
-    color: colors.textSecondary,
     fontSize: fontSizes.xs,
     fontWeight: fontWeights.bold,
-    letterSpacing: 1,
-    marginBottom: spacing.xs,
   },
-  debugText: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.xs,
-    fontFamily: "monospace",
+  playButton: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.accent,
   },
-  debugError: {
+  playSymbol: {
+    color: colors.textOnAccent,
+    fontSize: 34,
+    fontWeight: fontWeights.bold,
+  },
+  secondaryControls: {
+    width: "100%",
+    maxWidth: 520,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  rateButton: {
+    minWidth: 58,
+    height: 40,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgElevated,
+  },
+  rateText: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.bold,
+  },
+  statusPill: {
+    flex: 1,
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.full,
+    backgroundColor: colors.bgSurface,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { color: colors.textSecondary, fontSize: fontSizes.xs },
+  stopButton: {
+    minWidth: 58,
+    height: 40,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+  },
+  stopText: { color: colors.error, fontSize: fontSizes.sm },
+  errorCard: {
+    width: "100%",
+    maxWidth: 520,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+  },
+  errorTitle: {
     color: colors.error,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.bold,
   },
+  errorBody: { color: colors.textSecondary, fontSize: fontSizes.sm, marginTop: 4 },
+  empty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+    padding: spacing.xl,
+    backgroundColor: colors.bgPrimary,
+  },
+  emptyArtwork: {
+    width: 160,
+    height: 160,
+    borderRadius: radii.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgElevated,
+  },
+  emptyArtworkText: {
+    color: colors.accent,
+    fontSize: 48,
+    fontWeight: fontWeights.bold,
+  },
+  emptyTitle: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.xxl,
+    fontWeight: fontWeights.bold,
+  },
+  emptyBody: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.md,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  closeButton: {
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.full,
+    backgroundColor: colors.accent,
+  },
+  closeButtonText: {
+    color: colors.textOnAccent,
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
+  },
+  pressed: { opacity: 0.7 },
 });

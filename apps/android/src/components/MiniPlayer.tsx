@@ -1,160 +1,146 @@
-/**
- * Persistent mini-player shown above the bottom tab bar.
- *
- * Binds directly to native playback state — remains correct across navigation
- * and React Native reloads. See spec §35.9.
- */
-
-import React from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-
+import React from "react";
 import {
-  useNativeMediaStore,
-  selectIsPlaying,
+  ActivityIndicator,
+  type GestureResponderEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import { playbackController } from "../playback/controller";
+import {
   selectHasMedia,
+  selectIsPlaying,
+  useNativeMediaStore,
 } from "../stores/nativeMedia";
-import { PodwaffleMediaModule } from "../native-media/index";
 import {
   colors,
-  spacing,
   fontSizes,
   fontWeights,
   MINI_PLAYER_HEIGHT,
+  spacing,
 } from "../styles/tokens";
-
-// Simple icon components using Text to avoid extra deps in Milestone 14
-function PlayIcon() {
-  return <Text style={styles.iconText}>▶</Text>;
-}
-function PauseIcon() {
-  return <Text style={styles.iconText}>⏸</Text>;
-}
-function SkipBackIcon() {
-  return <Text style={styles.iconText}>⏮</Text>;
-}
-function SkipForwardIcon() {
-  return <Text style={styles.iconText}>⏭</Text>;
-}
 
 export function MiniPlayer() {
   const router = useRouter();
-  const mediaState = useNativeMediaStore((s) => s.state);
+  const mediaState = useNativeMediaStore((state) => state.state);
   const isPlaying = useNativeMediaStore(selectIsPlaying);
   const hasMedia = useNativeMediaStore(selectHasMedia);
 
-  if (!hasMedia || !mediaState) {
-    return null;
-  }
+  if (!hasMedia || !mediaState) return null;
 
   const isBuffering = mediaState.playbackStatus === "buffering";
+  const progress =
+    mediaState.durationMs && mediaState.durationMs > 0
+      ? Math.max(0, Math.min(1, mediaState.positionMs / mediaState.durationMs))
+      : 0;
 
-  async function handlePlayPause() {
-    try {
-      if (isPlaying) {
-        await PodwaffleMediaModule.pause();
-      } else {
-        await PodwaffleMediaModule.play();
-      }
-    } catch (err) {
-      console.warn("[MiniPlayer] play/pause error:", err);
-    }
-  }
-
-  async function handleSkipBackward() {
-    try {
-      await PodwaffleMediaModule.skipBackward();
-    } catch (err) {
-      console.warn("[MiniPlayer] skip backward error:", err);
-    }
-  }
-
-  async function handleSkipForward() {
-    try {
-      await PodwaffleMediaModule.skipForward();
-    } catch (err) {
-      console.warn("[MiniPlayer] skip forward error:", err);
-    }
+  function control(
+    event: GestureResponderEvent,
+    operation: () => Promise<void>,
+  ) {
+    event.stopPropagation();
+    void operation().catch((error) =>
+      console.warn("[MiniPlayer] playback command failed:", error),
+    );
   }
 
   return (
-    <TouchableOpacity
-      style={styles.container}
+    <Pressable
+      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
       onPress={() => router.push("/now-playing")}
-      activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityLabel="Open now playing"
     >
-      {/* Artwork */}
-      <View style={styles.artworkContainer}>
-        {mediaState.artworkUrl ? (
-          <Image
-            source={{ uri: mediaState.artworkUrl }}
-            style={styles.artwork}
-            contentFit="cover"
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <View style={styles.artworkPlaceholder} />
-        )}
-      </View>
-
-      {/* Titles */}
-      <View style={styles.titleContainer}>
-        <Text style={styles.episodeTitle} numberOfLines={1}>
-          {mediaState.title ?? "Unknown episode"}
-        </Text>
-        <Text style={styles.podcastTitle} numberOfLines={1}>
-          {mediaState.podcastTitle ?? "Unknown podcast"}
-        </Text>
-      </View>
-
-      {/* Controls */}
-      <View style={styles.controls}>
-        <TouchableOpacity
-          onPress={handleSkipBackward}
-          style={styles.controlBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Skip backward"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <SkipBackIcon />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={handlePlayPause}
-          style={[styles.controlBtn, styles.playBtn]}
-          accessibilityRole="button"
-          accessibilityLabel={isPlaying ? "Pause" : "Play"}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          {isBuffering ? (
-            <ActivityIndicator size="small" color={colors.textOnAccent} />
-          ) : isPlaying ? (
-            <PauseIcon />
+      <View style={styles.content}>
+        <View style={styles.artworkContainer}>
+          {mediaState.artworkUrl ? (
+            <Image
+              source={{ uri: mediaState.artworkUrl }}
+              style={styles.artwork}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
           ) : (
-            <PlayIcon />
+            <View style={styles.artworkPlaceholder}>
+              <Text style={styles.artworkFallback}>PW</Text>
+            </View>
           )}
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity
-          onPress={handleSkipForward}
-          style={styles.controlBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Skip forward"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <SkipForwardIcon />
-        </TouchableOpacity>
+        <View style={styles.titleContainer}>
+          <Text style={styles.episodeTitle} numberOfLines={1}>
+            {mediaState.title ?? "Unknown episode"}
+          </Text>
+          <Text style={styles.podcastTitle} numberOfLines={1}>
+            {mediaState.podcastTitle ?? "Unknown podcast"}
+          </Text>
+        </View>
+
+        <View style={styles.controls}>
+          <Pressable
+            onPress={(event) =>
+              control(event, () => playbackController.skipBackward())
+            }
+            style={({ pressed }) => [
+              styles.controlButton,
+              pressed && styles.controlPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Skip backward"
+            hitSlop={8}
+          >
+            <Text style={styles.iconText}>↶</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={(event) =>
+              control(event, () =>
+                isPlaying
+                  ? playbackController.pause()
+                  : playbackController.play(),
+              )
+            }
+            style={({ pressed }) => [
+              styles.controlButton,
+              styles.playButton,
+              pressed && styles.controlPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            hitSlop={8}
+          >
+            {isBuffering ? (
+              <ActivityIndicator size="small" color={colors.textOnAccent} />
+            ) : (
+              <Text style={styles.playIcon}>{isPlaying ? "Ⅱ" : "▶"}</Text>
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={(event) =>
+              control(event, () => playbackController.skipForward())
+            }
+            style={({ pressed }) => [
+              styles.controlButton,
+              pressed && styles.controlPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Skip forward"
+            hitSlop={8}
+          >
+            <Text style={styles.iconText}>↷</Text>
+          </Pressable>
+        </View>
       </View>
-    </TouchableOpacity>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -164,31 +150,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.playerBg,
     borderTopWidth: 1,
     borderTopColor: colors.playerBorder,
+  },
+  content: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
-  artworkContainer: {
-    width: 48,
-    height: 48,
-  },
-  artwork: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-  },
+  artworkContainer: { width: 48, height: 48 },
+  artwork: { width: 48, height: 48, borderRadius: 6 },
   artworkPlaceholder: {
     width: 48,
     height: 48,
     borderRadius: 6,
     backgroundColor: colors.bgElevated,
-  },
-  titleContainer: {
-    flex: 1,
+    alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
   },
+  artworkFallback: {
+    color: colors.textMuted,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.bold,
+  },
+  titleContainer: { flex: 1, justifyContent: "center", overflow: "hidden" },
   episodeTitle: {
     color: colors.textPrimary,
     fontSize: fontSizes.sm,
@@ -198,30 +183,26 @@ const styles = StyleSheet.create({
   podcastTitle: {
     color: colors.textSecondary,
     fontSize: fontSizes.xs,
-    fontWeight: fontWeights.normal,
     lineHeight: 16,
     marginTop: 2,
   },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  controlBtn: {
-    padding: spacing.xs,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 36,
-    minHeight: 36,
-  },
-  playBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: 18,
+  controls: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  controlButton: {
     width: 36,
     height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
   },
-  iconText: {
-    color: colors.textPrimary,
+  playButton: { backgroundColor: colors.accent },
+  iconText: { color: colors.textPrimary, fontSize: 22 },
+  playIcon: {
+    color: colors.textOnAccent,
     fontSize: fontSizes.md,
+    fontWeight: fontWeights.bold,
   },
+  progressTrack: { height: 3, backgroundColor: colors.bgElevated },
+  progressFill: { height: "100%", backgroundColor: colors.accent },
+  pressed: { opacity: 0.92 },
+  controlPressed: { opacity: 0.65 },
 });

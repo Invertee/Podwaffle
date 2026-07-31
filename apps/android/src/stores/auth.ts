@@ -9,10 +9,18 @@ import { PodwaffleMediaModule } from "../native-media";
 
 const CREDENTIALS_KEY = "podwaffle.credentials.v1";
 const SNAPSHOT_KEY = "podwaffle.snapshot.v1";
+const PLAYBACK_SETTINGS_KEY_PREFIX = "podwaffle.playback-settings.v1";
+const DEFAULT_SKIP_BACKWARD_SECONDS = 15;
+const DEFAULT_SKIP_FORWARD_SECONDS = 30;
 
-interface Credentials {
+export interface Credentials {
   serverUrl: string;
   token: string;
+}
+
+interface PlaybackSettings {
+  skipBackwardSeconds: number;
+  skipForwardSeconds: number;
 }
 
 type AuthStatus = "restoring" | "signed-out" | "authenticated";
@@ -26,6 +34,9 @@ interface AuthStore {
   snapshot: Snapshot | null;
   lastSyncAt: string | null;
   error: string | null;
+  skipBackwardSeconds: number;
+  skipForwardSeconds: number;
+  settingsProfileId: string | null;
   restore: () => Promise<void>;
   validateServer: (value: string) => Promise<{
     serverUrl: string;
@@ -38,6 +49,7 @@ interface AuthStore {
     deviceName: string;
   }) => Promise<void>;
   refresh: () => Promise<void>;
+  setSkipDurations: (backwardSeconds: number, forwardSeconds: number) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -46,6 +58,45 @@ function errorMessage(error: unknown): string {
     return "Could not reach the server. Check the address and your network.";
   }
   return error instanceof Error ? error.message : "Something went wrong.";
+}
+
+function clampSkipSeconds(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(120, Math.round(value)));
+}
+
+function settingsKey(profileId: string): string {
+  return `${PLAYBACK_SETTINGS_KEY_PREFIX}:${profileId}`;
+}
+
+async function readPlaybackSettings(profileId: string): Promise<PlaybackSettings> {
+  try {
+    const raw = await AsyncStorage.getItem(settingsKey(profileId));
+    if (!raw) throw new Error("No saved settings");
+    const parsed = JSON.parse(raw) as Partial<PlaybackSettings>;
+    return {
+      skipBackwardSeconds: clampSkipSeconds(
+        Number(parsed.skipBackwardSeconds),
+        DEFAULT_SKIP_BACKWARD_SECONDS,
+      ),
+      skipForwardSeconds: clampSkipSeconds(
+        Number(parsed.skipForwardSeconds),
+        DEFAULT_SKIP_FORWARD_SECONDS,
+      ),
+    };
+  } catch {
+    return {
+      skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
+      skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+    };
+  }
+}
+
+async function writePlaybackSettings(
+  profileId: string,
+  settings: PlaybackSettings,
+): Promise<void> {
+  await AsyncStorage.setItem(settingsKey(profileId), JSON.stringify(settings));
 }
 
 async function clearPersistedState(): Promise<void> {
@@ -58,6 +109,7 @@ async function clearPersistedState(): Promise<void> {
 async function configureNative(
   credentials: Credentials,
   session: Session,
+  settings: PlaybackSettings,
 ): Promise<void> {
   try {
     await PodwaffleMediaModule.configure({
@@ -65,11 +117,11 @@ async function configureNative(
       deviceId: session.device.id,
       deviceToken: credentials.token,
       profileId: session.profile.id,
-      skipBackSeconds: 15,
-      skipForwardSeconds: 30,
+      skipBackSeconds: settings.skipBackwardSeconds,
+      skipForwardSeconds: settings.skipForwardSeconds,
     });
   } catch {
-    // A native module is unavailable in web/test shells; authentication remains usable.
+    // Authentication and browsing remain usable in web/test shells.
   }
 }
 
@@ -81,6 +133,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   snapshot: null,
   lastSyncAt: null,
   error: null,
+  skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
+  skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+  settingsProfileId: null,
 
   restore: async () => {
     try {
@@ -96,11 +151,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const snapshot = snapshotJson
         ? (JSON.parse(snapshotJson) as Snapshot)
         : null;
+      const profileId = snapshot?.profile.id ?? null;
+      const settings = profileId
+        ? await readPlaybackSettings(profileId)
+        : {
+            skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
+            skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+          };
       set({
         status: "authenticated",
         connection: "checking",
         credentials,
         snapshot,
+        settingsProfileId: profileId,
+        ...settings,
       });
       await get().refresh();
     } catch (error) {
@@ -138,13 +202,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       ),
     });
     const credentials = { serverUrl, token: result.token };
+    const settings = await readPlaybackSettings(result.session.profile.id);
     await SecureStore.setItemAsync(
       CREDENTIALS_KEY,
       JSON.stringify(credentials),
     );
     const snapshot = await api.snapshot(serverUrl, result.token);
     await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
-    await configureNative(credentials, result.session);
+    await configureNative(credentials, result.session, settings);
     set({
       status: "authenticated",
       connection: "online",
@@ -152,6 +217,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       session: result.session,
       snapshot,
       lastSyncAt: new Date().toISOString(),
+      settingsProfileId: result.session.profile.id,
+      ...settings,
       error: null,
     });
   },
@@ -200,13 +267,24 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       if (nextSnapshot) {
         await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(nextSnapshot));
       }
-      await configureNative(credentials, session);
+
+      const current = get();
+      const settings =
+        current.settingsProfileId === session.profile.id
+          ? {
+              skipBackwardSeconds: current.skipBackwardSeconds,
+              skipForwardSeconds: current.skipForwardSeconds,
+            }
+          : await readPlaybackSettings(session.profile.id);
+      await configureNative(credentials, session, settings);
       set({
         status: "authenticated",
         connection: "online",
         session,
         snapshot: nextSnapshot,
         lastSyncAt: new Date().toISOString(),
+        settingsProfileId: session.profile.id,
+        ...settings,
         error: null,
       });
     } catch (error) {
@@ -226,6 +304,28 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
+  setSkipDurations: async (backwardSeconds, forwardSeconds) => {
+    const backward = clampSkipSeconds(
+      backwardSeconds,
+      DEFAULT_SKIP_BACKWARD_SECONDS,
+    );
+    const forward = clampSkipSeconds(
+      forwardSeconds,
+      DEFAULT_SKIP_FORWARD_SECONDS,
+    );
+    const settings = {
+      skipBackwardSeconds: backward,
+      skipForwardSeconds: forward,
+    };
+    const { credentials, session, snapshot } = get();
+    const profileId = session?.profile.id ?? snapshot?.profile.id ?? null;
+    set(settings);
+    if (profileId) await writePlaybackSettings(profileId, settings);
+    if (credentials && session) {
+      await configureNative(credentials, session, settings);
+    }
+  },
+
   logout: async () => {
     await clearPersistedState();
     set({
@@ -235,6 +335,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       session: null,
       snapshot: null,
       lastSyncAt: null,
+      settingsProfileId: null,
+      skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
+      skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
       error: null,
     });
   },
