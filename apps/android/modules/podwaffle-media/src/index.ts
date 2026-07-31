@@ -1,7 +1,4 @@
-import {
-  requireNativeModule,
-  type NativeModule as ExpoNativeModule,
-} from "expo-modules-core";
+import { requireNativeModule } from "expo-modules-core";
 
 export type NativePlaybackStatus =
   | "idle"
@@ -148,7 +145,7 @@ export const MEDIA_EVENTS = {
 export type MediaEventName =
   (typeof MEDIA_EVENTS)[keyof typeof MEDIA_EVENTS];
 
-interface PodwaffleNativeModule extends ExpoNativeModule {
+interface PodwaffleNativeModule {
   configure(config: PodwaffleMediaConfig): Promise<void>;
   bind(): Promise<NativePlaybackState>;
   getState(): Promise<NativePlaybackState>;
@@ -182,6 +179,10 @@ interface PodwaffleNativeModule extends ExpoNativeModule {
   removeDownload(episodeId: string): Promise<void>;
   getDownloads(): Promise<NativeDownload[]>;
   runDownloadMaintenance(): Promise<NativeDownloadMaintenanceResult>;
+  addListener(
+    event: MediaEventName,
+    handler: (data: unknown) => void,
+  ): { remove(): void };
 }
 
 const nativeModule =

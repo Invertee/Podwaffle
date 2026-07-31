@@ -38,9 +38,9 @@ async function ensureNotificationPermission(): Promise<void> {
     return;
   }
   notificationPermissionRequested = true;
-  await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-  ).catch(() => undefined);
+  const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
+  if (!permission) return;
+  await PermissionsAndroid.request(permission).catch(() => undefined);
 }
 
 function localPlaybackState(
