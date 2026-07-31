@@ -46,9 +46,10 @@ dependencies {
   implementation "androidx.media3:media3-common:${media3_version}"
   implementation "androidx.media3:media3-cast:${media3_version}"
 
-  implementation "com.google.android.gms:play-services-cast-framework:22.3.1"
+  implementation "com.google.android.gms:play-services-cast-framework:21.5.0"
   implementation "androidx.mediarouter:mediarouter:1.7.0"
 
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'org.mockito:mockito-core:5.11.0'
+  implementation "androidx.appcompat:appcompat:1.7.0"
 }

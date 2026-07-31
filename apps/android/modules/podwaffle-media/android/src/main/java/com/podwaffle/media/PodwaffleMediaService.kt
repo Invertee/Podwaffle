@@ -574,7 +574,7 @@ class PodwaffleMediaService : MediaSessionService() {
             ?: previous.durationMs.takeIf { sameEpisode }
         val idleReason = when (session.remoteMediaClient?.mediaStatus?.idleReason) {
             MediaStatus.IDLE_REASON_FINISHED -> "finished"
-            MediaStatus.IDLE_REASON_CANCELLED -> "cancelled"
+            MediaStatus.IDLE_REASON_CANCELED -> "cancelled"
             MediaStatus.IDLE_REASON_INTERRUPTED -> "interrupted"
             MediaStatus.IDLE_REASON_ERROR -> "error"
             else -> null

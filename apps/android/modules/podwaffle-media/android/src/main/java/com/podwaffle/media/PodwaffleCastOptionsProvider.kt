@@ -25,7 +25,6 @@ class PodwaffleCastOptionsProvider : OptionsProvider {
             .setResumeSavedSession(true)
             .setSessionTransferEnabled(true)
             .setRemoteToLocalEnabled(true)
-            .setShowSystemOutputSwitcherOnCastIconClick(true)
             .setStopReceiverApplicationWhenEndingSession(false)
             .build()
     }
