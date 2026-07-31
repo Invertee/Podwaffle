@@ -5,7 +5,10 @@ import { create } from "zustand";
 import type { PublicProfile, Session, Snapshot } from "@podwaffle/contracts";
 
 import { ApiClientError, api, normalizeServerUrl } from "../api/client";
+import { clearQueryCache } from "../api/queryCache";
 import { PodwaffleMediaModule } from "../native-media";
+import { clearPendingPlayback } from "../playback/offlineProgress";
+import { useDownloadsStore } from "./downloads";
 
 const CREDENTIALS_KEY = "podwaffle.credentials.v1";
 const SNAPSHOT_KEY = "podwaffle.snapshot.v1";
@@ -34,6 +37,7 @@ interface AuthStore {
   snapshot: Snapshot | null;
   lastSyncAt: string | null;
   error: string | null;
+  liveSyncConnected: boolean;
   skipBackwardSeconds: number;
   skipForwardSeconds: number;
   settingsProfileId: string | null;
@@ -50,6 +54,7 @@ interface AuthStore {
   }) => Promise<void>;
   refresh: () => Promise<void>;
   setSkipDurations: (backwardSeconds: number, forwardSeconds: number) => Promise<void>;
+  setLiveSyncConnected: (connected: boolean) => void;
   logout: () => Promise<void>;
 }
 
@@ -119,6 +124,8 @@ async function configureNative(
       profileId: session.profile.id,
       skipBackSeconds: settings.skipBackwardSeconds,
       skipForwardSeconds: settings.skipForwardSeconds,
+      downloadRetentionDays: 30,
+      maxDownloadStorageBytes: 2_000_000_000,
     });
   } catch {
     // Authentication and browsing remain usable in web/test shells.
@@ -133,6 +140,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   snapshot: null,
   lastSyncAt: null,
   error: null,
+  liveSyncConnected: false,
   skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
   skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
   settingsProfileId: null,
@@ -144,7 +152,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         AsyncStorage.getItem(SNAPSHOT_KEY),
       ]);
       if (!credentialsJson) {
-        set({ status: "signed-out", connection: "offline" });
+        set({ status: "signed-out", connection: "offline", liveSyncConnected: false });
         return;
       }
       const credentials = JSON.parse(credentialsJson) as Credentials;
@@ -238,6 +246,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           session: null,
           snapshot: null,
           error: "This device was signed out or revoked.",
+          liveSyncConnected: false,
         });
         return;
       }
@@ -297,12 +306,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           session: null,
           snapshot: null,
           error: "This device was revoked. Join the server again.",
+          liveSyncConnected: false,
         });
         return;
       }
       set({ connection: "offline", error: errorMessage(error) });
     }
   },
+
+  setLiveSyncConnected: (liveSyncConnected) => set({ liveSyncConnected }),
 
   setSkipDurations: async (backwardSeconds, forwardSeconds) => {
     const backward = clampSkipSeconds(
@@ -327,7 +339,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   logout: async () => {
+    const profileId = get().session?.profile.id ?? get().snapshot?.profile.id;
     await clearPersistedState();
+    if (profileId) {
+      await clearQueryCache(profileId).catch(() => undefined);
+      await clearPendingPlayback(profileId).catch(() => undefined);
+    }
+    useDownloadsStore.getState().clear();
     set({
       status: "signed-out",
       connection: "offline",
@@ -339,6 +357,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
       skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
       error: null,
+      liveSyncConnected: false,
     });
   },
 }));

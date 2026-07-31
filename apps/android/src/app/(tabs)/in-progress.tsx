@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import { api } from "../../api/client";
+import { cachedQuery } from "../../api/queryCache";
 import { EpisodeCard } from "../../components/EpisodeCard";
 import { useEpisodeActions } from "../../hooks/useEpisodeActions";
 import { useAuthStore } from "../../stores/auth";
@@ -22,12 +23,15 @@ import {
 export default function InProgressScreen() {
   const credentials = useAuthStore((state) => state.credentials);
   const connection = useAuthStore((state) => state.connection);
+  const profileId = useAuthStore((state) => state.session?.profile.id ?? state.snapshot?.profile.id);
   const refreshProfile = useAuthStore((state) => state.refresh);
   const episodes = useQuery({
     queryKey: ["android-in-progress"],
     queryFn: () =>
-      api.inProgress(credentials!.serverUrl, credentials!.token),
-    enabled: Boolean(credentials),
+      cachedQuery(profileId!, "in-progress", () =>
+        api.inProgress(credentials!.serverUrl, credentials!.token),
+      ),
+    enabled: Boolean(credentials && profileId),
   });
   const actions = useEpisodeActions(async () => {
     await episodes.refetch();

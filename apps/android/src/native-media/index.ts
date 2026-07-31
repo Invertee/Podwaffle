@@ -1,5 +1,3 @@
-// Re-export the native media bridge as the app-level entry point.
-// The rest of the app imports from here, not directly from the module path.
 export {
   PodwaffleMediaModule,
   MEDIA_EVENTS,
@@ -11,6 +9,8 @@ export {
   type NativeDownload,
   type NativeDownloadMaintenanceResult,
   type NativeCastState,
+  type NativeCastPlayerState,
   type NativeCastSessionSummary,
   type NativeMediaError,
+  type NativeEpisodeCompletion,
 } from "../../modules/podwaffle-media/src/index";

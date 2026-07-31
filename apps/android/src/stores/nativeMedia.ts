@@ -1,63 +1,112 @@
-/**
- * Zustand store for native media playback state.
- *
- * This store is the single source of truth for UI rendering of playback.
- * It is populated by event subscriptions from the Kotlin MediaSessionService
- * and must NEVER be directly mutated by UI components — use the
- * PodwaffleMediaModule commands instead.
- *
- * See: spec §28.2, §32.2
- */
-
 import { create } from "zustand";
-import type { NativePlaybackState } from "../native-media/index";
+
+import type {
+  NativeCastState,
+  NativePlaybackState,
+} from "../native-media/index";
 
 interface NativeMediaStore {
-  /** null means no media is loaded / service not yet bound */
   state: NativePlaybackState | null;
-  /** Whether we have successfully bound to the MediaSessionService */
+  castState: NativeCastState;
   bound: boolean;
-  /** Whether we're in the process of binding */
   binding: boolean;
-
-  // Actions
   setBound: (bound: boolean) => void;
   setBinding: (binding: boolean) => void;
   updateState: (state: NativePlaybackState) => void;
   updatePosition: (positionMs: number, bufferedPositionMs: number) => void;
+  updateCastState: (castState: NativeCastState) => void;
   clearState: () => void;
 }
 
+const initialCastState: NativeCastState = {
+  available: false,
+  connecting: false,
+  connected: false,
+  session: null,
+  availableDevices: [],
+};
+
 export const useNativeMediaStore = create<NativeMediaStore>((set) => ({
   state: null,
+  castState: initialCastState,
   bound: false,
   binding: false,
 
   setBound: (bound) => set({ bound }),
   setBinding: (binding) => set({ binding }),
-
-  updateState: (state) => set({ state }),
-
+  updateState: (state) =>
+    set((store) => ({
+      state:
+        store.castState.connected && store.castState.session
+          ? castPlaybackState(state, store.castState)
+          : state,
+    })),
   updatePosition: (positionMs, bufferedPositionMs) =>
     set((store) => {
-      if (!store.state) return {};
+      if (!store.state || store.castState.connected) return {};
       return {
         state: { ...store.state, positionMs, bufferedPositionMs },
       };
     }),
-
-  clearState: () => set({ state: null, bound: false, binding: false }),
+  updateCastState: (castState) =>
+    set((store) => ({
+      castState,
+      state:
+        castState.connected && castState.session
+          ? castPlaybackState(store.state, castState)
+          : store.state
+            ? {
+                ...store.state,
+                source: store.state.source === "cast" ? "stream" : store.state.source,
+                cast: null,
+              }
+            : null,
+    })),
+  clearState: () =>
+    set({ state: null, castState: initialCastState, bound: false, binding: false }),
 }));
 
-// Convenience selectors
-export const selectIsPlaying = (s: NativeMediaStore) =>
-  s.state?.playWhenReady === true && s.state.playbackStatus === "ready";
+function castPlaybackState(
+  local: NativePlaybackState | null,
+  castState: NativeCastState,
+): NativePlaybackState | null {
+  const session = castState.session;
+  if (!session) return local;
+  const playing = session.playerState === "playing";
+  const buffering = session.playerState === "buffering";
+  return {
+    episodeId: session.episodeId ?? local?.episodeId ?? null,
+    podcastId: local?.podcastId ?? null,
+    title: local?.title ?? null,
+    podcastTitle: local?.podcastTitle ?? null,
+    artworkUrl: local?.artworkUrl ?? null,
+    durationMs: session.durationMs ?? local?.durationMs ?? null,
+    positionMs: session.positionMs,
+    bufferedPositionMs: session.positionMs,
+    playbackStatus: buffering ? "buffering" : session.mediaLoaded ? "ready" : "idle",
+    playWhenReady: playing,
+    playbackRate: local?.playbackRate ?? 1,
+    source: "cast",
+    queueItemId: local?.queueItemId ?? null,
+    queueIndex: local?.queueIndex ?? 0,
+    queueLength: local?.queueLength ?? 0,
+    hasLease: local?.hasLease ?? false,
+    leaseExpiresAt: local?.leaseExpiresAt ?? null,
+    cast: session,
+    lastError: local?.lastError ?? null,
+  };
+}
 
-export const selectHasMedia = (s: NativeMediaStore) =>
-  s.state?.episodeId !== null && s.state !== null;
+export const selectIsPlaying = (store: NativeMediaStore) =>
+  store.state?.playWhenReady === true &&
+  (store.state.playbackStatus === "ready" ||
+    store.state.playbackStatus === "buffering");
 
-export const selectPositionMs = (s: NativeMediaStore) =>
-  s.state?.positionMs ?? 0;
+export const selectHasMedia = (store: NativeMediaStore) =>
+  store.state !== null && store.state.episodeId !== null;
 
-export const selectDurationMs = (s: NativeMediaStore) =>
-  s.state?.durationMs ?? null;
+export const selectPositionMs = (store: NativeMediaStore) =>
+  store.state?.positionMs ?? 0;
+
+export const selectDurationMs = (store: NativeMediaStore) =>
+  store.state?.durationMs ?? null;

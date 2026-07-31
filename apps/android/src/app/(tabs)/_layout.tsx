@@ -88,6 +88,15 @@ export default function TabLayout() {
             }}
           />
           <Tabs.Screen
+            name="downloads"
+            options={{
+              title: "Downloads",
+              tabBarIcon: ({ color }) => (
+                <TabIcon symbol="⇩" focused={color === colors.accent} />
+              ),
+            }}
+          />
+          <Tabs.Screen
             name="profile"
             options={{
               title: "Profile",

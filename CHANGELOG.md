@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Completed Android Milestones 19–23: authenticated live WebSocket recovery,
+  native queue and cross-client playback coordination, a full Now Playing
+  experience, persistent background downloads with offline playback and storage
+  maintenance, and Google Cast sender playback with receiver-confirmed handoff.
 - Completed Android Milestones 14–18: secure joining and cached sync, tile/list
   library ordering, podcast and episode browsing, Apple discovery, in-progress
   playback, profile statistics/device controls, a durable queue, and real Media3

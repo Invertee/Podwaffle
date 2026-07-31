@@ -1,9 +1,11 @@
 import type {
   ApiErrorBody,
+  CastConfirmedState,
   Device,
   DiscoveryResult,
   Episode,
   ListeningStats,
+  PlaybackCommand,
   PlaybackState,
   Podcast,
   PublicProfile,
@@ -417,6 +419,84 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+
+  startCast: (
+    serverUrl: string,
+    token: string,
+    confirmed: CastConfirmedState,
+  ) =>
+    request<{ playback: PlaybackState; revision: number }>(
+      serverUrl,
+      "/api/v1/playback/cast",
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({ commandId: createCommandId(), confirmed }),
+      },
+    ),
+
+  stopCast: (
+    serverUrl: string,
+    token: string,
+    body: {
+      positionMs: number;
+      durationMs: number | null;
+      state: "playing" | "paused" | "stopped";
+      playbackRate: number;
+    },
+  ) =>
+    request<{ playback: PlaybackState; revision: number }>(
+      serverUrl,
+      "/api/v1/playback/cast",
+      token,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ commandId: createCommandId(), ...body }),
+      },
+    ),
+
+  playbackCommand: (
+    serverUrl: string,
+    token: string,
+    command: PlaybackCommand,
+  ) =>
+    request<{
+      commandId: string;
+      status: "pending" | "accepted" | "rejected" | "cancelled";
+      delivered: boolean;
+      replayed: boolean;
+    }>(serverUrl, "/api/v1/playback/commands", token, {
+      method: "POST",
+      body: JSON.stringify(command),
+    }),
+
+  playbackCommandResult: (
+    serverUrl: string,
+    token: string,
+    result: {
+      commandId: string;
+      status: "accepted" | "rejected";
+      confirmed?: CastConfirmedState;
+      message?: string;
+    },
+  ) =>
+    request<{
+      playback: PlaybackState;
+      replayed: boolean;
+    }>(
+      serverUrl,
+      `/api/v1/playback/commands/${result.commandId}/result`,
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          status: result.status,
+          ...(result.confirmed ? { confirmed: result.confirmed } : {}),
+          ...(result.message ? { message: result.message } : {}),
+        }),
+      },
+    ),
+
   movement: (
     serverUrl: string,
     token: string,
@@ -443,7 +523,7 @@ export const api = {
       playbackInstanceId: string;
       sequence: number;
       episodeId: string;
-      source: "android-local";
+      source: "android-local" | "cast";
       listenedMs: number;
       contentConsumedMs: number;
     },

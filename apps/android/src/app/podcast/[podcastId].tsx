@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { api } from "../../api/client";
+import { cachedQuery } from "../../api/queryCache";
 import { EpisodeCard } from "../../components/EpisodeCard";
 import { useEpisodeActions } from "../../hooks/useEpisodeActions";
 import { useAuthStore } from "../../stores/auth";
@@ -44,6 +45,7 @@ export default function PodcastScreen() {
     ? params.podcastId[0]
     : params.podcastId;
   const credentials = useAuthStore((state) => state.credentials);
+  const profileId = useAuthStore((state) => state.session?.profile.id ?? state.snapshot?.profile.id);
   const cachedPodcast = useAuthStore((state) =>
     state.snapshot?.subscriptions.find((item) => item.id === podcastId),
   );
@@ -51,15 +53,19 @@ export default function PodcastScreen() {
   const podcast = useQuery({
     queryKey: ["android-podcast", podcastId],
     queryFn: () =>
-      api.podcast(credentials!.serverUrl, credentials!.token, podcastId!),
-    enabled: Boolean(credentials && podcastId),
+      cachedQuery(profileId!, `podcast:${podcastId}`, () =>
+        api.podcast(credentials!.serverUrl, credentials!.token, podcastId!),
+      ),
+    enabled: Boolean(credentials && podcastId && profileId),
     initialData: cachedPodcast as Podcast | undefined,
   });
   const episodes = useQuery({
     queryKey: ["android-episodes", podcastId],
     queryFn: () =>
-      api.episodes(credentials!.serverUrl, credentials!.token, podcastId!),
-    enabled: Boolean(credentials && podcastId),
+      cachedQuery(profileId!, `episodes:${podcastId}`, () =>
+        api.episodes(credentials!.serverUrl, credentials!.token, podcastId!),
+      ),
+    enabled: Boolean(credentials && podcastId && profileId),
   });
   const actions = useEpisodeActions(async () => {
     await episodes.refetch();

@@ -4,7 +4,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.2.0",
+  version: "0.3.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "podwaffle",
@@ -18,15 +18,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "2",
+    buildNumber: "3",
   },
   android: {
+    versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0D1B2A",
     },
     package: "com.podwaffle.app",
-    versionCode: 2,
     permissions: [
       "android.permission.INTERNET",
       "android.permission.FOREGROUND_SERVICE",
@@ -44,16 +44,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     "expo-router",
+    "expo-asset",
     "expo-secure-store",
     [
       "expo-build-properties",
       {
         android: {
           minSdkVersion: 26,
-          // Media3 1.5 requires API 35 at compile time. Runtime targeting
-          // remains Android 14 / API 34 until the release hardening pass.
           compileSdkVersion: 35,
-          targetSdkVersion: 34,
+          targetSdkVersion: 35,
         },
       },
     ],
@@ -71,7 +70,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    nativeRuntimeVersion: "0.2-native-2",
+    nativeRuntimeVersion: "0.3-native-3",
     apiMinVersion: 1,
   },
 });

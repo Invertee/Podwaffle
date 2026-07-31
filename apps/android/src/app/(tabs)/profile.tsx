@@ -44,6 +44,7 @@ export default function ProfileScreen() {
   const snapshot = useAuthStore((state) => state.snapshot);
   const credentials = useAuthStore((state) => state.credentials);
   const connection = useAuthStore((state) => state.connection);
+  const liveSyncConnected = useAuthStore((state) => state.liveSyncConnected);
   const lastSyncAt = useAuthStore((state) => state.lastSyncAt);
   const error = useAuthStore((state) => state.error);
   const refresh = useAuthStore((state) => state.refresh);
@@ -349,6 +350,11 @@ export default function ProfileScreen() {
                 : "Offline"
           }
           valueColor={connection === "online" ? colors.success : colors.warning}
+        />
+        <Row
+          label="Live sync"
+          value={liveSyncConnected ? "Connected" : "Reconnecting"}
+          valueColor={liveSyncConnected ? colors.success : colors.warning}
         />
         <Row label="Cached revision" value={String(snapshot?.revision ?? "None")} />
         <Row

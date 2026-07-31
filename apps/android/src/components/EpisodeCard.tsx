@@ -16,6 +16,7 @@ import {
   radii,
   spacing,
 } from "../styles/tokens";
+import { DownloadAction } from "./DownloadAction";
 
 export function formatDurationMs(durationMs: number | null): string {
   if (!durationMs || durationMs <= 0) return "Duration unavailable";
@@ -145,6 +146,8 @@ export function EpisodeCard({
         >
           <Text style={styles.actionText}>Queue</Text>
         </Pressable>
+
+        <DownloadAction episode={episode} />
 
         <Pressable
           style={({ pressed }) => [
