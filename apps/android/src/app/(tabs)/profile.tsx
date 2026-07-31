@@ -297,7 +297,7 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.deviceCount}>{devices.data?.length ?? 0}</Text>
         </View>
-        {devices.data?.map((device) => (
+        {devices.data?.map((device: Device) => (
           <View style={styles.device} key={device.id}>
             <View style={styles.deviceIcon}>
               <Text style={styles.deviceIconText}>
