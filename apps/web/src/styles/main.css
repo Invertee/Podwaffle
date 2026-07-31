@@ -21,6 +21,20 @@
   box-sizing: border-box;
 }
 
+/* Keep pages and panels scrollable without showing browser scrollbars. */
+html,
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -268,7 +282,7 @@ button:disabled {
 
 .podcast-grid.tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
   gap: 1.25rem;
 }
 
@@ -833,6 +847,17 @@ header .eyebrow,
   border-radius: 1rem;
 }
 
+.episode-info {
+  position: relative;
+}
+
+.episode-info .drawer-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  margin: 0;
+}
+
 .show-notes {
   color: #d5cfd8;
   line-height: 1.6;
@@ -1139,7 +1164,7 @@ a:focus-visible {
 }
 
 .podcast-grid.tiles {
-  grid-template-columns: repeat(auto-fill, minmax(10.2rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
   gap: 0.2rem;
 }
 
