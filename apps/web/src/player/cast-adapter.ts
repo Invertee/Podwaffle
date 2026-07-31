@@ -499,11 +499,16 @@ export class GoogleCastAdapter implements CastAdapter {
       0,
       Math.round((remote.duration || 0) * 1000),
     );
-    const positionMs =
+    const preserveLastPosition =
+      !this.loadingMedia &&
       remotePositionMs === 0 &&
-      (remote.playerState === "IDLE" || !remote.isConnected)
-        ? this.current.positionMs
-        : remotePositionMs;
+      this.current.positionMs > 0 &&
+      (!remote.isMediaLoaded ||
+        remote.playerState === "IDLE" ||
+        !remote.isConnected);
+    const positionMs = preserveLastPosition
+      ? this.current.positionMs
+      : remotePositionMs;
     const durationMs = remoteDurationMs || this.current.durationMs;
     const idleReason = session?.getMediaSession()?.idleReason ?? null;
     const activeState = ["PLAYING", "PAUSED", "BUFFERING"].includes(
