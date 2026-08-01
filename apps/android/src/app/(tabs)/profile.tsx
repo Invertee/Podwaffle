@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { api } from "../../api/client";
+import { updateProfilePlaybackSettings } from "../../api/profileSettings";
 import {
   authenticatedConnection,
   refreshProfile,
@@ -86,6 +87,27 @@ export default function ProfileScreen() {
       const current = useAuthStore.getState();
       setBackwardInput(String(current.skipBackwardSeconds));
       setForwardInput(String(current.skipForwardSeconds));
+      const currentCredentials = current.credentials;
+      const revision = current.snapshot?.revision ?? current.session?.profile.revision;
+      if (currentCredentials && revision !== undefined) {
+        await updateProfilePlaybackSettings(
+          currentCredentials.serverUrl,
+          currentCredentials.token,
+          {
+            skipBackwardSeconds: current.skipBackwardSeconds,
+            skipForwardSeconds: current.skipForwardSeconds,
+          },
+          revision,
+        );
+        await current.refresh();
+      }
+    } catch (settingsError) {
+      Alert.alert(
+        "Settings could not be saved",
+        settingsError instanceof Error
+          ? settingsError.message
+          : "The profile settings could not be updated.",
+      );
     } finally {
       setSavingSettings(false);
     }
@@ -179,7 +201,7 @@ export default function ProfileScreen() {
           ) : null}
         </View>
         <Text style={styles.cardDescription}>
-          Used by the mini-player, Now Playing screen, and notification controls.
+          Synced across the Android app, web player, and profile devices.
         </Text>
         <View style={styles.settingRow}>
           <Text style={styles.settingLabel}>Skip backward</Text>
