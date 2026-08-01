@@ -302,12 +302,14 @@ export function resolveCastCommand(
       command: existing,
       playback: playbackState(db, profileId, ownerDeviceId),
     };
-  if (input.status === "accepted" && !input.confirmed)
+
+  const confirmed = input.confirmed;
+  if (input.status === "accepted" && !confirmed)
     throw new Error("CAST_CONFIRMATION_REQUIRED");
 
-  if (input.status === "accepted") {
+  if (input.status === "accepted" && confirmed) {
     const before = playbackState(db, profileId, ownerDeviceId);
-    startCast(db, profileId, ownerDeviceId, input.confirmed!);
+    startCast(db, profileId, ownerDeviceId, confirmed);
     const action = existing.command.action;
     if (
       action === "seek" ||
@@ -316,25 +318,25 @@ export function resolveCastCommand(
     ) {
       recordMovement(db, profileId, ownerDeviceId, {
         commandId: input.commandId,
-        episodeId: input.confirmed.episodeId,
+        episodeId: confirmed.episodeId,
         type: action,
         fromPositionMs: before.positionMs,
         requestedPositionMs:
           action === "seek"
-            ? (existing.command.positionMs ?? input.confirmed.positionMs)
+            ? (existing.command.positionMs ?? confirmed.positionMs)
             : Math.max(
                 0,
                 before.positionMs +
                   (action === "skip-forward" ? 1 : -1) *
                     (existing.command.offsetMs ?? 0),
               ),
-        confirmedPositionMs: input.confirmed.positionMs,
+        confirmedPositionMs: confirmed.positionMs,
       });
     }
   }
   const result = {
     status: input.status,
-    ...(input.confirmed ? { confirmed: input.confirmed } : {}),
+    ...(confirmed ? { confirmed } : {}),
     ...(input.message ? { message: input.message } : {}),
   };
   db.prepare(
