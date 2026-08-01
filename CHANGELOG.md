@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Registered the Android MediaSessionService with an in-process MediaController so
+  Media3 can publish the foreground media notification, lock-screen metadata and
+  system play/pause/seek controls during local playback.
+- Added the platform media-browser service declaration and updated the Android
+  application and native runtime version to 0.4.3.
 - Restored the web Google Cast sender control and added Play on device pickers to
   both web and Android, with targeted live handoff between profile clients.
 - Added target-device playback commands and separated local command confirmation
