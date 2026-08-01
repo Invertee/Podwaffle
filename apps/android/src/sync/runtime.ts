@@ -144,7 +144,13 @@ class AndroidSyncRuntime {
   private async handlePlaybackCommand(
     command: PlaybackCommand & { requestedByDeviceId: string },
   ): Promise<void> {
-    const result = await playbackController.handleRemotePlaybackCommand(command);
+    const currentDeviceId = useAuthStore.getState().session?.device.id;
+    const targetedTakeover =
+      command.action === "play-episode" &&
+      command.targetDeviceId === currentDeviceId;
+    const result = targetedTakeover
+      ? await this.takeOverPlayback(command)
+      : await playbackController.handleRemotePlaybackCommand(command);
     const credentials = this.credentials;
     if (!credentials) return;
     try {
@@ -161,6 +167,28 @@ class AndroidSyncRuntime {
         commandId: command.commandId,
         ...result,
       });
+    }
+  }
+
+  private async takeOverPlayback(
+    command: PlaybackCommand,
+  ): Promise<{
+    status: "accepted" | "rejected";
+    message?: string;
+  }> {
+    try {
+      await useAuthStore.getState().refresh();
+      await playbackController.takeOverPlayback();
+      if (command.playbackState === "paused") {
+        await playbackController.pause();
+      }
+      return { status: "accepted" };
+    } catch (error) {
+      return {
+        status: "rejected",
+        message:
+          error instanceof Error ? error.message : "Playback could not be moved.",
+      };
     }
   }
 
