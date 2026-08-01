@@ -8,8 +8,8 @@ import android.os.Build
 
 object NotificationHelper {
     const val PLAYBACK_CHANNEL_ID = "podwaffle_playback_channel_v2"
-    const val DOWNLOAD_CHANNEL_ID = "podwaffle_download_channel"
     const val PLAYBACK_NOTIFICATION_ID = 1002
+    private const val LEGACY_DOWNLOAD_CHANNEL_ID = "podwaffle_download_channel"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -27,16 +27,6 @@ object NotificationHelper {
                 enableVibration(false)
             },
         )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                DOWNLOAD_CHANNEL_ID,
-                "Podwaffle downloads",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Podcast download progress"
-                setSound(null, null)
-                enableVibration(false)
-            },
-        )
+        manager.deleteNotificationChannel(LEGACY_DOWNLOAD_CHANNEL_ID)
     }
 }
