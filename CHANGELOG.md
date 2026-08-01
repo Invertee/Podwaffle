@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced Android's system DownloadManager with an app-private resumable podcast
+  downloader, removed its separate notification channel, and migrate/cancel
+  outstanding legacy system downloads during upgrade.
+- Matched the Android mini-player, Now Playing transport controls, system media
+  actions and Cast glyphs to the web player's icon language; updated Android to
+  version 0.4.4 and native runtime 0.4-native-7.
 - Registered the Android MediaSessionService with an in-process MediaController so
   Media3 can publish the foreground media notification, lock-screen metadata and
   system play/pause/seek controls during local playback.
