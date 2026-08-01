@@ -35,6 +35,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.WAKE_LOCK",
       "android.permission.RECEIVE_BOOT_COMPLETED",
       "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION",
     ],
   },
   web: {
