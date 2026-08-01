@@ -120,9 +120,6 @@ export function createPlaybackRouter(
           } catch (error) {
             leaseError(error);
           }
-          // Playback state is the source of truth for the player position.
-          // Mirror every confirmed position into episode_state so switching away
-          // from an episode (or reloading the app) does not lose its progress.
           const priorEpisode = getEpisode(db, profile.id, input.episodeId);
           const episode = setEpisodeProgress(
             db,
@@ -213,9 +210,43 @@ export function createPlaybackRouter(
       const { profile, device } = request.auth!;
       let stored: ReturnType<typeof createCastCommand>;
       try {
-        stored = database.transaction(() =>
-          createCastCommand(database.db, profile.id, device.id, command),
-        );
+        stored = database.transaction(() => {
+          const targetDeviceId = command.targetDeviceId;
+          if (targetDeviceId) {
+            const target = database.db
+              .prepare(
+                "SELECT id FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
+              )
+              .get(targetDeviceId, profile.id) as { id: string } | undefined;
+            if (!target) {
+              throw new ApiError(
+                404,
+                "DEVICE_NOT_FOUND",
+                "The playback device was not found",
+              );
+            }
+          }
+          const created = createCastCommand(
+            database.db,
+            profile.id,
+            device.id,
+            command,
+          );
+          if (
+            targetDeviceId &&
+            created.status === "pending" &&
+            !created.replayed &&
+            created.ownerDeviceId !== targetDeviceId
+          ) {
+            database.db
+              .prepare(
+                "UPDATE playback_commands SET owner_device_id = ? WHERE command_id = ? AND profile_id = ?",
+              )
+              .run(targetDeviceId, command.commandId, profile.id);
+            return { ...created, ownerDeviceId: targetDeviceId };
+          }
+          return created;
+        });
       } catch (error) {
         if (error instanceof Error && error.message === "PLAYBACK_NOT_ACTIVE")
           throw new ApiError(
@@ -231,8 +262,7 @@ export function createPlaybackRouter(
           profile.id,
           stored.ownerDeviceId,
           stored.command,
-        ) ??
-          false);
+        ) ?? false);
       response.status(stored.status === "pending" ? 202 : 200).json({
         commandId: command.commandId,
         status: stored.status,
@@ -334,14 +364,14 @@ export function applyCastCommandResult(
   if (!existing)
     throw new ApiError(
       404,
-      "CAST_COMMAND_NOT_FOUND",
-      "The Cast command was not found",
+      "PLAYBACK_COMMAND_NOT_FOUND",
+      "The playback command was not found",
     );
   if (existing.ownerDeviceId !== ownerDeviceId)
     throw new ApiError(
       409,
-      "CAST_OWNER_REQUIRED",
-      "This device does not own the Cast session",
+      "PLAYBACK_TARGET_REQUIRED",
+      "This device is not the target of the playback command",
     );
   if (existing.status !== "pending") {
     return {
@@ -351,11 +381,39 @@ export function applyCastCommandResult(
     };
   }
   const current = playbackState(database.db, profileId, ownerDeviceId);
-  const eventType =
-    current.mode === "cast"
-      ? "playback.cast.updated"
-      : "playback.state.updated";
-  const applied = sync.mutate(profileId, eventType, (db) => {
+  if (current.mode !== "cast") {
+    const applied = sync.mutate(profileId, "playback.state.updated", (db) => {
+      const result = {
+        status: input.status,
+        ...(input.message ? { message: input.message } : {}),
+      };
+      db.prepare(
+        `UPDATE playback_commands SET status = ?, result_json = ?, completed_at = ?
+         WHERE command_id = ? AND profile_id = ?`,
+      ).run(
+        input.status,
+        JSON.stringify(result),
+        new Date().toISOString(),
+        input.commandId,
+        profileId,
+      );
+      const playback = playbackState(db, profileId, ownerDeviceId);
+      return {
+        result: {
+          command: getCastCommand(db, profileId, input.commandId)!,
+          playback,
+        },
+        payload: {
+          commandId: input.commandId,
+          status: input.status,
+          playback,
+        },
+      };
+    });
+    return { ...applied.result, replayed: false };
+  }
+
+  const applied = sync.mutate(profileId, "playback.cast.updated", (db) => {
     const result = resolveCastCommand(db, profileId, ownerDeviceId, input);
     return {
       result,
