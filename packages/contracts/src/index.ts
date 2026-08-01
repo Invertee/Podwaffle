@@ -81,6 +81,7 @@ export const playbackCommandSchema = z.object({
   positionMs: z.number().int().nonnegative().optional(),
   offsetMs: z.number().int().positive().optional(),
   episodeId: z.uuid().optional(),
+  targetDeviceId: z.uuid().optional(),
 });
 
 export const castConfirmedStateSchema = z.object({
