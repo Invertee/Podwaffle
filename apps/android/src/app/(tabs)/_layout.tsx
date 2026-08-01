@@ -23,7 +23,6 @@ export default function TabLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="in-progress" />
       <Stack.Screen name="discover" />
-      <Stack.Screen name="downloads" />
       <Stack.Screen name="profile" />
     </Stack>
   );
