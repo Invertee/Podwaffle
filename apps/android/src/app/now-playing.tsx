@@ -15,7 +15,7 @@ import {
 
 import { api } from "../api/client";
 import { DownloadAction } from "../components/DownloadAction";
-import { Icon, type IconName } from "../components/Icon";
+import { Icon } from "../components/Icon";
 import { playbackController } from "../playback/controller";
 import { usePlaybackPresentation } from "../playback/presentation";
 import { useAuthStore } from "../stores/auth";
@@ -213,11 +213,6 @@ export default function NowPlayingScreen() {
       <View style={styles.controls}>
         <Transport
           icon="previous"
-          label="Previous episode"
-          onPress={() => playbackController.previous()}
-        />
-        <Transport
-          icon="rewind"
           label={`Back ${backward} seconds`}
           onPress={() => playbackController.skipBackward()}
         />
@@ -238,14 +233,9 @@ export default function NowPlayingScreen() {
           )}
         </Pressable>
         <Transport
-          icon="forward"
+          icon="next"
           label={`Forward ${forward} seconds`}
           onPress={() => playbackController.skipForward()}
-        />
-        <Transport
-          icon="next"
-          label="Next episode"
-          onPress={() => playbackController.next()}
         />
       </View>
 
@@ -326,7 +316,7 @@ function Transport({
   label,
   onPress,
 }: {
-  icon: IconName;
+  icon: "previous" | "next";
   label: string;
   onPress: () => void | Promise<void>;
 }) {
@@ -337,7 +327,7 @@ function Transport({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Icon name={icon} size={25} color={colors.textPrimary} />
+      <Icon name={icon} size={28} color={colors.textPrimary} />
     </Pressable>
   );
 }
@@ -439,11 +429,12 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    gap: spacing.xl,
   },
   control: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.full,
