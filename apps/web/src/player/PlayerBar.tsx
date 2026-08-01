@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../app/Icon";
+import { PlaybackDevicePicker } from "./PlaybackDevicePicker";
 import { player, usePlayer } from "./local-player";
 
 function time(ms: number): string {
@@ -16,6 +17,7 @@ export function PlayerBar({
 }) {
   const state = usePlayer();
   const [info, setInfo] = useState(false);
+  const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const episode = state.episode;
   const castBusy = [
     "connecting",
@@ -99,28 +101,30 @@ export function PlayerBar({
           </div>
         </div>
         <div className="player-tools">
-          {!state.remote && <label className="volume-control">
-            <Icon name={state.muted ? "mute" : "volume"} />
-            <span className="visually-hidden">
-              {state.mode === "cast" ? "Cast volume" : "Volume"}
-            </span>
-            <input
-              className="volume"
-              aria-label={state.mode === "cast" ? "Cast volume" : "Volume"}
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={state.volume}
-              onChange={(event) => player.setVolume(Number(event.target.value))}
-            />
-          </label>}
-          {state.remote && episode && (
+          {!state.remote && (
+            <label className="volume-control">
+              <Icon name={state.muted ? "mute" : "volume"} />
+              <span className="visually-hidden">
+                {state.mode === "cast" ? "Cast volume" : "Volume"}
+              </span>
+              <input
+                className="volume"
+                aria-label={state.mode === "cast" ? "Cast volume" : "Volume"}
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={state.volume}
+                onChange={(event) => player.setVolume(Number(event.target.value))}
+              />
+            </label>
+          )}
+          {episode && (
             <button
               className="icon-button"
-              aria-label="Move playback to this browser"
-              title="Play here"
-              onClick={() => void player.takeOverPlayback()}
+              aria-label="Choose playback device"
+              title="Play on…"
+              onClick={() => setDevicePickerOpen(true)}
             >
               <Icon name="device" />
             </button>
@@ -129,17 +133,17 @@ export function PlayerBar({
             !state.remote &&
             state.mode === "local" &&
             state.castAvailable && (
-            <button
-              className="icon-button cast-button"
-              aria-label="Cast to a speaker"
-              title="Cast to a speaker"
-              disabled={castBusy}
-              onClick={() => void player.startCasting()}
-            >
-              <Icon name="cast" />
-            </button>
-          )}
-          {state.mode === "cast" && (
+              <button
+                className="icon-button cast-button"
+                aria-label="Cast to a speaker"
+                title="Cast to a speaker"
+                disabled={castBusy}
+                onClick={() => void player.startCasting()}
+              >
+                <Icon name="cast" />
+              </button>
+            )}
+          {state.mode === "cast" && !state.remote && (
             <div className="cast-controls" aria-busy={castBusy}>
               <span
                 className="visually-hidden"
@@ -200,6 +204,10 @@ export function PlayerBar({
           </button>
         </div>
       </section>
+      <PlaybackDevicePicker
+        open={devicePickerOpen}
+        onClose={() => setDevicePickerOpen(false)}
+      />
       {info && episode && (
         <div className="drawer-backdrop" onClick={() => setInfo(false)}>
           <aside
