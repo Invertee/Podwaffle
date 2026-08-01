@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Icon } from "../app/Icon";
 import { PlaybackDevicePicker } from "./PlaybackDevicePicker";
@@ -15,6 +16,7 @@ export function PlayerBar({
   onQueue: () => void;
   queueCount: number;
 }) {
+  const queryClient = useQueryClient();
   const state = usePlayer();
   const [info, setInfo] = useState(false);
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
@@ -26,6 +28,15 @@ export function PlayerBar({
     "stopping",
   ].includes(state.castStatus);
   useEffect(() => player.start(), []);
+
+  async function skipAndRefreshStats(
+    seconds: number,
+    type: "skip-forward" | "skip-backward",
+  ): Promise<void> {
+    await player.skip(seconds, type);
+    await queryClient.invalidateQueries({ queryKey: ["stats"] });
+  }
+
   return (
     <>
       <section
@@ -56,7 +67,10 @@ export function PlayerBar({
               title={`Skip back ${state.skipBackwardSeconds} seconds`}
               disabled={!episode}
               onClick={() =>
-                void player.skip(-state.skipBackwardSeconds, "skip-backward")
+                void skipAndRefreshStats(
+                  -state.skipBackwardSeconds,
+                  "skip-backward",
+                )
               }
             >
               <Icon name="previous" />
@@ -80,7 +94,10 @@ export function PlayerBar({
               title={`Skip forward ${state.skipForwardSeconds} seconds`}
               disabled={!episode}
               onClick={() =>
-                void player.skip(state.skipForwardSeconds, "skip-forward")
+                void skipAndRefreshStats(
+                  state.skipForwardSeconds,
+                  "skip-forward",
+                )
               }
             >
               <Icon name="next" />
