@@ -1,6 +1,7 @@
 import type { Episode } from "@podwaffle/contracts";
 
 import type { NativeEpisodeMedia } from "../native-media";
+import { useAuthStore } from "../stores/auth";
 import { downloadedPath } from "../stores/downloads";
 
 export function episodeMedia(
@@ -10,6 +11,13 @@ export function episodeMedia(
   if (!episode.enclosureUrl) {
     throw new Error("This episode does not have a playable audio enclosure.");
   }
+  const podcastArtworkUrl =
+    episode.podcastArtworkUrl ??
+    useAuthStore
+      .getState()
+      .snapshot?.subscriptions.find((podcast) => podcast.id === episode.podcastId)
+      ?.artworkUrl ??
+    episode.artworkUrl;
   return {
     episodeId: episode.id,
     podcastId: episode.podcastId,
@@ -18,7 +26,7 @@ export function episodeMedia(
     enclosureUrl: episode.enclosureUrl,
     enclosureType: episode.enclosureType,
     localDownloadPath: downloadedPath(episode.id),
-    artworkUrl: episode.artworkUrl,
+    artworkUrl: podcastArtworkUrl,
     durationMs: episode.durationMs,
     queueItemId,
   };
