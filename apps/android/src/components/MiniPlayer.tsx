@@ -65,7 +65,7 @@ export function MiniPlayer() {
         </Pressable>
 
         <ChromeControl
-          icon="rewind"
+          icon="previous"
           label="Skip backward"
           disabled={!enabled}
           onPress={() => playbackController.skipBackward()}
@@ -97,7 +97,7 @@ export function MiniPlayer() {
           )}
         </Pressable>
         <ChromeControl
-          icon="forward"
+          icon="next"
           label="Skip forward"
           disabled={!enabled}
           onPress={() => playbackController.skipForward()}
@@ -135,7 +135,7 @@ function ChromeControl({
   disabled,
   onPress,
 }: {
-  icon: "rewind" | "forward";
+  icon: "previous" | "next";
   label: string;
   disabled: boolean;
   onPress: () => void | Promise<void>;
