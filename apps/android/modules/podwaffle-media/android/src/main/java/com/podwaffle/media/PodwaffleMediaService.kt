@@ -192,8 +192,10 @@ class PodwaffleMediaService : MediaSessionService() {
         notificationProvider.setSmallIcon(R.drawable.ic_podwaffle_notification)
         setMediaNotificationProvider(notificationProvider)
 
+        val mediaButtons = notificationButtons()
         val sessionBuilder = MediaSession.Builder(this, local)
-            .setCustomLayout(notificationButtons())
+            .setMediaButtonPreferences(mediaButtons)
+            .setCustomLayout(mediaButtons)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         mediaSession = sessionBuilder.build()
 
@@ -456,6 +458,18 @@ class PodwaffleMediaService : MediaSessionService() {
                 lastError = error,
             ),
         )
+        refreshSystemNotification()
+    }
+
+    private fun refreshSystemNotification() {
+        // Media3 normally detects player changes itself. Explicitly asking for
+        // an update also covers metadata and player swaps that happen while the
+        // React Native activity is not in the foreground.
+        runCatching {
+            MediaSessionService::class.java
+                .getMethod("triggerNotificationUpdate")
+                .invoke(this)
+        }
     }
 
     fun notifyCastStateChanged() {

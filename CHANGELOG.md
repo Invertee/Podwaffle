@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hardened Android Cast startup by using CAF's configured media-route button,
+  restored public lock-screen media controls and metadata, and improved
+  notification refreshes across player and metadata changes.
+- Generalised playback-command relay to local and Cast owners, added live remote
+  state and explicit Play Here takeover across Android and web, and added remote
+  episode selection alongside transport commands.
 - Completed the Android Milestones 23–26 finish pass: persistent navigation and
   mini-player chrome, compact artwork-free episode rows, web-aligned vector
   icons and styling, status-bar-safe layouts, animation-free detail navigation,

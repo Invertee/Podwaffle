@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect } from "react";
-import { AppState, StyleSheet, View } from "react-native";
+import { Alert, AppState, Linking, StyleSheet, View } from "react-native";
 import {
   SafeAreaProvider,
   SafeAreaView,
@@ -98,12 +98,37 @@ function RuntimeBinder() {
   const queueSignature = useAuthStore((state) =>
     state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
   );
+  const sharedPlayback = useAuthStore((state) => state.snapshot?.playback ?? null);
+  const sharedPlaybackSignature = sharedPlayback
+    ? [
+        sharedPlayback.episode?.id ?? "",
+        sharedPlayback.activeDeviceId ?? "",
+        sharedPlayback.mode,
+        sharedPlayback.state,
+        sharedPlayback.positionMs,
+        sharedPlayback.leaseExpiresAt ?? "",
+      ].join(":")
+    : "";
 
   useEffect(() => void restore(), [restore]);
 
   useEffect(() => {
-    if (status === "authenticated" && credentials) syncRuntime.start(credentials, revision);
-    else syncRuntime.stop();
+    if (status === "authenticated" && credentials) {
+      syncRuntime.start(credentials, revision);
+      void playbackController.ensureNotificationPermission().then((granted) => {
+        if (granted) return;
+        Alert.alert(
+          "Enable playback controls",
+          "Allow Podwaffle notifications to show the current podcast and playback controls on the lock screen.",
+          [
+            { text: "Not now", style: "cancel" },
+            { text: "Open settings", onPress: () => void Linking.openSettings() },
+          ],
+        );
+      });
+    } else {
+      syncRuntime.stop();
+    }
     return () => syncRuntime.stop();
   }, [status, credentials]);
 
@@ -117,6 +142,10 @@ function RuntimeBinder() {
       useNativeMediaStore.getState().state?.episodeId ?? undefined,
     );
   }, [queueSignature]);
+
+  useEffect(() => {
+    playbackController.applySharedPlayback(sharedPlayback);
+  }, [sharedPlaybackSignature]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

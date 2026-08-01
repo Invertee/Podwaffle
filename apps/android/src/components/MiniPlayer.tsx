@@ -1,4 +1,3 @@
-import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React from "react";
 import {
@@ -11,11 +10,7 @@ import {
 } from "react-native";
 
 import { playbackController } from "../playback/controller";
-import {
-  selectHasMedia,
-  selectIsPlaying,
-  useNativeMediaStore,
-} from "../stores/nativeMedia";
+import { usePlaybackPresentation } from "../playback/presentation";
 import {
   colors,
   fontSizes,
@@ -27,26 +22,22 @@ import { Icon } from "./Icon";
 
 export function MiniPlayer() {
   const router = useRouter();
-  const media = useNativeMediaStore((state) => state.state);
-  const cast = useNativeMediaStore((state) => state.castState);
-  const hasMedia = useNativeMediaStore(selectHasMedia);
-  const isPlaying = useNativeMediaStore(selectIsPlaying);
-  const enabled = Boolean(hasMedia && media);
+  const playback = usePlaybackPresentation();
+  const media = playback.media;
+  const enabled = playback.hasMedia;
 
   const progress =
     media?.durationMs && media.durationMs > 0
       ? Math.max(0, Math.min(1, media.positionMs / media.durationMs))
       : 0;
 
-  async function toggleCast() {
-    if (!enabled) return;
+  async function takeOver() {
     try {
-      if (cast.connected) await playbackController.stopCasting(true);
-      else await playbackController.startCasting();
+      await playbackController.takeOverPlayback();
     } catch (error) {
       Alert.alert(
-        "Google Cast",
-        error instanceof Error ? error.message : "Cast could not be started.",
+        "Play on this device",
+        error instanceof Error ? error.message : "Playback could not be moved.",
       );
     }
   }
@@ -66,28 +57,18 @@ export function MiniPlayer() {
         accessibilityRole="button"
         accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
       >
-        <View style={styles.artworkFrame}>
-          {media?.artworkUrl ? (
-            <Image
-              source={{ uri: media.artworkUrl }}
-              style={styles.artwork}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-          ) : (
-            <Text style={styles.artworkFallback}>PW</Text>
-          )}
-        </View>
         <View style={styles.copy}>
           <Text style={styles.title} numberOfLines={1}>
             {media?.title ?? "Nothing playing"}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {media?.source === "cast" && media.cast
-              ? `Casting to ${media.cast.deviceName}`
-              : media?.source === "download"
-                ? `${media.podcastTitle ?? "Podcast"} · Offline`
-                : media?.podcastTitle ?? "Choose an episode"}
+            {playback.remote
+              ? `${media?.podcastTitle ?? "Podcast"} · playing on ${playback.ownerDeviceName}`
+              : media?.source === "cast" && media.cast
+                ? `Casting to ${media.cast.deviceName}`
+                : media?.source === "download"
+                  ? `${media.podcastTitle ?? "Podcast"} · Offline`
+                  : media?.podcastTitle ?? "Choose an episode"}
           </Text>
         </View>
       </Pressable>
@@ -107,16 +88,18 @@ export function MiniPlayer() {
         ]}
         disabled={!enabled}
         onPress={() =>
-          void (isPlaying ? playbackController.pause() : playbackController.play())
+          void (playback.isPlaying
+            ? playbackController.pause()
+            : playbackController.play())
         }
         accessibilityRole="button"
-        accessibilityLabel={isPlaying ? "Pause" : "Play"}
+        accessibilityLabel={playback.isPlaying ? "Pause" : "Play"}
       >
         {media?.playbackStatus === "buffering" ? (
           <ActivityIndicator size="small" color={colors.textOnAccent} />
         ) : (
           <Icon
-            name={isPlaying ? "pause" : "play"}
+            name={playback.isPlaying ? "pause" : "play"}
             size={17}
             color={colors.textOnAccent}
           />
@@ -128,24 +111,16 @@ export function MiniPlayer() {
         disabled={!enabled}
         onPress={() => playbackController.skipForward()}
       />
-      <Pressable
-        style={({ pressed }) => [
-          styles.cast,
-          cast.connected && styles.castActive,
-          !enabled && styles.disabled,
-          pressed && enabled && styles.pressed,
-        ]}
-        disabled={!enabled}
-        onPress={() => void toggleCast()}
-        accessibilityRole="button"
-        accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
-      >
-        <Icon
-          name="cast"
-          size={20}
-          color={cast.connected ? colors.accent : colors.textSecondary}
-        />
-      </Pressable>
+      {playback.canTakeOver ? (
+        <Pressable
+          style={({ pressed }) => [styles.transfer, pressed && styles.pressed]}
+          onPress={() => void takeOver()}
+          accessibilityRole="button"
+          accessibilityLabel="Move playback to this device"
+        >
+          <Icon name="device" size={20} color={colors.accent} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -199,26 +174,10 @@ const styles = StyleSheet.create({
   openArea: {
     flex: 1,
     minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  artworkFrame: {
-    width: 44,
-    height: 44,
-    borderRadius: 7,
-    overflow: "hidden",
-    backgroundColor: colors.bgElevated,
-    alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: spacing.xs,
   },
-  artwork: { width: "100%", height: "100%" },
-  artworkFallback: {
-    color: colors.textMuted,
-    fontSize: fontSizes.xs,
-    fontWeight: fontWeights.bold,
-  },
-  copy: { flex: 1, minWidth: 0 },
+  copy: { minWidth: 0 },
   title: {
     color: colors.textPrimary,
     fontSize: fontSizes.sm,
@@ -226,21 +185,21 @@ const styles = StyleSheet.create({
   },
   subtitle: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 2 },
   control: {
-    width: 32,
+    width: 34,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 18,
   },
-  play: { width: 36, height: 36, backgroundColor: colors.accent },
-  cast: {
-    width: 32,
+  play: { width: 38, height: 38, backgroundColor: colors.accent },
+  transfer: {
+    width: 34,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 18,
+    backgroundColor: colors.accentDim,
   },
-  castActive: { backgroundColor: colors.accentDim },
   disabled: { opacity: 0.3 },
   pressed: { opacity: 0.65 },
 });

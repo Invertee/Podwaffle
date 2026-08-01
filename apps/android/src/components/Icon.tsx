@@ -14,6 +14,7 @@ export type IconName =
   | "check"
   | "close"
   | "discover"
+  | "device"
   | "download"
   | "downloads"
   | "forward"
@@ -79,6 +80,14 @@ export function Icon({
           <>
             <Circle cx="12" cy="12" r="9" {...common} />
             <Path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9 4.9-2.1Z" {...common} />
+          </>
+        );
+      case "device":
+        return (
+          <>
+            <Rect x="4" y="3.5" width="16" height="11" rx="2" {...common} />
+            <Path d="M9 20h6M12 14.5V20" {...common} />
+            <Path d="m8 9 2.2 2.2L16 5.8" {...common} />
           </>
         );
       case "download":

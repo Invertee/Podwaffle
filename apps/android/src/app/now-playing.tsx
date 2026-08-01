@@ -17,8 +17,9 @@ import { api } from "../api/client";
 import { DownloadAction } from "../components/DownloadAction";
 import { Icon, type IconName } from "../components/Icon";
 import { playbackController } from "../playback/controller";
+import { usePlaybackPresentation } from "../playback/presentation";
 import { useAuthStore } from "../stores/auth";
-import { selectIsPlaying, useNativeMediaStore } from "../stores/nativeMedia";
+import { useNativeMediaStore } from "../stores/nativeMedia";
 import { usePlayerUiStore } from "../stores/playerUi";
 import {
   colors,
@@ -83,9 +84,10 @@ function SeekBar({
 
 export default function NowPlayingScreen() {
   const router = useRouter();
-  const media = useNativeMediaStore((state) => state.state);
+  const presentation = usePlaybackPresentation();
+  const media = presentation.media;
   const cast = useNativeMediaStore((state) => state.castState);
-  const isPlaying = useNativeMediaStore(selectIsPlaying);
+  const isPlaying = presentation.isPlaying;
   const credentials = useAuthStore((state) => state.credentials);
   const backward = useAuthStore((state) => state.skipBackwardSeconds);
   const forward = useAuthStore((state) => state.skipForwardSeconds);
@@ -113,6 +115,9 @@ export default function NowPlayingScreen() {
 
   async function toggleCast() {
     try {
+      if (presentation.remote) {
+        throw new Error("Move playback to this device before starting Cast.");
+      }
       if (cast.connected) await playbackController.stopCasting(true);
       else await playbackController.startCasting();
     } catch (error) {
@@ -143,13 +148,19 @@ export default function NowPlayingScreen() {
         />
         <View style={styles.headerCopy}>
           <Text style={styles.headerEyebrow}>
-            {cast.connected
-              ? "CASTING"
-              : media?.source === "download"
-                ? "PLAYING OFFLINE"
-                : "NOW PLAYING"}
+            {presentation.remote
+              ? "REMOTE PLAYBACK"
+              : cast.connected
+                ? "CASTING"
+                : media?.source === "download"
+                  ? "PLAYING OFFLINE"
+                  : "NOW PLAYING"}
           </Text>
-          {cast.session ? (
+          {presentation.remote ? (
+            <Text style={styles.headerDevice} numberOfLines={1}>
+              Playing on {presentation.ownerDeviceName}
+            </Text>
+          ) : cast.session ? (
             <Text style={styles.headerDevice} numberOfLines={1}>
               {cast.session.deviceName}
             </Text>
@@ -239,31 +250,43 @@ export default function NowPlayingScreen() {
       </View>
 
       <View style={styles.tools}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.tool,
-            cast.connected && styles.toolActive,
-            pressed && styles.pressed,
-            castStatus === "connecting" && styles.disabled,
-          ]}
-          disabled={castStatus === "connecting"}
-          onPress={() => void toggleCast()}
-          accessibilityRole="button"
-          accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
-        >
-          {castStatus === "connecting" ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : (
-            <Icon
-              name="cast"
-              size={20}
-              color={cast.connected ? colors.accent : colors.textSecondary}
-            />
-          )}
-          <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
-            {cast.connected ? "Stop Cast" : "Cast"}
-          </Text>
-        </Pressable>
+        {presentation.remote ? (
+          <Pressable
+            style={({ pressed }) => [styles.tool, styles.toolActive, pressed && styles.pressed]}
+            onPress={() => void playbackController.takeOverPlayback()}
+            accessibilityRole="button"
+            accessibilityLabel="Move playback to this device"
+          >
+            <Icon name="device" size={20} color={colors.accent} />
+            <Text style={[styles.toolLabel, styles.toolActiveText]}>Play here</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [
+              styles.tool,
+              cast.connected && styles.toolActive,
+              pressed && styles.pressed,
+              castStatus === "connecting" && styles.disabled,
+            ]}
+            disabled={castStatus === "connecting"}
+            onPress={() => void toggleCast()}
+            accessibilityRole="button"
+            accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
+          >
+            {castStatus === "connecting" ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Icon
+                name="cast"
+                size={20}
+                color={cast.connected ? colors.accent : colors.textSecondary}
+              />
+            )}
+            <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
+              {cast.connected ? "Stop Cast" : "Cast"}
+            </Text>
+          </Pressable>
+        )}
         {episode.data ? <DownloadAction episode={episode.data} /> : null}
       </View>
 
@@ -350,9 +373,9 @@ const styles = StyleSheet.create({
   },
   headerDevice: { color: colors.accent, fontSize: fontSizes.xs, marginTop: 2 },
   artworkFrame: {
-    width: "100%",
+    width: "50%",
     aspectRatio: 1,
-    maxWidth: 480,
+    maxWidth: 220,
     alignSelf: "center",
     borderRadius: radii.xl,
     overflow: "hidden",

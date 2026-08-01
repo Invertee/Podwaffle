@@ -1,14 +1,15 @@
 package com.podwaffle.media
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 
 object NotificationHelper {
-    const val PLAYBACK_CHANNEL_ID = "podwaffle_playback_channel"
+    const val PLAYBACK_CHANNEL_ID = "podwaffle_playback_channel_v2"
     const val DOWNLOAD_CHANNEL_ID = "podwaffle_download_channel"
-    const val PLAYBACK_NOTIFICATION_ID = 1001
+    const val PLAYBACK_NOTIFICATION_ID = 1002
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -19,7 +20,9 @@ object NotificationHelper {
                 "Podwaffle playback",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Podcast playback controls"
+                description = "Podcast playback and lock-screen controls"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setShowBadge(false)
                 setSound(null, null)
                 enableVibration(false)
             },

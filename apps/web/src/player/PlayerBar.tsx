@@ -39,7 +39,10 @@ export function PlayerBar({
           <div className="player-title">
             <strong>{episode?.title ?? "Nothing playing"}</strong>
             <span>
-              {episode?.podcastTitle ?? "Choose an episode to start listening"}
+              {state.remote
+                ? `${episode?.podcastTitle ?? "Podcast"} · playing on another device`
+                : episode?.podcastTitle ??
+                  "Choose an episode to start listening"}
             </span>
           </div>
         </div>
@@ -96,7 +99,7 @@ export function PlayerBar({
           </div>
         </div>
         <div className="player-tools">
-          <label className="volume-control">
+          {!state.remote && <label className="volume-control">
             <Icon name={state.muted ? "mute" : "volume"} />
             <span className="visually-hidden">
               {state.mode === "cast" ? "Cast volume" : "Volume"}
@@ -111,8 +114,21 @@ export function PlayerBar({
               value={state.volume}
               onChange={(event) => player.setVolume(Number(event.target.value))}
             />
-          </label>
-          {episode && state.mode === "local" && state.castAvailable && (
+          </label>}
+          {state.remote && episode && (
+            <button
+              className="icon-button"
+              aria-label="Move playback to this browser"
+              title="Play here"
+              onClick={() => void player.takeOverPlayback()}
+            >
+              <Icon name="device" />
+            </button>
+          )}
+          {episode &&
+            !state.remote &&
+            state.mode === "local" &&
+            state.castAvailable && (
             <button
               className="icon-button cast-button"
               aria-label="Cast to a speaker"

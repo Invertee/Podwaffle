@@ -162,8 +162,12 @@ data class EpisodeMedia(
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
+            .setDisplayTitle(title)
             .setArtist(podcastTitle)
             .setAlbumTitle(podcastTitle)
+            .setSubtitle(podcastTitle)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+            .setIsPlayable(true)
             .setArtworkUri(artworkUrl?.let(Uri::parse))
             .setExtras(extras)
             .build()

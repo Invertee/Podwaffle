@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { playbackController } from "../playback/controller";
 import type { Credentials } from "../stores/auth";
 import { useAuthStore } from "../stores/auth";
+import { useNativeMediaStore } from "../stores/nativeMedia";
 
 const HEARTBEAT_MS = 25_000;
 const MAX_RECONNECT_MS = 30_000;
@@ -115,7 +116,9 @@ class AndroidSyncRuntime {
       return;
     }
     if (message.type === "playback.command.cancelled") {
-      await playbackController.handleCastCancellation(message.reason);
+      if (useNativeMediaStore.getState().castState.connected) {
+        await playbackController.handleCastCancellation(message.reason);
+      }
       this.scheduleRefresh(0);
       return;
     }
@@ -141,7 +144,7 @@ class AndroidSyncRuntime {
   private async handlePlaybackCommand(
     command: PlaybackCommand & { requestedByDeviceId: string },
   ): Promise<void> {
-    const result = await playbackController.handleRemoteCastCommand(command);
+    const result = await playbackController.handleRemotePlaybackCommand(command);
     const credentials = this.credentials;
     if (!credentials) return;
     try {
@@ -175,8 +178,10 @@ class AndroidSyncRuntime {
         .getState()
         .refresh()
         .then(() => {
-          const revision = useAuthStore.getState().snapshot?.revision ?? 0;
+          const snapshot = useAuthStore.getState().snapshot;
+          const revision = snapshot?.revision ?? 0;
           this.afterRevision = Math.max(this.afterRevision, revision);
+          playbackController.applySharedPlayback(snapshot?.playback ?? null);
         });
     }, delayMs);
   }

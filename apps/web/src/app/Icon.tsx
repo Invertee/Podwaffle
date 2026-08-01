@@ -4,6 +4,7 @@ export type IconName =
   | "cast"
   | "check"
   | "close"
+  | "device"
   | "discover"
   | "history"
   | "info"
@@ -40,6 +41,12 @@ export function Icon({
       </>
     ),
     close: <path d="m6 6 12 12M18 6 6 18" />,
+    device: (
+      <>
+        <rect x="6" y="3" width="12" height="18" rx="2" />
+        <path d="M10 17h4M12 7v6M9.5 10.5 12 13l2.5-2.5" />
+      </>
+    ),
     discover: (
       <>
         <circle cx="12" cy="12" r="9" />

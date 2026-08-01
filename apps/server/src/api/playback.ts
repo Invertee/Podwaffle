@@ -217,11 +217,11 @@ export function createPlaybackRouter(
           createCastCommand(database.db, profile.id, device.id, command),
         );
       } catch (error) {
-        if (error instanceof Error && error.message === "CAST_NOT_ACTIVE")
+        if (error instanceof Error && error.message === "PLAYBACK_NOT_ACTIVE")
           throw new ApiError(
             409,
-            "CAST_NOT_ACTIVE",
-            "There is no active Cast session for this profile",
+            "PLAYBACK_NOT_ACTIVE",
+            "There is no connected playback owner for this profile",
           );
         throw error;
       }
@@ -350,7 +350,12 @@ export function applyCastCommandResult(
       replayed: true,
     };
   }
-  const applied = sync.mutate(profileId, "playback.cast.updated", (db) => {
+  const current = playbackState(database.db, profileId, ownerDeviceId);
+  const eventType =
+    current.mode === "cast"
+      ? "playback.cast.updated"
+      : "playback.state.updated";
+  const applied = sync.mutate(profileId, eventType, (db) => {
     const result = resolveCastCommand(db, profileId, ownerDeviceId, input);
     return {
       result,

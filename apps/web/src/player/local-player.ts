@@ -29,6 +29,7 @@ interface PlayerView {
   error: string | null;
   tabOwner: boolean;
   mode: "local" | "cast";
+  remote: boolean;
   castAvailable: boolean;
   castDeviceName: string | null;
   castSessionId: string | null;
@@ -56,6 +57,7 @@ export const usePlayer = create<PlayerView>(() => ({
   error: null,
   tabOwner: false,
   mode: "local",
+  remote: false,
   castAvailable: false,
   castDeviceName: null,
   castSessionId: null,
@@ -269,6 +271,14 @@ export class LocalPlayer {
       usePlayer.setState({ error: "This episode has no playable audio." });
       return;
     }
+    if (usePlayer.getState().remote) {
+      await api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: "play-episode",
+        episodeId: episode.id,
+      });
+      return;
+    }
     this.claimTab();
     if (!this.isTabOwner()) {
       this.channel?.postMessage({ type: "command", action: "takeover" });
@@ -317,6 +327,7 @@ export class LocalPlayer {
       durationMs: episode.durationMs ?? 0,
       error: null,
       mode: "local",
+      remote: false,
       castDeviceName: null,
       castSessionId: null,
       castStatus: "idle",
@@ -326,6 +337,13 @@ export class LocalPlayer {
   }
 
   public async play(): Promise<void> {
+    if (usePlayer.getState().remote) {
+      await api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: "play",
+      });
+      return;
+    }
     if (usePlayer.getState().mode === "cast") {
       await this.castControl("play");
       return;
@@ -349,6 +367,13 @@ export class LocalPlayer {
   }
 
   public pause(): void {
+    if (usePlayer.getState().remote) {
+      void api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: "pause",
+      });
+      return;
+    }
     if (usePlayer.getState().mode === "cast") {
       void this.castControl("pause");
       return;
@@ -357,6 +382,13 @@ export class LocalPlayer {
   }
 
   public async toggle(): Promise<void> {
+    if (usePlayer.getState().remote) {
+      await api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: usePlayer.getState().playing ? "pause" : "play",
+      });
+      return;
+    }
     if (!this.isTabOwner()) {
       this.channel?.postMessage({ type: "command", action: "toggle" });
       return;
@@ -373,6 +405,14 @@ export class LocalPlayer {
   ): Promise<void> {
     const episode = usePlayer.getState().episode;
     if (!episode) return;
+    if (usePlayer.getState().remote) {
+      await api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: type,
+        offsetMs: Math.abs(seconds * 1000),
+      });
+      return;
+    }
     if (usePlayer.getState().mode === "cast") {
       await this.castControl(type, {
         offsetMs: Math.abs(seconds * 1000),
@@ -407,6 +447,14 @@ export class LocalPlayer {
   public async seek(positionMs: number): Promise<void> {
     const episode = usePlayer.getState().episode;
     if (!episode) return;
+    if (usePlayer.getState().remote) {
+      await api.playbackCommand({
+        commandId: crypto.randomUUID(),
+        action: "seek",
+        positionMs,
+      });
+      return;
+    }
     if (usePlayer.getState().mode === "cast") {
       await this.castControl("seek", { positionMs });
       return;
@@ -454,6 +502,10 @@ export class LocalPlayer {
   private countListened(): void {
     const now = performance.now();
     const state = usePlayer.getState();
+    if (state.remote) {
+      this.lastPlayingTick = now;
+      return;
+    }
     if (state.playing && !state.buffering)
       this.listenedSinceFlush += Math.max(0, now - this.lastPlayingTick);
     this.lastPlayingTick = now;
@@ -463,6 +515,7 @@ export class LocalPlayer {
     this.countListened();
     const episode = usePlayer.getState().episode;
     const listenedMs = Math.round(this.listenedSinceFlush);
+    if (usePlayer.getState().remote) return;
     if (!episode || listenedMs <= 0 || !this.isTabOwner()) return;
     this.listenedSinceFlush = 0;
     try {
@@ -558,6 +611,7 @@ export class LocalPlayer {
       positionMs: 0,
       durationMs: 0,
       error: null,
+      remote: false,
     };
     usePlayer.setState(state);
     this.channel?.postMessage({ type: "state", ...state });
@@ -574,6 +628,7 @@ export class LocalPlayer {
       !episode ||
       !this.isTabOwner() ||
       usePlayer.getState().mode === "cast" ||
+      usePlayer.getState().remote ||
       this.transitioningToCast
     )
       return;
@@ -589,8 +644,40 @@ export class LocalPlayer {
   }
 
   public applySharedPlayback(playback: PlaybackState | null): void {
-    if (!playback) return;
     const local = usePlayer.getState();
+    if (!playback) {
+      if (local.remote) usePlayer.setState({ remote: false, playing: false });
+      return;
+    }
+    if (!playback.episode || playback.state === "stopped") {
+      if (local.remote) usePlayer.setState({ remote: false, playing: false });
+      return;
+    }
+    if (playback.ownedByCurrentDevice && local.remote) {
+      usePlayer.setState({ remote: false });
+    }
+    if (
+      !playback.ownedByCurrentDevice &&
+      playback.episode &&
+      playback.state !== "stopped"
+    ) {
+      usePlayer.setState({
+        episode: playback.episode,
+        playing: playback.state === "playing",
+        buffering: false,
+        positionMs: playback.positionMs,
+        durationMs: playback.durationMs ?? playback.episode.durationMs ?? 0,
+        rate: playback.playbackRate,
+        mode: playback.mode,
+        remote: true,
+        castDeviceName: null,
+        castSessionId: playback.castSessionId,
+        castStatus: playback.mode === "cast" ? "connected" : "idle",
+        error: null,
+      });
+      this.audio.pause();
+      return;
+    }
     if (playback.mode === "cast") {
       const reconnectFailed =
         this.failedCastSessionId === playback.castSessionId;
@@ -601,6 +688,7 @@ export class LocalPlayer {
         durationMs: playback.durationMs ?? 0,
         rate: playback.playbackRate,
         mode: "cast",
+        remote: false,
         castSessionId: playback.castSessionId,
         castStatus: this.castState.connected
           ? "connected"
@@ -627,6 +715,7 @@ export class LocalPlayer {
         durationMs: playback.durationMs ?? 0,
         rate: playback.playbackRate,
         mode: "local",
+        remote: false,
         castDeviceName: null,
         castSessionId: null,
         castStatus: "idle",
@@ -634,6 +723,7 @@ export class LocalPlayer {
     } else if (
       playback.episode &&
       playback.state !== "stopped" &&
+      playback.ownedByCurrentDevice &&
       local.mode === "local" &&
       local.episode?.id !== playback.episode.id &&
       this.restoringLocalEpisodeId !== playback.episode.id
@@ -662,6 +752,8 @@ export class LocalPlayer {
 
   public async startCasting(): Promise<void> {
     const state = usePlayer.getState();
+    if (state.remote)
+      throw new Error("Move playback to this browser before starting Cast.");
     const episode = state.episode;
     if (!episode) return;
     const wasPlaying = state.playing;
@@ -685,6 +777,7 @@ export class LocalPlayer {
       await api.startCast(confirmedCastState(remote, episode, state.rate));
       usePlayer.setState({
         mode: "cast",
+        remote: false,
         playing: remote.playing,
         buffering: remote.buffering,
         positionMs: remote.positionMs,
@@ -971,20 +1064,61 @@ export class LocalPlayer {
   }
 
   private async handleRemoteCommand(command: PlaybackCommand): Promise<void> {
-    if (!this.isTabOwner() || !this.castState.connected) return;
+    this.claimTab();
+    if (!this.isTabOwner()) return;
     try {
-      await this.castControl(command.action, command);
+      const current = usePlayer.getState();
+      if (
+        command.action !== "play-episode" &&
+        current.mode === "local" &&
+        current.episode
+      ) {
+        await api.acquirePlayback({
+          episodeId: current.episode.id,
+          positionMs: current.positionMs,
+          durationMs: current.durationMs || current.episode.durationMs,
+          playbackRate: current.rate,
+        });
+      }
+      if (command.action === "play-episode") {
+        if (!command.episodeId) throw new Error("The requested episode is missing.");
+        await this.load(await api.episode(command.episodeId));
+      } else if (usePlayer.getState().mode === "cast") {
+        await this.castControl(command.action, command);
+      } else if (command.action === "play") {
+        await this.play();
+      } else if (command.action === "pause") {
+        this.pause();
+      } else if (command.action === "seek" && command.positionMs !== undefined) {
+        await this.seek(command.positionMs);
+      } else if (command.action === "skip-forward") {
+        await this.skip((command.offsetMs ?? 30_000) / 1_000, "skip-forward");
+      } else if (command.action === "skip-backward") {
+        await this.skip(-(command.offsetMs ?? 15_000) / 1_000, "skip-backward");
+      } else if (command.action === "next" || command.action === "previous") {
+        const queue = await api.queue();
+        const currentId = usePlayer.getState().episode?.id;
+        const index = queue.findIndex((item) => item.episode.id === currentId);
+        const target =
+          command.action === "next"
+            ? queue[index >= 0 ? index + 1 : 0]?.episode
+            : queue[index > 0 ? index - 1 : 0]?.episode;
+        if (target) await this.load(target);
+      }
       const episode = usePlayer.getState().episode;
-      if (!episode) throw new Error("No Cast episode is active.");
-      sendPlaybackCommandResult({
+      if (!episode) throw new Error("No episode is active.");
+      const result: Parameters<typeof sendPlaybackCommandResult>[0] = {
         commandId: command.commandId,
         status: "accepted",
-        confirmed: confirmedCastState(
+      };
+      if (usePlayer.getState().mode === "cast" && this.castState.connected) {
+        result.confirmed = confirmedCastState(
           this.cast.state(),
           episode,
           usePlayer.getState().rate,
-        ),
-      });
+        );
+      }
+      sendPlaybackCommandResult(result);
     } catch (error) {
       sendPlaybackCommandResult({
         commandId: command.commandId,

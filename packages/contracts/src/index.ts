@@ -72,6 +72,7 @@ export const playbackCommandActionSchema = z.enum([
   "skip-backward",
   "next",
   "previous",
+  "play-episode",
 ]);
 
 export const playbackCommandSchema = z.object({
@@ -79,6 +80,7 @@ export const playbackCommandSchema = z.object({
   action: playbackCommandActionSchema,
   positionMs: z.number().int().nonnegative().optional(),
   offsetMs: z.number().int().positive().optional(),
+  episodeId: z.uuid().optional(),
 });
 
 export const castConfirmedStateSchema = z.object({

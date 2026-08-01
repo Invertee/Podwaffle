@@ -172,16 +172,14 @@ function Action({
 
 const styles = StyleSheet.create({
   card: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
-    backgroundColor: colors.bgSurface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    gap: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   playedCard: { opacity: 0.68 },
-  copy: { gap: 3 },
+  copy: { gap: 2 },
   podcastTitle: {
     color: colors.accent,
     fontSize: fontSizes.xs,
@@ -191,7 +189,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: fontSizes.md,
     fontWeight: fontWeights.semibold,
-    lineHeight: 19,
+    lineHeight: 18,
   },
   playedTitle: { textDecorationLine: "line-through" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
@@ -207,7 +205,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
+    gap: 5,
   },
   playAction: {
     width: 38,

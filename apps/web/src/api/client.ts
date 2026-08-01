@@ -137,6 +137,10 @@ export const api = {
     request<{ episodes: Episode[] }>("/history").then(
       (result) => result.episodes,
     ),
+  episode: (episodeId: string) =>
+    request<{ episode: Episode }>(`/episodes/${episodeId}`).then(
+      (result) => result.episode,
+    ),
   setPlayed: (episodeId: string, played: boolean, revision: number) =>
     request<{ episode: Episode; revision: number }>(
       `/episodes/${episodeId}/state`,

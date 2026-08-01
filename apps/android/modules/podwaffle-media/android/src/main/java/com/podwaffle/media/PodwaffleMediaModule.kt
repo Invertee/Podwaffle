@@ -4,11 +4,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.media3.common.util.UnstableApi
-import androidx.mediarouter.app.MediaRouteChooserDialog
-import androidx.mediarouter.media.MediaRouteSelector
-import com.google.android.gms.cast.CastMediaControlIntent
-import com.google.android.gms.cast.framework.CastContext
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.Callable
@@ -294,21 +295,35 @@ class PodwaffleMediaModule : Module() {
     private fun openCastPickerOnMain() {
         val activity = appContext.currentActivity
             ?: throw IllegalStateException("The Cast picker requires an active Android screen")
-        val receiverId = CastContext.getSharedInstance(context)
-            .castOptions
-            .receiverApplicationId
-        val selector = MediaRouteSelector.Builder()
-            .addControlCategory(CastMediaControlIntent.categoryForCast(receiverId))
-            .build()
-        MediaRouteChooserDialog(activity).apply {
-            setRouteSelector(selector)
-            setTitle("Cast Podwaffle")
-        }.show()
+        val root = activity.findViewById<ViewGroup>(android.R.id.content)
+            ?: throw IllegalStateException("The Cast picker could not attach to the current screen")
+
+        // Use CAF's supported MediaRouteButton path rather than constructing a
+        // MediaRouteChooserDialog directly. The direct dialog path can resolve
+        // an incompatible theme layout in React Native activities and crash
+        // while trying to update a missing title TextView.
+        val button = MediaRouteButton(activity).apply {
+            alpha = 0.01f
+            contentDescription = "Cast Podwaffle"
+        }
+        val layout = FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.END)
+        root.addView(button, layout)
+        try {
+            CastButtonFactory.setUpMediaRouteButton(activity.applicationContext, button)
+            if (!button.showDialog()) {
+                throw IllegalStateException("The Cast device picker could not be opened")
+            }
+        } finally {
+            button.postDelayed({
+                (button.parent as? ViewGroup)?.removeView(button)
+            }, CAST_BUTTON_CLEANUP_DELAY_MS)
+        }
     }
 
     private companion object {
         const val MAIN_OPERATION_TIMEOUT_SECONDS = 15L
         const val SERVICE_START_RETRIES = 100
         const val SERVICE_START_RETRY_MS = 50L
+        const val CAST_BUTTON_CLEANUP_DELAY_MS = 2_000L
     }
 }

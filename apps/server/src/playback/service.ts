@@ -45,9 +45,7 @@ export function playbackState(
     leaseExpiresAt: (row?.lease_expires_at as string | null) ?? null,
     castOwnerDeviceId: (row?.cast_owner_device_id as string | null) ?? null,
     castSessionId: (row?.cast_session_id as string | null) ?? null,
-    ownedByCurrentDevice:
-      row?.active_device_id === deviceId &&
-      Date.parse(String(row.lease_expires_at)) > Date.now(),
+    ownedByCurrentDevice: row?.active_device_id === deviceId,
   };
 }
 
@@ -232,13 +230,22 @@ export function createCastCommand(
   if (existing) return mapPlaybackCommand(existing, true);
   const playback = db
     .prepare(
-      `SELECT mode, cast_owner_device_id FROM playback_state
+      `SELECT mode, active_device_id, cast_owner_device_id
+       FROM playback_state
        WHERE profile_id = ?`,
     )
     .get(profileId) as
-    { mode: string; cast_owner_device_id: string | null } | undefined;
-  if (playback?.mode !== "cast" || !playback.cast_owner_device_id)
-    throw new Error("CAST_NOT_ACTIVE");
+    | {
+        mode: "local" | "cast";
+        active_device_id: string | null;
+        cast_owner_device_id: string | null;
+      }
+    | undefined;
+  const ownerDeviceId =
+    playback?.mode === "cast"
+      ? playback.cast_owner_device_id
+      : playback?.active_device_id;
+  if (!ownerDeviceId) throw new Error("PLAYBACK_NOT_ACTIVE");
   db.prepare(
     `INSERT INTO playback_commands(
        command_id, profile_id, requested_by_device_id, owner_device_id,
@@ -248,14 +255,14 @@ export function createCastCommand(
     command.commandId,
     profileId,
     requestedByDeviceId,
-    playback.cast_owner_device_id,
+    ownerDeviceId,
     command.action,
     JSON.stringify(command),
     new Date().toISOString(),
   );
   return {
     command: { ...command, requestedByDeviceId },
-    ownerDeviceId: playback.cast_owner_device_id,
+    ownerDeviceId,
     status: "pending",
     result: null,
     replayed: false,
@@ -309,19 +316,19 @@ export function resolveCastCommand(
     ) {
       recordMovement(db, profileId, ownerDeviceId, {
         commandId: input.commandId,
-        episodeId: input.confirmed!.episodeId,
+        episodeId: input.confirmed.episodeId,
         type: action,
         fromPositionMs: before.positionMs,
         requestedPositionMs:
           action === "seek"
-            ? (existing.command.positionMs ?? input.confirmed!.positionMs)
+            ? (existing.command.positionMs ?? input.confirmed.positionMs)
             : Math.max(
                 0,
                 before.positionMs +
                   (action === "skip-forward" ? 1 : -1) *
                     (existing.command.offsetMs ?? 0),
               ),
-        confirmedPositionMs: input.confirmed!.positionMs,
+        confirmedPositionMs: input.confirmed.positionMs,
       });
     }
   }
