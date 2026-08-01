@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refreshed the web listening-statistics query after confirmed skip movements so
+  skipped-forward totals update immediately without reloading the profile page.
 - Switched Android podcast downloads to DownloadManager's hidden-notification mode,
   declared the normal install-time permission it requires, and removed the unused
   Podwaffle download channel while retaining durable background download behavior.
