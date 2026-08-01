@@ -1,11 +1,12 @@
 import type { Podcast } from "@podwaffle/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
-import { Stack, useLocalSearchParams } from "expo-router";
-import React from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -14,6 +15,7 @@ import {
 import { api } from "../../api/client";
 import { cachedQuery } from "../../api/queryCache";
 import { EpisodeCard } from "../../components/EpisodeCard";
+import { Icon } from "../../components/Icon";
 import { useEpisodeActions } from "../../hooks/useEpisodeActions";
 import { useAuthStore } from "../../stores/auth";
 import {
@@ -40,15 +42,19 @@ function textFromHtml(value: string | null): string | null {
 }
 
 export default function PodcastScreen() {
+  const router = useRouter();
   const params = useLocalSearchParams<{ podcastId?: string | string[] }>();
   const podcastId = Array.isArray(params.podcastId)
     ? params.podcastId[0]
     : params.podcastId;
   const credentials = useAuthStore((state) => state.credentials);
-  const profileId = useAuthStore((state) => state.session?.profile.id ?? state.snapshot?.profile.id);
+  const profileId = useAuthStore(
+    (state) => state.session?.profile.id ?? state.snapshot?.profile.id,
+  );
   const cachedPodcast = useAuthStore((state) =>
     state.snapshot?.subscriptions.find((item) => item.id === podcastId),
   );
+  const [refreshing, setRefreshing] = useState(false);
 
   const podcast = useQuery({
     queryKey: ["android-podcast", podcastId],
@@ -71,6 +77,16 @@ export default function PodcastScreen() {
     await episodes.refetch();
   });
 
+  async function manualRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([episodes.refetch(), podcast.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (!podcastId) {
     return (
       <View style={styles.centered}>
@@ -84,13 +100,27 @@ export default function PodcastScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: item?.title ?? "Podcast" }} />
+      <View style={styles.screenHeader}>
+        <Pressable
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Back to podcasts"
+        >
+          <Icon name="back" size={22} color={colors.textPrimary} />
+        </Pressable>
+        <Text style={styles.screenTitle} numberOfLines={1}>
+          {item?.title ?? "Podcast"}
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <FlatList
         data={episodes.data ?? []}
         keyExtractor={(episode) => episode.id}
         contentContainerStyle={styles.content}
-        refreshing={episodes.isRefetching || podcast.isRefetching}
-        onRefresh={() => void Promise.all([episodes.refetch(), podcast.refetch()])}
+        refreshing={refreshing}
+        onRefresh={() => void manualRefresh()}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
           <View style={styles.hero}>
@@ -115,7 +145,7 @@ export default function PodcastScreen() {
               </View>
             </View>
             {description ? (
-              <Text style={styles.description} numberOfLines={6}>
+              <Text style={styles.description} numberOfLines={5}>
                 {description}
               </Text>
             ) : null}
@@ -161,7 +191,32 @@ export default function PodcastScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
-  content: { padding: spacing.md, paddingBottom: 150 },
+  screenHeader: {
+    height: 52,
+    paddingHorizontal: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  backButton: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.full,
+    backgroundColor: colors.bgSurface,
+  },
+  screenTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.semibold,
+    textAlign: "center",
+  },
+  headerSpacer: { width: 38 },
+  content: { padding: spacing.md, paddingBottom: spacing.lg },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -169,11 +224,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgPrimary,
     padding: spacing.lg,
   },
-  hero: { gap: spacing.md, marginBottom: spacing.lg },
+  hero: { gap: spacing.md, marginBottom: spacing.md },
   heroTop: { flexDirection: "row", gap: spacing.md, alignItems: "center" },
   artworkFrame: {
-    width: 112,
-    height: 112,
+    width: 92,
+    height: 92,
     borderRadius: radii.lg,
     overflow: "hidden",
     alignItems: "center",
@@ -183,42 +238,42 @@ const styles = StyleSheet.create({
   artwork: { width: "100%", height: "100%" },
   artworkFallback: {
     color: colors.accent,
-    fontSize: fontSizes.xxl,
+    fontSize: fontSizes.xl,
     fontWeight: fontWeights.bold,
   },
-  heroCopy: { flex: 1, gap: spacing.sm },
+  heroCopy: { flex: 1, gap: spacing.xs },
   title: {
     color: colors.textPrimary,
-    fontSize: fontSizes.xxl,
+    fontSize: fontSizes.xl,
     fontWeight: fontWeights.bold,
-    lineHeight: 30,
+    lineHeight: 25,
   },
-  author: { color: colors.accent, fontSize: fontSizes.md },
+  author: { color: colors.accent, fontSize: fontSizes.sm },
   description: {
     color: colors.textSecondary,
     fontSize: fontSizes.sm,
-    lineHeight: 20,
+    lineHeight: 19,
   },
   sectionHeading: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   sectionTitle: {
     color: colors.textPrimary,
-    fontSize: fontSizes.xl,
+    fontSize: fontSizes.lg,
     fontWeight: fontWeights.bold,
   },
   count: {
     color: colors.textSecondary,
-    fontSize: fontSizes.sm,
+    fontSize: fontSizes.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radii.full,
     backgroundColor: colors.bgElevated,
   },
-  separator: { height: spacing.md },
+  separator: { height: spacing.xs },
   error: { color: colors.error, fontSize: fontSizes.sm, textAlign: "center" },
   empty: {
     alignItems: "center",
@@ -235,4 +290,5 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     textAlign: "center",
   },
+  pressed: { opacity: 0.68 },
 });

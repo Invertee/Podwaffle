@@ -1,5 +1,4 @@
 import type { Episode } from "@podwaffle/contracts";
-import { Image } from "expo-image";
 import React from "react";
 import {
   ActivityIndicator,
@@ -17,6 +16,7 @@ import {
   spacing,
 } from "../styles/tokens";
 import { DownloadAction } from "./DownloadAction";
+import { Icon } from "./Icon";
 
 export function formatDurationMs(durationMs: number | null): string {
   if (!durationMs || durationMs <= 0) return "Duration unavailable";
@@ -61,143 +61,127 @@ export function EpisodeCard({
     episode.durationMs && episode.durationMs > 0
       ? Math.max(0, Math.min(1, episode.positionMs / episode.durationMs))
       : 0;
+  const resume = episode.positionMs > 0 && !episode.played;
 
   return (
     <View style={[styles.card, episode.played && styles.playedCard]}>
-      <View style={styles.headerRow}>
-        <View style={styles.artworkFrame}>
-          {episode.artworkUrl ? (
-            <Image
-              source={{ uri: episode.artworkUrl }}
-              style={styles.artwork}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-          ) : (
-            <Text style={styles.artworkFallback}>PW</Text>
-          )}
-        </View>
-        <View style={styles.copy}>
-          {showPodcast ? (
-            <Text style={styles.podcastTitle} numberOfLines={1}>
-              {episode.podcastTitle}
-            </Text>
-          ) : null}
-          <Text
-            style={[styles.title, episode.played && styles.playedTitle]}
-            numberOfLines={3}
-          >
-            {episode.title}
+      <View style={styles.copy}>
+        {showPodcast ? (
+          <Text style={styles.podcastTitle} numberOfLines={1}>
+            {episode.podcastTitle}
           </Text>
+        ) : null}
+        <Text
+          style={[styles.title, episode.played && styles.playedTitle]}
+          numberOfLines={2}
+        >
+          {episode.title}
+        </Text>
+        <View style={styles.metaRow}>
           <Text style={styles.meta} numberOfLines={1}>
             {formatPublishedAt(episode.publishedAt)} · {formatDurationMs(episode.durationMs)}
           </Text>
+          {resume ? (
+            <Text style={styles.progressLabel}>{Math.round(progress * 100)}%</Text>
+          ) : null}
         </View>
-      </View>
-
-      {progress > 0 && !episode.played ? (
-        <View>
+        {resume ? (
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
           </View>
-          <Text style={styles.progressLabel}>
-            {Math.round(progress * 100)}% played
-          </Text>
-        </View>
-      ) : null}
+        ) : null}
+      </View>
 
       <View style={styles.actions}>
         <Pressable
           style={({ pressed }) => [
-            styles.primaryAction,
+            styles.playAction,
             pressed && styles.pressed,
             (!episode.enclosureUrl || busy) && styles.disabled,
           ]}
           disabled={!episode.enclosureUrl || busy}
           onPress={() => void onPlay(episode)}
           accessibilityRole="button"
-          accessibilityLabel={`Play ${episode.title}`}
+          accessibilityLabel={`${resume ? "Resume" : "Play"} ${episode.title}`}
         >
           {busy ? (
             <ActivityIndicator size="small" color={colors.textOnAccent} />
           ) : (
-            <Text style={styles.primaryActionText}>
-              {episode.positionMs > 0 && !episode.played ? "▶ Resume" : "▶ Play"}
-            </Text>
+            <Icon name="play" size={17} color={colors.textOnAccent} />
           )}
         </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+        <Action
+          icon="queueNext"
+          label={`Play ${episode.title} next`}
           disabled={busy}
-          onPress={() => void onAddQueue(episode, "next")}
-          accessibilityRole="button"
-          accessibilityLabel={`Play ${episode.title} next`}
-        >
-          <Text style={styles.actionText}>Next</Text>
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+          onPress={() => onAddQueue(episode, "next")}
+        />
+        <Action
+          icon="queue"
+          label={`Add ${episode.title} to queue`}
           disabled={busy}
-          onPress={() => void onAddQueue(episode, "bottom")}
-          accessibilityRole="button"
-          accessibilityLabel={`Add ${episode.title} to queue`}
-        >
-          <Text style={styles.actionText}>Queue</Text>
-        </Pressable>
-
-        <DownloadAction episode={episode} />
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.action,
-            episode.played && styles.playedAction,
-            pressed && styles.pressed,
-          ]}
+          onPress={() => onAddQueue(episode, "bottom")}
+        />
+        <DownloadAction episode={episode} compact />
+        <Action
+          icon="check"
+          label={`Mark ${episode.title} ${episode.played ? "unplayed" : "played"}`}
           disabled={busy}
-          onPress={() => void onTogglePlayed(episode)}
-          accessibilityRole="button"
-          accessibilityLabel={`Mark ${episode.title} ${episode.played ? "unplayed" : "played"}`}
-        >
-          <Text
-            style={[styles.actionText, episode.played && styles.playedActionText]}
-          >
-            {episode.played ? "Unplay" : "Played"}
-          </Text>
-        </Pressable>
+          active={episode.played}
+          onPress={() => onTogglePlayed(episode)}
+        />
       </View>
     </View>
   );
 }
 
+function Action({
+  icon,
+  label,
+  disabled,
+  active = false,
+  onPress,
+}: {
+  icon: "queueNext" | "queue" | "check";
+  label: string;
+  disabled: boolean;
+  active?: boolean;
+  onPress: () => void | Promise<void>;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.action,
+        active && styles.actionActive,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+      disabled={disabled}
+      onPress={() => void onPress()}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Icon
+        name={icon}
+        size={18}
+        color={active ? colors.success : colors.textSecondary}
+      />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   card: {
-    padding: spacing.md,
-    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
     backgroundColor: colors.bgSurface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  playedCard: { opacity: 0.72 },
-  headerRow: { flexDirection: "row", gap: spacing.md },
-  artworkFrame: {
-    width: 72,
-    height: 72,
     borderRadius: radii.md,
-    overflow: "hidden",
-    backgroundColor: colors.bgElevated,
-    alignItems: "center",
-    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
   },
-  artwork: { width: "100%", height: "100%" },
-  artworkFallback: {
-    color: colors.textMuted,
-    fontSize: fontSizes.lg,
-    fontWeight: fontWeights.bold,
-  },
-  copy: { flex: 1, gap: 4 },
+  playedCard: { opacity: 0.68 },
+  copy: { gap: 3 },
   podcastTitle: {
     color: colors.accent,
     fontSize: fontSizes.xs,
@@ -207,45 +191,35 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: fontSizes.md,
     fontWeight: fontWeights.semibold,
-    lineHeight: 20,
+    lineHeight: 19,
   },
   playedTitle: { textDecorationLine: "line-through" },
-  meta: { color: colors.textSecondary, fontSize: fontSizes.xs },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  meta: { flex: 1, color: colors.textSecondary, fontSize: fontSizes.xs },
+  progressLabel: { color: colors.accent, fontSize: fontSizes.xs },
   progressTrack: {
-    height: 4,
+    height: 3,
     borderRadius: 2,
     overflow: "hidden",
     backgroundColor: colors.bgElevated,
   },
   progressFill: { height: "100%", backgroundColor: colors.accent },
-  progressLabel: {
-    marginTop: 5,
-    color: colors.textMuted,
-    fontSize: fontSizes.xs,
-  },
   actions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    flexWrap: "wrap",
+    gap: spacing.xs,
   },
-  primaryAction: {
-    minHeight: 40,
-    minWidth: 92,
-    paddingHorizontal: spacing.md,
+  playAction: {
+    width: 38,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.full,
     backgroundColor: colors.accent,
   },
-  primaryActionText: {
-    color: colors.textOnAccent,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.bold,
-  },
   action: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.full,
@@ -253,13 +227,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.bgElevated,
   },
-  actionText: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.xs,
-    fontWeight: fontWeights.semibold,
-  },
-  playedAction: { borderColor: colors.success },
-  playedActionText: { color: colors.success },
-  pressed: { opacity: 0.7 },
-  disabled: { opacity: 0.45 },
+  actionActive: { borderColor: colors.success },
+  pressed: { opacity: 0.65 },
+  disabled: { opacity: 0.4 },
 });

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import React from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -33,12 +33,19 @@ export default function InProgressScreen() {
       ),
     enabled: Boolean(credentials && profileId),
   });
+  const [refreshing, setRefreshing] = useState(false);
   const actions = useEpisodeActions(async () => {
     await episodes.refetch();
   });
 
   async function refresh() {
-    await Promise.all([refreshProfile(), episodes.refetch()]);
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshProfile(), episodes.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   return (
@@ -72,7 +79,7 @@ export default function InProgressScreen() {
             (episodes.data?.length ?? 0) === 0 && styles.emptyContent,
           ]}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
-          refreshing={episodes.isRefetching || connection === "checking"}
+          refreshing={refreshing}
           onRefresh={() => void refresh()}
           renderItem={({ item }) => (
             <EpisodeCard
@@ -107,9 +114,9 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
   },
   headerBody: { color: colors.textSecondary, fontSize: fontSizes.sm },
-  content: { padding: spacing.md, paddingTop: spacing.sm, paddingBottom: 150 },
+  content: { padding: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   emptyContent: { flexGrow: 1 },
-  separator: { height: spacing.md },
+  separator: { height: spacing.xs },
   centered: {
     flex: 1,
     alignItems: "center",

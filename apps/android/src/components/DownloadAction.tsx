@@ -1,13 +1,27 @@
 import type { Episode } from "@podwaffle/contracts";
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 import { PodwaffleMediaModule } from "../native-media";
 import { episodeMedia } from "../playback/media";
 import { useDownloadsStore } from "../stores/downloads";
 import { colors, fontSizes, fontWeights, radii, spacing } from "../styles/tokens";
+import { Icon } from "./Icon";
 
-export function DownloadAction({ episode }: { episode: Episode }) {
+export function DownloadAction({
+  episode,
+  compact = false,
+}: {
+  episode: Episode;
+  compact?: boolean;
+}) {
   const download = useDownloadsStore((state) =>
     state.items.find((item) => item.episodeId === episode.id),
   );
@@ -50,25 +64,42 @@ export function DownloadAction({ episode }: { episode: Episode }) {
     }
   }
 
+  const disabled =
+    !episode.enclosureUrl ||
+    busy ||
+    download?.state === "downloading" ||
+    download?.state === "queued";
+  const completed = download?.state === "completed";
+
   return (
     <Pressable
       style={({ pressed }) => [
         styles.button,
-        download?.state === "completed" && styles.completed,
+        compact && styles.compactButton,
+        completed && styles.completed,
         pressed && styles.pressed,
-        (!episode.enclosureUrl || busy) && styles.disabled,
+        disabled && styles.disabled,
       ]}
       onPress={() => void toggle()}
-      disabled={!episode.enclosureUrl || busy || download?.state === "downloading" || download?.state === "queued"}
+      disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={`${label} ${episode.title}`}
     >
-      {busy ? (
+      {busy || download?.state === "downloading" || download?.state === "queued" ? (
         <ActivityIndicator size="small" color={colors.textSecondary} />
       ) : (
-        <Text style={[styles.text, download?.state === "completed" && styles.completedText]}>
-          {label}
-        </Text>
+        <View style={styles.content}>
+          <Icon
+            name={completed ? "trash" : "download"}
+            size={compact ? 18 : 17}
+            color={completed ? colors.success : colors.textSecondary}
+          />
+          {!compact ? (
+            <Text style={[styles.text, completed && styles.completedText]}>
+              {label}
+            </Text>
+          ) : null}
+        </View>
       )}
     </Pressable>
   );
@@ -85,6 +116,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.bgElevated,
   },
+  compactButton: {
+    width: 36,
+    height: 36,
+    minHeight: 36,
+    paddingHorizontal: 0,
+  },
+  content: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   completed: { borderColor: colors.success },
   text: {
     color: colors.textSecondary,

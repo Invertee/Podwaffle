@@ -1,6 +1,8 @@
 package com.podwaffle.media
 
+import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.cast.CastPlayer
@@ -12,6 +14,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.mediarouter.media.MediaRouter
@@ -59,6 +63,9 @@ class PodwaffleMediaService : MediaSessionService() {
     private var lastPersistAt = 0L
 
     companion object {
+        private const val DEFAULT_SKIP_BACK_MS = 15_000L
+        private const val DEFAULT_SKIP_FORWARD_MS = 30_000L
+
         var instance: PodwaffleMediaService? = null
             private set
 
@@ -166,14 +173,29 @@ class PodwaffleMediaService : MediaSessionService() {
             eventEmitter?.invoke(name, payload)
         }
 
-        val local = ExoPlayer.Builder(this).build().also { player ->
+        val local = ExoPlayer.Builder(this)
+            .setSeekBackIncrementMs(DEFAULT_SKIP_BACK_MS)
+            .setSeekForwardIncrementMs(DEFAULT_SKIP_FORWARD_MS)
+            .build()
+            .also { player ->
             player.setHandleAudioBecomingNoisy(true)
             player.setPauseAtEndOfMediaItems(true)
             player.addListener(localPlayerListener)
         }
         localPlayer = local
         activePlayer = local
-        mediaSession = MediaSession.Builder(this, local).build()
+
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(NotificationHelper.PLAYBACK_CHANNEL_ID)
+            .setNotificationId(NotificationHelper.PLAYBACK_NOTIFICATION_ID)
+            .build()
+        notificationProvider.setSmallIcon(R.drawable.ic_podwaffle_notification)
+        setMediaNotificationProvider(notificationProvider)
+
+        val sessionBuilder = MediaSession.Builder(this, local)
+            .setCustomLayout(notificationButtons())
+        createSessionActivity()?.let(sessionBuilder::setSessionActivity)
+        mediaSession = sessionBuilder.build()
 
         try {
             val context = CastContext.getSharedInstance(this)
@@ -613,6 +635,40 @@ class PodwaffleMediaService : MediaSessionService() {
             .distinct()
     } catch (_: Exception) {
         emptyList()
+    }
+
+    private fun createSessionActivity(): PendingIntent? {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(
+            this,
+            0,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun notificationButtons(): List<CommandButton> {
+        val backExtras = Bundle().apply {
+            putInt(DefaultMediaNotificationProvider.COMMAND_KEY_COMPACT_VIEW_INDEX, 0)
+        }
+        val forwardExtras = Bundle().apply {
+            putInt(DefaultMediaNotificationProvider.COMMAND_KEY_COMPACT_VIEW_INDEX, 2)
+        }
+        return listOf(
+            CommandButton.Builder()
+                .setDisplayName("Back 15 seconds")
+                .setIconResId(R.drawable.ic_podwaffle_replay_15)
+                .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+                .setExtras(backExtras)
+                .build(),
+            CommandButton.Builder()
+                .setDisplayName("Forward 30 seconds")
+                .setIconResId(R.drawable.ic_podwaffle_forward_30)
+                .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+                .setExtras(forwardExtras)
+                .build(),
+        )
     }
 
     private fun startPositionUpdates() {

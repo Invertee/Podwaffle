@@ -3,7 +3,11 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect } from "react";
 import { AppState, StyleSheet, View } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import {
   MEDIA_EVENTS,
@@ -13,17 +17,16 @@ import {
   type NativeEpisodeCompletion,
   type NativePlaybackState,
 } from "../native-media/index";
+import { AppChrome } from "../components/AppChrome";
 import { playbackController } from "../playback/controller";
 import { useAuthStore } from "../stores/auth";
 import { useDownloadsStore } from "../stores/downloads";
 import { useNativeMediaStore } from "../stores/nativeMedia";
 import { syncRuntime } from "../sync/runtime";
-import { colors } from "../styles/tokens";
+import { APP_CHROME_HEIGHT, colors } from "../styles/tokens";
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 30_000, retry: 2 },
-  },
+  defaultOptions: { queries: { staleTime: 30_000, retry: 2 } },
 });
 
 function NativeMediaBinder() {
@@ -49,59 +52,37 @@ function NativeMediaBinder() {
     } finally {
       setBinding(false);
     }
-  }, [setBinding, updateState, setBound]);
+  }, [setBinding, updateState, updateCastState, setBound]);
 
   useEffect(() => {
     void bindToService();
-
     const subscriptions = [
-      PodwaffleMediaModule.addListener(
-        MEDIA_EVENTS.STATE_CHANGED,
-        (data: unknown) => {
-          const state = data as NativePlaybackState;
-          updateState(state);
-          playbackController.handleNativeState(state);
-        },
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.STATE_CHANGED, (data) => {
+        const state = data as NativePlaybackState;
+        updateState(state);
+        playbackController.handleNativeState(state);
+      }),
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.POSITION_CHANGED, (data) => {
+        const position = data as { positionMs: number; bufferedPositionMs: number };
+        updatePosition(position.positionMs, position.bufferedPositionMs);
+        playbackController.handleNativePosition();
+      }),
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.ITEM_ENDED, (data) =>
+        playbackController.handleNativeCompletion(data as NativeEpisodeCompletion),
       ),
-      PodwaffleMediaModule.addListener(
-        MEDIA_EVENTS.POSITION_CHANGED,
-        (data: unknown) => {
-          const position = data as {
-            positionMs: number;
-            bufferedPositionMs: number;
-          };
-          updatePosition(position.positionMs, position.bufferedPositionMs);
-          playbackController.handleNativePosition();
-        },
-      ),
-      PodwaffleMediaModule.addListener(
-        MEDIA_EVENTS.ITEM_ENDED,
-        (data: unknown) => {
-          playbackController.handleNativeCompletion(
-            data as NativeEpisodeCompletion,
-          );
-        },
-      ),
-      PodwaffleMediaModule.addListener(
-        MEDIA_EVENTS.CAST_STATE_CHANGED,
-        (data: unknown) => {
-          const cast = data as NativeCastState;
-          updateCastState(cast);
-          playbackController.handleCastState(cast);
-        },
-      ),
-      PodwaffleMediaModule.addListener(
-        MEDIA_EVENTS.DOWNLOAD_STATE_CHANGED,
-        (data: unknown) => {
-          useDownloadsStore.getState().apply(data as NativeDownload);
-        },
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.CAST_STATE_CHANGED, (data) => {
+        const cast = data as NativeCastState;
+        updateCastState(cast);
+        playbackController.handleCastState(cast);
+      }),
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.DOWNLOAD_STATE_CHANGED, (data) =>
+        useDownloadsStore.getState().apply(data as NativeDownload),
       ),
       PodwaffleMediaModule.addListener(
         MEDIA_EVENTS.DOWNLOAD_MAINTENANCE_COMPLETED,
         () => void useDownloadsStore.getState().load(),
       ),
     ];
-
     return () => subscriptions.forEach((subscription) => subscription.remove());
   }, [bindToService, updateState, updatePosition, updateCastState]);
 
@@ -118,24 +99,17 @@ function RuntimeBinder() {
     state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
   );
 
-  useEffect(() => {
-    void restore();
-  }, [restore]);
+  useEffect(() => void restore(), [restore]);
 
   useEffect(() => {
-    if (status === "authenticated" && credentials) {
-      syncRuntime.start(credentials, revision);
-    } else {
-      syncRuntime.stop();
-    }
+    if (status === "authenticated" && credentials) syncRuntime.start(credentials, revision);
+    else syncRuntime.stop();
     return () => syncRuntime.stop();
   }, [status, credentials]);
 
   useEffect(() => {
     syncRuntime.updateRevision(revision);
-    if (revision > 0) {
-      void queryClient.invalidateQueries();
-    }
+    if (revision > 0) void queryClient.invalidateQueries();
   }, [revision]);
 
   useEffect(() => {
@@ -161,6 +135,37 @@ function RuntimeBinder() {
   return null;
 }
 
+function AppNavigator() {
+  const insets = useSafeAreaInsets();
+  const authenticated = useAuthStore((state) => state.status === "authenticated");
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View
+        style={[
+          styles.navigator,
+          authenticated && { paddingBottom: APP_CHROME_HEIGHT + insets.bottom },
+        ]}
+      >
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bgPrimary },
+            animation: "none",
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="join" />
+          <Stack.Screen name="podcast/[podcastId]" />
+          <Stack.Screen name="queue" />
+          <Stack.Screen name="now-playing" />
+        </Stack>
+      </View>
+      <AppChrome />
+    </SafeAreaView>
+  );
+}
+
 export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -168,41 +173,13 @@ export default function RootLayout() {
         <StatusBar style="light" backgroundColor={colors.bgPrimary} />
         <NativeMediaBinder />
         <RuntimeBinder />
-        <View style={styles.root}>
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: colors.bgPrimary },
-              headerTintColor: colors.textPrimary,
-              headerTitleStyle: { color: colors.textPrimary },
-              contentStyle: { backgroundColor: colors.bgPrimary },
-              animation: "slide_from_right",
-            }}
-          >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="join"
-              options={{ headerShown: false, animation: "fade" }}
-            />
-            <Stack.Screen
-              name="podcast/[podcastId]"
-              options={{ title: "Podcast" }}
-            />
-            <Stack.Screen name="queue" options={{ title: "Queue" }} />
-            <Stack.Screen
-              name="now-playing"
-              options={{
-                title: "Now Playing",
-                presentation: "modal",
-                animation: "slide_from_bottom",
-              }}
-            />
-          </Stack>
-        </View>
+        <AppNavigator />
       </SafeAreaProvider>
     </QueryClientProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bgPrimary },
+  safe: { flex: 1, backgroundColor: colors.bgPrimary },
+  navigator: { flex: 1, backgroundColor: colors.bgPrimary },
 });

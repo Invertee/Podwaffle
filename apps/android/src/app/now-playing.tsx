@@ -1,21 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  LayoutChangeEvent,
+  type LayoutChangeEvent,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "../api/client";
 import { DownloadAction } from "../components/DownloadAction";
+import { Icon, type IconName } from "../components/Icon";
 import { playbackController } from "../playback/controller";
 import { useAuthStore } from "../stores/auth";
 import { selectIsPlaying, useNativeMediaStore } from "../stores/nativeMedia";
@@ -82,7 +82,6 @@ function SeekBar({
 }
 
 export default function NowPlayingScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const media = useNativeMediaStore((state) => state.state);
   const cast = useNativeMediaStore((state) => state.castState);
@@ -92,9 +91,6 @@ export default function NowPlayingScreen() {
   const forward = useAuthStore((state) => state.skipForwardSeconds);
   const castStatus = usePlayerUiStore((state) => state.castStatus);
   const castError = usePlayerUiStore((state) => state.castError);
-  const sleepTimerEndsAt = usePlayerUiStore((state) => state.sleepTimerEndsAt);
-  const stopAtEpisodeEnd = usePlayerUiStore((state) => state.stopAtEpisodeEnd);
-  const [clock, setClock] = useState(Date.now());
 
   const episode = useQuery({
     queryKey: ["android-now-playing-episode", media?.episodeId],
@@ -102,12 +98,6 @@ export default function NowPlayingScreen() {
       api.episode(credentials!.serverUrl, credentials!.token, media!.episodeId!),
     enabled: Boolean(credentials && media?.episodeId),
   });
-
-  useEffect(() => {
-    if (!sleepTimerEndsAt) return;
-    const timer = setInterval(() => setClock(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [sleepTimerEndsAt]);
 
   async function togglePlay() {
     try {
@@ -119,17 +109,6 @@ export default function NowPlayingScreen() {
         error instanceof Error ? error.message : "Playback could not be changed.",
       );
     }
-  }
-
-  function chooseSleepTimer() {
-    Alert.alert("Sleep timer", "Pause playback after a delay.", [
-      { text: "15 minutes", onPress: () => playbackController.setSleepTimer(15) },
-      { text: "30 minutes", onPress: () => playbackController.setSleepTimer(30) },
-      { text: "60 minutes", onPress: () => playbackController.setSleepTimer(60) },
-      { text: "End of episode", onPress: () => playbackController.setSleepTimer("episode") },
-      { text: "Off", style: "destructive", onPress: () => playbackController.setSleepTimer(null) },
-      { text: "Cancel", style: "cancel" },
-    ]);
   }
 
   async function toggleCast() {
@@ -144,32 +123,31 @@ export default function NowPlayingScreen() {
     }
   }
 
-  const remaining = Math.max(0, (media?.durationMs ?? 0) - (media?.positionMs ?? 0));
-  const sleepRemaining = sleepTimerEndsAt
-    ? Math.max(0, sleepTimerEndsAt - clock)
-    : null;
+  const remaining = Math.max(
+    0,
+    (media?.durationMs ?? 0) - (media?.positionMs ?? 0),
+  );
   const buffering = media?.playbackStatus === "buffering";
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xl },
-      ]}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
-        <Pressable
-          style={styles.headerButton}
+        <HeaderButton
+          icon="back"
+          label="Back"
           onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Close now playing"
-        >
-          <Text style={styles.headerButtonText}>⌄</Text>
-        </Pressable>
+        />
         <View style={styles.headerCopy}>
           <Text style={styles.headerEyebrow}>
-            {cast.connected ? "CASTING" : media?.source === "download" ? "PLAYING OFFLINE" : "NOW PLAYING"}
+            {cast.connected
+              ? "CASTING"
+              : media?.source === "download"
+                ? "PLAYING OFFLINE"
+                : "NOW PLAYING"}
           </Text>
           {cast.session ? (
             <Text style={styles.headerDevice} numberOfLines={1}>
@@ -177,14 +155,11 @@ export default function NowPlayingScreen() {
             </Text>
           ) : null}
         </View>
-        <Pressable
-          style={styles.headerButton}
+        <HeaderButton
+          icon="queue"
+          label="Open queue"
           onPress={() => router.push("/queue")}
-          accessibilityRole="button"
-          accessibilityLabel="Open queue"
-        >
-          <Text style={styles.headerButtonText}>☷</Text>
-        </Pressable>
+        />
       </View>
 
       <View style={styles.artworkFrame}>
@@ -193,7 +168,7 @@ export default function NowPlayingScreen() {
             source={{ uri: media.artworkUrl }}
             style={styles.artwork}
             contentFit="cover"
-            transition={180}
+            cachePolicy="memory-disk"
           />
         ) : (
           <View style={styles.artworkFallback}>
@@ -225,8 +200,16 @@ export default function NowPlayingScreen() {
       </View>
 
       <View style={styles.controls}>
-        <Control label="Previous" symbol="|◀" onPress={() => playbackController.previous()} />
-        <Control label={`Back ${backward} seconds`} symbol={`↶${backward}`} onPress={() => playbackController.skipBackward()} />
+        <Transport
+          icon="previous"
+          label="Previous episode"
+          onPress={() => playbackController.previous()}
+        />
+        <Transport
+          icon="rewind"
+          label={`Back ${backward} seconds`}
+          onPress={() => playbackController.skipBackward()}
+        />
         <Pressable
           style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
           onPress={() => void togglePlay()}
@@ -236,55 +219,26 @@ export default function NowPlayingScreen() {
           {buffering ? (
             <ActivityIndicator size="large" color={colors.textOnAccent} />
           ) : (
-            <Text style={styles.playSymbol}>{isPlaying ? "Ⅱ" : "▶"}</Text>
+            <Icon
+              name={isPlaying ? "pause" : "play"}
+              size={30}
+              color={colors.textOnAccent}
+            />
           )}
         </Pressable>
-        <Control label={`Forward ${forward} seconds`} symbol={`${forward}↷`} onPress={() => playbackController.skipForward()} />
-        <Control label="Next" symbol="▶|" onPress={() => playbackController.next()} />
-      </View>
-
-      <View style={styles.rateRow}>
-        {[0.8, 1, 1.2, 1.5, 2].map((rate) => (
-          <Pressable
-            key={rate}
-            style={[
-              styles.rateButton,
-              media?.playbackRate === rate && styles.rateButtonActive,
-              media?.source === "cast" && styles.disabled,
-            ]}
-            disabled={media?.source === "cast"}
-            onPress={() => void playbackController.setPlaybackRate(rate)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: media?.playbackRate === rate }}
-          >
-            <Text
-              style={[
-                styles.rateText,
-                media?.playbackRate === rate && styles.rateTextActive,
-              ]}
-            >
-              {rate}×
-            </Text>
-          </Pressable>
-        ))}
+        <Transport
+          icon="forward"
+          label={`Forward ${forward} seconds`}
+          onPress={() => playbackController.skipForward()}
+        />
+        <Transport
+          icon="next"
+          label="Next episode"
+          onPress={() => playbackController.next()}
+        />
       </View>
 
       <View style={styles.tools}>
-        <Pressable
-          style={({ pressed }) => [styles.tool, pressed && styles.pressed]}
-          onPress={chooseSleepTimer}
-          accessibilityRole="button"
-        >
-          <Text style={styles.toolIcon}>◷</Text>
-          <Text style={styles.toolLabel}>
-            {stopAtEpisodeEnd
-              ? "End of episode"
-              : sleepRemaining !== null
-                ? `${Math.ceil(sleepRemaining / 60_000)} min`
-                : "Sleep timer"}
-          </Text>
-        </Pressable>
-
         <Pressable
           style={({ pressed }) => [
             styles.tool,
@@ -295,17 +249,21 @@ export default function NowPlayingScreen() {
           disabled={castStatus === "connecting"}
           onPress={() => void toggleCast()}
           accessibilityRole="button"
+          accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
         >
           {castStatus === "connecting" ? (
             <ActivityIndicator size="small" color={colors.accent} />
           ) : (
-            <Text style={[styles.toolIcon, cast.connected && styles.toolActiveText]}>▣</Text>
+            <Icon
+              name="cast"
+              size={20}
+              color={cast.connected ? colors.accent : colors.textSecondary}
+            />
           )}
           <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
             {cast.connected ? "Stop Cast" : "Cast"}
           </Text>
         </Pressable>
-
         {episode.data ? <DownloadAction episode={episode.data} /> : null}
       </View>
 
@@ -319,13 +277,34 @@ export default function NowPlayingScreen() {
   );
 }
 
-function Control({
+function HeaderButton({
+  icon,
   label,
-  symbol,
   onPress,
 }: {
+  icon: "back" | "queue";
   label: string;
-  symbol: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Icon name={icon} size={22} color={colors.textPrimary} />
+    </Pressable>
+  );
+}
+
+function Transport({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
   onPress: () => void | Promise<void>;
 }) {
   return (
@@ -335,14 +314,19 @@ function Control({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Text style={styles.controlSymbol}>{symbol}</Text>
+      <Icon name={icon} size={25} color={colors.textPrimary} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  content: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
+    gap: spacing.lg,
+  },
   header: {
     width: "100%",
     flexDirection: "row",
@@ -357,7 +341,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     backgroundColor: colors.bgSurface,
   },
-  headerButtonText: { color: colors.textPrimary, fontSize: fontSizes.xl },
   headerCopy: { flex: 1, alignItems: "center" },
   headerEyebrow: {
     color: colors.textSecondary,
@@ -369,16 +352,11 @@ const styles = StyleSheet.create({
   artworkFrame: {
     width: "100%",
     aspectRatio: 1,
-    maxWidth: 520,
+    maxWidth: 480,
     alignSelf: "center",
     borderRadius: radii.xl,
     overflow: "hidden",
     backgroundColor: colors.bgElevated,
-    elevation: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
   },
   artwork: { width: "100%", height: "100%" },
   artworkFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -447,11 +425,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: radii.full,
   },
-  controlSymbol: {
-    color: colors.textPrimary,
-    fontSize: fontSizes.md,
-    fontWeight: fontWeights.semibold,
-  },
   playButton: {
     width: 74,
     height: 74,
@@ -460,20 +433,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: colors.accent,
   },
-  playSymbol: { color: colors.textOnAccent, fontSize: 30, fontWeight: fontWeights.bold },
-  rateRow: { flexDirection: "row", justifyContent: "center", gap: spacing.sm },
-  rateButton: {
-    minWidth: 48,
-    minHeight: 36,
-    paddingHorizontal: spacing.sm,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radii.full,
-    backgroundColor: colors.bgSurface,
-  },
-  rateButtonActive: { backgroundColor: colors.accentDim },
-  rateText: { color: colors.textSecondary, fontSize: fontSizes.xs },
-  rateTextActive: { color: colors.accent, fontWeight: fontWeights.bold },
   tools: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   tool: {
     minHeight: 46,
@@ -487,7 +446,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgSurface,
   },
   toolActive: { borderColor: colors.accent, backgroundColor: colors.accentDim },
-  toolIcon: { color: colors.textSecondary, fontSize: fontSizes.lg },
   toolLabel: {
     color: colors.textSecondary,
     fontSize: fontSizes.xs,

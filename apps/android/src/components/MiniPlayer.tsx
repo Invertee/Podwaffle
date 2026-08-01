@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -22,19 +23,33 @@ import {
   MINI_PLAYER_HEIGHT,
   spacing,
 } from "../styles/tokens";
+import { Icon } from "./Icon";
 
 export function MiniPlayer() {
   const router = useRouter();
   const media = useNativeMediaStore((state) => state.state);
+  const cast = useNativeMediaStore((state) => state.castState);
   const hasMedia = useNativeMediaStore(selectHasMedia);
   const isPlaying = useNativeMediaStore(selectIsPlaying);
-
-  if (!hasMedia || !media) return null;
+  const enabled = Boolean(hasMedia && media);
 
   const progress =
-    media.durationMs && media.durationMs > 0
+    media?.durationMs && media.durationMs > 0
       ? Math.max(0, Math.min(1, media.positionMs / media.durationMs))
       : 0;
+
+  async function toggleCast() {
+    if (!enabled) return;
+    try {
+      if (cast.connected) await playbackController.stopCasting(true);
+      else await playbackController.startCasting();
+    } catch (error) {
+      Alert.alert(
+        "Google Cast",
+        error instanceof Error ? error.message : "Cast could not be started.",
+      );
+    }
+  }
 
   return (
     <View style={styles.container}>
@@ -42,17 +57,22 @@ export function MiniPlayer() {
         <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
       </View>
       <Pressable
-        style={styles.openArea}
+        style={({ pressed }) => [
+          styles.openArea,
+          pressed && enabled && styles.pressed,
+        ]}
+        disabled={!enabled}
         onPress={() => router.push("/now-playing")}
         accessibilityRole="button"
-        accessibilityLabel="Open now playing"
+        accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
       >
         <View style={styles.artworkFrame}>
-          {media.artworkUrl ? (
+          {media?.artworkUrl ? (
             <Image
               source={{ uri: media.artworkUrl }}
               style={styles.artwork}
               contentFit="cover"
+              cachePolicy="memory-disk"
             />
           ) : (
             <Text style={styles.artworkFallback}>PW</Text>
@@ -60,53 +80,101 @@ export function MiniPlayer() {
         </View>
         <View style={styles.copy}>
           <Text style={styles.title} numberOfLines={1}>
-            {media.title ?? "Unknown episode"}
+            {media?.title ?? "Nothing playing"}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {media.source === "cast" && media.cast
+            {media?.source === "cast" && media.cast
               ? `Casting to ${media.cast.deviceName}`
-              : media.source === "download"
+              : media?.source === "download"
                 ? `${media.podcastTitle ?? "Podcast"} · Offline`
-                : media.podcastTitle ?? "Unknown podcast"}
+                : media?.podcastTitle ?? "Choose an episode"}
           </Text>
         </View>
       </Pressable>
 
-      <Pressable
-        style={({ pressed }) => [styles.control, pressed && styles.pressed]}
-        onPress={() => void playbackController.skipBackward()}
-        accessibilityRole="button"
-        accessibilityLabel="Skip backward"
-      >
-        <Text style={styles.controlText}>↶</Text>
-      </Pressable>
+      <ChromeControl
+        icon="rewind"
+        label="Skip backward"
+        disabled={!enabled}
+        onPress={() => playbackController.skipBackward()}
+      />
       <Pressable
         style={({ pressed }) => [
           styles.control,
           styles.play,
-          pressed && styles.pressed,
+          !enabled && styles.disabled,
+          pressed && enabled && styles.pressed,
         ]}
+        disabled={!enabled}
         onPress={() =>
           void (isPlaying ? playbackController.pause() : playbackController.play())
         }
         accessibilityRole="button"
         accessibilityLabel={isPlaying ? "Pause" : "Play"}
       >
-        {media.playbackStatus === "buffering" ? (
+        {media?.playbackStatus === "buffering" ? (
           <ActivityIndicator size="small" color={colors.textOnAccent} />
         ) : (
-          <Text style={styles.playText}>{isPlaying ? "Ⅱ" : "▶"}</Text>
+          <Icon
+            name={isPlaying ? "pause" : "play"}
+            size={17}
+            color={colors.textOnAccent}
+          />
         )}
       </Pressable>
+      <ChromeControl
+        icon="forward"
+        label="Skip forward"
+        disabled={!enabled}
+        onPress={() => playbackController.skipForward()}
+      />
       <Pressable
-        style={({ pressed }) => [styles.control, pressed && styles.pressed]}
-        onPress={() => void playbackController.skipForward()}
+        style={({ pressed }) => [
+          styles.cast,
+          cast.connected && styles.castActive,
+          !enabled && styles.disabled,
+          pressed && enabled && styles.pressed,
+        ]}
+        disabled={!enabled}
+        onPress={() => void toggleCast()}
         accessibilityRole="button"
-        accessibilityLabel="Skip forward"
+        accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
       >
-        <Text style={styles.controlText}>↷</Text>
+        <Icon
+          name="cast"
+          size={20}
+          color={cast.connected ? colors.accent : colors.textSecondary}
+        />
       </Pressable>
     </View>
+  );
+}
+
+function ChromeControl({
+  icon,
+  label,
+  disabled,
+  onPress,
+}: {
+  icon: "rewind" | "forward";
+  label: string;
+  disabled: boolean;
+  onPress: () => void | Promise<void>;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.control,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+      disabled={disabled}
+      onPress={() => void onPress()}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Icon name={icon} size={20} color={colors.textPrimary} />
+    </Pressable>
   );
 }
 
@@ -114,12 +182,10 @@ const styles = StyleSheet.create({
   container: {
     height: MINI_PLAYER_HEIGHT,
     backgroundColor: colors.playerBg,
-    borderTopWidth: 1,
-    borderTopColor: colors.playerBorder,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    gap: 2,
   },
   progressTrack: {
     position: "absolute",
@@ -138,8 +204,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   artworkFrame: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 7,
     overflow: "hidden",
     backgroundColor: colors.bgElevated,
@@ -147,23 +213,34 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   artwork: { width: "100%", height: "100%" },
-  artworkFallback: { color: colors.textMuted, fontWeight: fontWeights.bold },
+  artworkFallback: {
+    color: colors.textMuted,
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.bold,
+  },
   copy: { flex: 1, minWidth: 0 },
   title: {
     color: colors.textPrimary,
     fontSize: fontSizes.sm,
     fontWeight: fontWeights.semibold,
   },
-  subtitle: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 3 },
+  subtitle: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 2 },
   control: {
-    width: 34,
-    height: 34,
+    width: 32,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 17,
+    borderRadius: 18,
   },
-  play: { backgroundColor: colors.accent },
-  controlText: { color: colors.textPrimary, fontSize: fontSizes.lg },
-  playText: { color: colors.textOnAccent, fontWeight: fontWeights.bold },
-  pressed: { opacity: 0.7 },
+  play: { width: 36, height: 36, backgroundColor: colors.accent },
+  cast: {
+    width: 32,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+  },
+  castActive: { backgroundColor: colors.accentDim },
+  disabled: { opacity: 0.3 },
+  pressed: { opacity: 0.65 },
 });

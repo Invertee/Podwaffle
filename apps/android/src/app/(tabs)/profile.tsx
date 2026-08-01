@@ -219,7 +219,7 @@ export default function ProfileScreen() {
             <Text style={styles.eyebrow}>YOUR LISTENING</Text>
             <Text style={styles.cardTitle}>Statistics</Text>
           </View>
-          {stats.isFetching ? (
+          {stats.isLoading ? (
             <ActivityIndicator size="small" color={colors.accent} />
           ) : null}
         </View>
@@ -419,7 +419,7 @@ function Row({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
-  content: { padding: spacing.md, paddingBottom: 150, gap: spacing.md },
+  content: { padding: spacing.md, paddingBottom: spacing.lg, gap: spacing.md },
   identity: {
     flexDirection: "row",
     alignItems: "center",

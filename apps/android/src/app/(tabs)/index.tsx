@@ -21,6 +21,7 @@ import {
   refreshProfile,
   withProfileRevision,
 } from "../../api/profileMutations";
+import { Icon } from "../../components/Icon";
 import { useAuthStore } from "../../stores/auth";
 import {
   colors,
@@ -42,7 +43,6 @@ function Artwork({ item, size }: { item: Subscription; size: number }) {
           style={styles.artwork}
           contentFit="cover"
           cachePolicy="memory-disk"
-          transition={150}
         />
       ) : (
         <Text style={styles.artworkFallback}>PW</Text>
@@ -157,6 +157,7 @@ export default function PodcastsScreen() {
   const [mode, setMode] = useState<"tiles" | "list">("tiles");
   const [reordering, setReordering] = useState(false);
   const [reorderBusy, setReorderBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [subscriptions, setSubscriptions] = useState(snapshotSubscriptions);
   const columns = width >= 720 ? 5 : width >= 480 ? 4 : 3;
   const tileSize =
@@ -220,6 +221,16 @@ export default function PodcastsScreen() {
     }
   }
 
+  async function manualRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       {connection !== "online" ? (
@@ -246,7 +257,8 @@ export default function PodcastsScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Open queue with ${queueCount} episodes`}
           >
-            <Text style={styles.queueButtonText}>Queue · {queueCount}</Text>
+            <Icon name="queue" size={17} color={colors.textSecondary} />
+            <Text style={styles.queueButtonText}>{queueCount}</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
@@ -281,14 +293,11 @@ export default function PodcastsScreen() {
                   accessibilityState={{ selected: mode === value }}
                   accessibilityLabel={`${value === "tiles" ? "Tile" : "List"} view`}
                 >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      mode === value && styles.toggleTextActive,
-                    ]}
-                  >
-                    {value === "tiles" ? "▦" : "☷"}
-                  </Text>
+                  <Icon
+                    name={value === "tiles" ? "tiles" : "list"}
+                    size={20}
+                    color={mode === value ? colors.accent : colors.textMuted}
+                  />
                 </Pressable>
               ))}
             </View>
@@ -301,8 +310,8 @@ export default function PodcastsScreen() {
           data={subscriptions}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          onRefresh={() => void refresh()}
-          refreshing={connection === "checking"}
+          onRefresh={() => void manualRefresh()}
+          refreshing={refreshing}
           renderItem={({ item, index }) => (
             <ReorderRow
               item={item}
@@ -330,8 +339,8 @@ export default function PodcastsScreen() {
             styles.listContent,
             subscriptions.length === 0 && styles.emptyContent,
           ]}
-          onRefresh={() => void refresh()}
-          refreshing={connection === "checking"}
+          onRefresh={() => void manualRefresh()}
+          refreshing={refreshing}
           renderItem={({ item }) =>
             mode === "tiles" ? (
               <Pressable
@@ -345,9 +354,6 @@ export default function PodcastsScreen() {
                 accessibilityLabel={`${item.title}${item.hasNewEpisode ? ", new episodes" : ""}`}
               >
                 <Artwork item={item} size={tileSize} />
-                <Text style={styles.tileTitle} numberOfLines={2}>
-                  {item.title}
-                </Text>
               </Pressable>
             ) : (
               <Pressable
@@ -420,6 +426,8 @@ const styles = StyleSheet.create({
   },
   queueButton: {
     minHeight: 40,
+    flexDirection: "row",
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
     alignItems: "center",
     justifyContent: "center",
@@ -463,10 +471,10 @@ const styles = StyleSheet.create({
   toggleButtonActive: { backgroundColor: colors.accentDim },
   toggleText: { color: colors.textMuted, fontSize: 22 },
   toggleTextActive: { color: colors.accent },
-  listContent: { paddingHorizontal: spacing.md, paddingBottom: 150 },
+  listContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.lg },
   emptyContent: { flexGrow: 1 },
   row: { gap: spacing.sm },
-  tile: { marginBottom: spacing.lg, gap: spacing.sm },
+  tile: { marginBottom: spacing.sm },
   artworkFrame: {
     borderRadius: radii.md,
     overflow: "hidden",
@@ -490,12 +498,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.newEpisodeDot,
     borderWidth: 2,
     borderColor: colors.bgPrimary,
-  },
-  tileTitle: {
-    color: colors.textPrimary,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.semibold,
-    lineHeight: 17,
   },
   listItem: {
     flexDirection: "row",

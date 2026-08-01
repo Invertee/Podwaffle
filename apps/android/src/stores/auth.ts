@@ -234,7 +234,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   refresh: async () => {
     const { credentials, snapshot } = get();
     if (!credentials) return;
-    set({ connection: "checking" });
+    if (!snapshot) set({ connection: "checking" });
     try {
       const session = await api.me(credentials.serverUrl, credentials.token);
       if (!session) {

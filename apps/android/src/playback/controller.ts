@@ -74,7 +74,6 @@ class AndroidPlaybackController {
   private castBackendActive = false;
   private endingCast = false;
   private lastCastReportAt = 0;
-  private sleepTimer: ReturnType<typeof setTimeout> | null = null;
   private offlinePlayback = false;
 
   public async playEpisode(episode: Episode): Promise<void> {
@@ -409,24 +408,6 @@ class AndroidPlaybackController {
     }
   }
 
-  public setSleepTimer(minutes: number | "episode" | null): void {
-    if (this.sleepTimer) clearTimeout(this.sleepTimer);
-    this.sleepTimer = null;
-    const ui = usePlayerUiStore.getState();
-    ui.setStopAtEpisodeEnd(minutes === "episode");
-    if (typeof minutes !== "number") {
-      ui.setSleepTimer(null);
-      return;
-    }
-    const endsAt = Date.now() + Math.max(1, minutes) * 60_000;
-    ui.setSleepTimer(endsAt);
-    this.sleepTimer = setTimeout(() => {
-      this.sleepTimer = null;
-      usePlayerUiStore.getState().setSleepTimer(null);
-      void this.pause();
-    }, Math.max(0, endsAt - Date.now()));
-  }
-
   public handleNativeState(state: NativePlaybackState): void {
     this.sampleListening();
     this.lastNativeState = state;
@@ -606,10 +587,6 @@ class AndroidPlaybackController {
     this.castBackendActive = false;
     this.offlinePlayback = false;
     this.listenedSinceTelemetry = 0;
-    if (this.sleepTimer) clearTimeout(this.sleepTimer);
-    this.sleepTimer = null;
-    usePlayerUiStore.getState().setSleepTimer(null);
-    usePlayerUiStore.getState().setStopAtEpisodeEnd(false);
   }
 
   private connection(): { serverUrl: string; token: string } {
@@ -899,19 +876,6 @@ class AndroidPlaybackController {
         this.leaseExpiresAt = 0;
       }
       await useAuthStore.getState().refresh();
-      if (usePlayerUiStore.getState().stopAtEpisodeEnd) {
-        const castConnected = useNativeMediaStore.getState().castState.connected;
-        this.setSleepTimer(null);
-        if (castConnected) {
-          await this.stopCasting(false).catch(() => undefined);
-        } else {
-          // Completion has already been persisted and the lease released above.
-          // Pause natively without invoking the public pause path, which would
-          // acquire a fresh playback lease for an episode that just completed.
-          await PodwaffleMediaModule.pause().catch(() => undefined);
-        }
-        return;
-      }
       const nextEpisode = completed.queue[0]?.episode;
       if (nextEpisode) await this.playEpisode(nextEpisode);
       else {

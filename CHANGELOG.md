@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Completed the Android Milestones 23–26 finish pass: persistent navigation and
+  mini-player chrome, compact artwork-free episode rows, web-aligned vector
+  icons and styling, status-bar-safe layouts, animation-free detail navigation,
+  Google Cast controls, and Media3 lock-screen/notification transport controls.
+- Removed Android sleep-timer and playback-speed controls, suppressed background
+  refresh spinners, and updated the Android application/runtime version to 0.4.0.
 - Completed Android Milestones 19–23: authenticated live WebSocket recovery,
   native queue and cross-client playback coordination, a full Now Playing
   experience, persistent background downloads with offline playback and storage

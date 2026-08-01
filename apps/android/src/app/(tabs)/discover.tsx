@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     textAlign: "center",
   },
-  content: { padding: spacing.md, paddingTop: spacing.sm, paddingBottom: 150 },
+  content: { padding: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   emptyContent: { flexGrow: 1 },
   separator: { height: spacing.sm },
   result: {

@@ -33,6 +33,7 @@ export default function DownloadsScreen() {
   const error = useDownloadsStore((state) => state.error);
   const load = useDownloadsStore((state) => state.load);
   const [busyEpisodeId, setBusyEpisodeId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     void load();
@@ -46,6 +47,16 @@ export default function DownloadsScreen() {
     const timer = setInterval(() => void load(), 2_000);
     return () => clearInterval(timer);
   }, [items, load]);
+
+  async function manualRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function play(download: NativeDownload) {
     setBusyEpisodeId(download.episodeId);
@@ -89,7 +100,9 @@ export default function DownloadsScreen() {
             {items.filter((item) => item.state === "completed").length} ready offline
           </Text>
         </View>
-        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        {loading && items.length === 0 ? (
+          <ActivityIndicator color={colors.accent} />
+        ) : null}
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -101,8 +114,8 @@ export default function DownloadsScreen() {
           styles.list,
           items.length === 0 && styles.emptyList,
         ]}
-        onRefresh={() => void load()}
-        refreshing={loading}
+        onRefresh={() => void manualRefresh()}
+        refreshing={refreshing}
         renderItem={({ item }) => {
           const progress =
             item.totalBytes && item.totalBytes > 0
@@ -216,7 +229,7 @@ const styles = StyleSheet.create({
   },
   subtitle: { color: colors.textSecondary, fontSize: fontSizes.sm, marginTop: 3 },
   error: { color: colors.error, paddingHorizontal: spacing.md },
-  list: { padding: spacing.md, paddingTop: 0, paddingBottom: 160, gap: spacing.md },
+  list: { padding: spacing.md, paddingTop: 0, paddingBottom: spacing.lg, gap: spacing.md },
   emptyList: { flexGrow: 1 },
   card: {
     padding: spacing.md,
