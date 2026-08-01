@@ -9,6 +9,8 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { api } from "../api/client";
+import { warmEpisodeCache } from "../api/queryCache";
 import {
   MEDIA_EVENTS,
   PodwaffleMediaModule,
@@ -92,9 +94,20 @@ function NativeMediaBinder() {
 function RuntimeBinder() {
   const restore = useAuthStore((state) => state.restore);
   const refresh = useAuthStore((state) => state.refresh);
+  const setSkipDurations = useAuthStore((state) => state.setSkipDurations);
   const status = useAuthStore((state) => state.status);
   const credentials = useAuthStore((state) => state.credentials);
   const revision = useAuthStore((state) => state.snapshot?.revision ?? 0);
+  const profileId = useAuthStore(
+    (state) => state.session?.profile.id ?? state.snapshot?.profile.id,
+  );
+  const profilePlaybackSettings = useAuthStore(
+    (state) => state.snapshot?.profile.settings.playback,
+  );
+  const subscriptionIds = useAuthStore(
+    (state) => state.snapshot?.subscriptions.map((item) => item.id) ?? [],
+  );
+  const subscriptionSignature = subscriptionIds.join(":");
   const queueSignature = useAuthStore((state) =>
     state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
   );
@@ -136,6 +149,25 @@ function RuntimeBinder() {
     syncRuntime.updateRevision(revision);
     if (revision > 0) void queryClient.invalidateQueries();
   }, [revision]);
+
+  useEffect(() => {
+    if (!profilePlaybackSettings) return;
+    void setSkipDurations(
+      profilePlaybackSettings.skipBackwardSeconds,
+      profilePlaybackSettings.skipForwardSeconds,
+    );
+  }, [
+    profilePlaybackSettings?.skipBackwardSeconds,
+    profilePlaybackSettings?.skipForwardSeconds,
+    setSkipDurations,
+  ]);
+
+  useEffect(() => {
+    if (!credentials || !profileId || subscriptionIds.length === 0) return;
+    void warmEpisodeCache(profileId, subscriptionIds, (podcastId) =>
+      api.episodes(credentials.serverUrl, credentials.token, podcastId),
+    );
+  }, [credentials, profileId, subscriptionSignature]);
 
   useEffect(() => {
     void playbackController.syncNativeQueue(
