@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../api/client";
 import { Icon } from "../app/Icon";
+import { takeOverBrowserPlayback } from "./device-handoff";
 import { player, usePlayer } from "./local-player";
 import "../styles/device-picker.css";
 
@@ -71,13 +72,20 @@ export function PlaybackDevicePicker({
     setError(null);
     try {
       if (device.current) {
-        if (state.remote) await player.takeOverPlayback();
+        if (state.remote) {
+          await takeOverBrowserPlayback({
+            episodeId: episode.id,
+            positionMs: state.positionMs,
+            playbackState: state.playing ? "playing" : "paused",
+          });
+        }
       } else {
         const result = await api.playbackCommand({
           commandId: crypto.randomUUID(),
           action: "play-episode",
           episodeId: episode.id,
           positionMs: state.positionMs,
+          playbackState: state.playing ? "playing" : "paused",
           targetDeviceId: device.id,
         });
         if (result.status === "pending" && !result.delivered) {
