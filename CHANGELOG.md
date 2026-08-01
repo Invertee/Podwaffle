@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Removed the pre-application Android media-controller bootstrap that raced Expo
+  module initialization in release builds, registered the MediaSession directly
+  with MediaSessionService, and updated Android to 0.4.5 / native runtime 0.4-native-8.
 - Refreshed the web listening-statistics query after confirmed skip movements so
   skipped-forward totals update immediately without reloading the profile page.
 - Switched Android podcast downloads to DownloadManager's hidden-notification mode,
@@ -10,9 +13,6 @@
 - Matched the Android mini-player, Now Playing transport controls, system media
   actions and Cast glyphs to the web player's icon language; updated Android to
   version 0.4.4 and native runtime 0.4-native-7.
-- Registered the Android MediaSessionService with an in-process MediaController so
-  Media3 can publish the foreground media notification, lock-screen metadata and
-  system play/pause/seek controls during local playback.
 - Added the platform media-browser service declaration and updated the Android
   application and native runtime version to 0.4.3.
 - Restored the web Google Cast sender control and added Play on device pickers to
