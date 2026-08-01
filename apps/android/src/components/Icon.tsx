@@ -17,7 +17,6 @@ export type IconName =
   | "device"
   | "download"
   | "downloads"
-  | "forward"
   | "history"
   | "info"
   | "list"
@@ -30,7 +29,6 @@ export type IconName =
   | "progress"
   | "queue"
   | "queueNext"
-  | "rewind"
   | "stop"
   | "tiles"
   | "trash";
@@ -62,8 +60,14 @@ export function Icon({
       case "cast":
         return (
           <>
-            <Circle cx="4" cy="20" r="1.5" {...common} />
-            <Path d="M2.5 14.5a7 7 0 0 1 7 7M2.5 9.5a12 12 0 0 1 12 12M9 4h8a3 3 0 0 1 3 3v10" {...common} />
+            <Path
+              d="M4 18.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
+              {...common}
+            />
+            <Path
+              d="M2.5 14.5a7 7 0 0 1 7 7M2.5 9.5a12 12 0 0 1 12 12M9 4h8a3 3 0 0 1 3 3v10"
+              {...common}
+            />
           </>
         );
       case "check":
@@ -85,9 +89,8 @@ export function Icon({
       case "device":
         return (
           <>
-            <Rect x="4" y="3.5" width="16" height="11" rx="2" {...common} />
-            <Path d="M9 20h6M12 14.5V20" {...common} />
-            <Path d="m8 9 2.2 2.2L16 5.8" {...common} />
+            <Rect x="6" y="3" width="12" height="18" rx="2" {...common} />
+            <Path d="M10 17h4M12 7v6M9.5 10.5 12 13l2.5-2.5" {...common} />
           </>
         );
       case "download":
@@ -97,13 +100,6 @@ export function Icon({
             <Path d="M12 3v12" {...common} />
             <Path d="m7.5 10.5 4.5 4.5 4.5-4.5" {...common} />
             <Path d="M5 20h14" {...common} />
-          </>
-        );
-      case "forward":
-        return (
-          <>
-            <Path d="M5 8V4l4 4-4 4V8a7 7 0 1 0 2.1-5" {...common} />
-            <Path d="M11 10.2h1.7c1 0 1.8.8 1.8 1.8v0c0 1-.8 1.8-1.8 1.8H11v-3.6Zm0 3.6v2M17 10.2v5.6" {...common} />
           </>
         );
       case "history":
@@ -175,13 +171,6 @@ export function Icon({
           <>
             <Path d="M5 7h12M5 12h8M5 17h6" {...common} />
             <Path d="m16 14 3 3-3 3" {...common} />
-          </>
-        );
-      case "rewind":
-        return (
-          <>
-            <Path d="M19 8V4l-4 4 4 4V8a7 7 0 1 1-2.1-5" {...common} />
-            <Path d="M7 10.2h1.7c1 0 1.8.8 1.8 1.8v0c0 1-.8 1.8-1.8 1.8H7v-3.6Zm0 3.6v2M13 10.2v5.6" {...common} />
           </>
         );
       case "stop":
