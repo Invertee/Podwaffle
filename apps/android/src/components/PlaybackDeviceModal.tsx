@@ -100,6 +100,8 @@ export function PlaybackDeviceModal({
             action: "play-episode",
             episodeId: playback.episode.id,
             positionMs: playback.positionMs,
+            playbackState:
+              playback.state === "playing" ? "playing" : "paused",
             targetDeviceId: device.id,
           },
         );
