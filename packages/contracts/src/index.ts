@@ -17,6 +17,15 @@ export const commandSchema = z.object({
   expectedRevision: z.number().int().nonnegative().optional(),
 });
 
+export const playbackSettingsSchema = z.object({
+  skipBackwardSeconds: z.number().int().min(1).max(120),
+  skipForwardSeconds: z.number().int().min(1).max(120),
+});
+
+export const profileSettingsUpdateSchema = commandSchema.extend({
+  playback: playbackSettingsSchema,
+});
+
 export const revokeDeviceSchema = commandSchema;
 
 export const subscribeSchema = commandSchema.extend({
@@ -82,6 +91,7 @@ export const playbackCommandSchema = z.object({
   offsetMs: z.number().int().positive().optional(),
   episodeId: z.uuid().optional(),
   targetDeviceId: z.uuid().optional(),
+  playbackState: z.enum(["playing", "paused"]).optional(),
 });
 
 export const castConfirmedStateSchema = z.object({
@@ -207,6 +217,7 @@ export type ServerMessage = z.infer<typeof serverMessageSchema>;
 export type PlaybackCommand = z.infer<typeof playbackCommandSchema>;
 export type PlaybackCommandAction = z.infer<typeof playbackCommandActionSchema>;
 export type CastConfirmedState = z.infer<typeof castConfirmedStateSchema>;
+export type PlaybackSettings = z.infer<typeof playbackSettingsSchema>;
 
 export interface ApiErrorBody {
   error: {
@@ -238,11 +249,15 @@ export interface Session {
   device: Device;
 }
 
+export interface ProfileSettings extends Record<string, unknown> {
+  playback?: PlaybackSettings;
+}
+
 export interface Snapshot {
   revision: number;
   profile: PublicProfile & {
     timezone: string;
-    settings: Record<string, unknown>;
+    settings: ProfileSettings;
   };
   devices: Device[];
   subscriptions: Subscription[];
@@ -281,6 +296,7 @@ export interface Episode {
   firstDiscoveredAt: string;
   durationMs: number | null;
   artworkUrl: string | null;
+  podcastArtworkUrl?: string | null;
   episodeUrl: string | null;
   positionMs: number;
   played: boolean;
