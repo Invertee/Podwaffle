@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Restored the web Google Cast sender control and added Play on device pickers to
+  both web and Android, with targeted live handoff between profile clients.
+- Added target-device playback commands and separated local command confirmation
+  from Cast receiver confirmation so local transfers no longer require Cast state.
 - Hardened Android Cast startup by using CAF's configured media-route button,
   restored public lock-screen media controls and metadata, and improved
   notification refreshes across player and metadata changes.
