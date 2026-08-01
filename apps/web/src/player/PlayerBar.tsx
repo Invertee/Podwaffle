@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../app/Icon";
+import { useSyncStore } from "../stores/sync";
 import { PlaybackDevicePicker } from "./PlaybackDevicePicker";
 import { player, usePlayer } from "./local-player";
 
@@ -18,6 +19,13 @@ export function PlayerBar({
 }) {
   const queryClient = useQueryClient();
   const state = usePlayer();
+  const remotePlayback = useSyncStore((store) => store.snapshot?.playback ?? null);
+  const [remotePositionMs, setRemotePositionMs] = useState<number | null>(null);
+  const remoteClock = useRef({
+    episodeId: "",
+    lastPositionMs: 0,
+    zeroSamples: 0,
+  });
   const [info, setInfo] = useState(false);
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const episode = state.episode;
@@ -28,6 +36,72 @@ export function PlayerBar({
     "stopping",
   ].includes(state.castStatus);
   useEffect(() => player.start(), []);
+
+  useEffect(() => {
+    if (
+      !state.remote ||
+      !remotePlayback?.episode ||
+      remotePlayback.state === "stopped"
+    ) {
+      setRemotePositionMs(null);
+      return;
+    }
+
+    const episodeId = remotePlayback.episode.id;
+    const sameEpisode = remoteClock.current.episodeId === episodeId;
+    let anchorPositionMs = remotePlayback.positionMs;
+    if (
+      sameEpisode &&
+      anchorPositionMs === 0 &&
+      remoteClock.current.lastPositionMs > 5_000
+    ) {
+      remoteClock.current.zeroSamples += 1;
+      if (remoteClock.current.zeroSamples < 2) {
+        anchorPositionMs = remoteClock.current.lastPositionMs;
+      }
+    } else {
+      remoteClock.current.zeroSamples = 0;
+    }
+
+    remoteClock.current.episodeId = episodeId;
+    remoteClock.current.lastPositionMs = anchorPositionMs;
+    const startedAt = Date.now();
+    const durationMs =
+      remotePlayback.durationMs ?? remotePlayback.episode.durationMs ?? 0;
+
+    const update = () => {
+      const elapsedMs =
+        remotePlayback.state === "playing"
+          ? (Date.now() - startedAt) * remotePlayback.playbackRate
+          : 0;
+      const next = Math.max(
+        0,
+        Math.min(durationMs || Number.MAX_SAFE_INTEGER, anchorPositionMs + elapsedMs),
+      );
+      remoteClock.current.lastPositionMs = next;
+      setRemotePositionMs(next);
+    };
+
+    update();
+    const timer = window.setInterval(update, 500);
+    return () => window.clearInterval(timer);
+  }, [
+    state.remote,
+    remotePlayback?.episode?.id,
+    remotePlayback?.positionMs,
+    remotePlayback?.durationMs,
+    remotePlayback?.state,
+    remotePlayback?.playbackRate,
+  ]);
+
+  const displayDurationMs =
+    state.remote && remotePlayback?.episode
+      ? (remotePlayback.durationMs ?? remotePlayback.episode.durationMs ?? state.durationMs)
+      : state.durationMs;
+  const displayPositionMs =
+    state.remote && remotePositionMs !== null
+      ? remotePositionMs
+      : state.positionMs;
 
   async function skipAndRefreshStats(
     seconds: number,
@@ -104,17 +178,17 @@ export function PlayerBar({
             </button>
           </div>
           <div className="timeline">
-            <span>{time(state.positionMs)}</span>
+            <span>{time(displayPositionMs)}</span>
             <input
               aria-label="Episode progress"
               type="range"
               min={0}
-              max={Math.max(1, state.durationMs)}
-              value={Math.min(state.positionMs, state.durationMs || 1)}
+              max={Math.max(1, displayDurationMs)}
+              value={Math.min(displayPositionMs, displayDurationMs || 1)}
               disabled={!episode}
               onChange={(event) => void player.seek(Number(event.target.value))}
             />
-            <span>−{time(state.durationMs - state.positionMs)}</span>
+            <span>−{time(displayDurationMs - displayPositionMs)}</span>
           </div>
         </div>
         <div className="player-tools">
@@ -245,7 +319,7 @@ export function PlayerBar({
               {episode.publishedAt
                 ? new Date(episode.publishedAt).toLocaleDateString()
                 : ""}{" "}
-              · {time(state.durationMs)}
+              · {time(displayDurationMs)}
             </p>
             <div className="show-notes">{notes(episode.descriptionHtml)}</div>
             {episode.episodeUrl && (
