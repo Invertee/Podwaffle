@@ -178,10 +178,10 @@ class PodwaffleMediaService : MediaSessionService() {
             .setSeekForwardIncrementMs(DEFAULT_SKIP_FORWARD_MS)
             .build()
             .also { player ->
-            player.setHandleAudioBecomingNoisy(true)
-            player.setPauseAtEndOfMediaItems(true)
-            player.addListener(localPlayerListener)
-        }
+                player.setHandleAudioBecomingNoisy(true)
+                player.setPauseAtEndOfMediaItems(true)
+                player.addListener(localPlayerListener)
+            }
         localPlayer = local
         activePlayer = local
 
@@ -197,7 +197,9 @@ class PodwaffleMediaService : MediaSessionService() {
             .setMediaButtonPreferences(mediaButtons)
             .setCustomLayout(mediaButtons)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
-        mediaSession = sessionBuilder.build()
+        val session = sessionBuilder.build()
+        mediaSession = session
+        addSession(session)
 
         try {
             val context = CastContext.getSharedInstance(this)
@@ -462,14 +464,7 @@ class PodwaffleMediaService : MediaSessionService() {
     }
 
     private fun refreshSystemNotification() {
-        // Media3 normally detects player changes itself. Explicitly asking for
-        // an update also covers metadata and player swaps that happen while the
-        // React Native activity is not in the foreground.
-        runCatching {
-            MediaSessionService::class.java
-                .getMethod("triggerNotificationUpdate")
-                .invoke(this)
-        }
+        runCatching { triggerNotificationUpdate() }
     }
 
     fun notifyCastStateChanged() {
@@ -689,7 +684,8 @@ class PodwaffleMediaService : MediaSessionService() {
         positionNotifier = object : Runnable {
             override fun run() {
                 val player = activePlayer
-                if (player != null &&
+                if (
+                    player != null &&
                     (player.isPlaying || player.playbackState == Player.STATE_BUFFERING)
                 ) {
                     notifyPositionChanged()
