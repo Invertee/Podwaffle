@@ -195,7 +195,6 @@ class PodwaffleMediaService : MediaSessionService() {
         val mediaButtons = notificationButtons()
         val sessionBuilder = MediaSession.Builder(this, local)
             .setMediaButtonPreferences(mediaButtons)
-            .setCustomLayout(mediaButtons)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         val session = sessionBuilder.build()
         mediaSession = session
@@ -669,12 +668,14 @@ class PodwaffleMediaService : MediaSessionService() {
                 .setDisplayName("Back 15 seconds")
                 .setIconResId(R.drawable.ic_podwaffle_replay_15)
                 .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+                .setSlots(intArrayOf(CommandButton.SLOT_BACK))
                 .setExtras(backExtras)
                 .build(),
             CommandButton.Builder()
                 .setDisplayName("Forward 30 seconds")
                 .setIconResId(R.drawable.ic_podwaffle_forward_30)
                 .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+                .setSlots(intArrayOf(CommandButton.SLOT_FORWARD))
                 .setExtras(forwardExtras)
                 .build(),
         )
