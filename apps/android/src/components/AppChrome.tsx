@@ -24,7 +24,6 @@ const navigation: Array<{
   { label: "Podcasts", href: "/", path: "/", icon: "podcasts" },
   { label: "Progress", href: "/in-progress", path: "/in-progress", icon: "progress" },
   { label: "Discover", href: "/discover", path: "/discover", icon: "discover" },
-  { label: "Downloads", href: "/downloads", path: "/downloads", icon: "downloads" },
   { label: "Profile", href: "/profile", path: "/profile", icon: "profile" },
 ];
 
