@@ -7,6 +7,7 @@ import type {
   Subscription,
 } from "@podwaffle/contracts";
 import { api } from "../api/client";
+import { updateProfilePlaybackSettings } from "../api/profile-settings";
 import { useProfileSync } from "../api/use-profile-sync";
 import { useSyncStore } from "../stores/sync";
 import { player } from "../player/local-player";
@@ -124,12 +125,25 @@ export function Dashboard({ session }: { session: Session }) {
     "today" | "7d" | "30d" | "year" | "all"
   >("30d");
   const skipSettingsKey = `podwaffle-skip-settings:${session.profile.id}`;
+  const profilePlaybackSettings = snapshot?.profile.settings.playback;
   const [skipBackwardSeconds, setSkipBackwardSeconds] = useState(() =>
+    profilePlaybackSettings?.skipBackwardSeconds ??
     skipSetting(skipSettingsKey, "backward", 15),
   );
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(() =>
+    profilePlaybackSettings?.skipForwardSeconds ??
     skipSetting(skipSettingsKey, "forward", 30),
   );
+
+  useEffect(() => {
+    if (!profilePlaybackSettings) return;
+    setSkipBackwardSeconds(profilePlaybackSettings.skipBackwardSeconds);
+    setSkipForwardSeconds(profilePlaybackSettings.skipForwardSeconds);
+  }, [
+    profilePlaybackSettings?.skipBackwardSeconds,
+    profilePlaybackSettings?.skipForwardSeconds,
+  ]);
+
   useEffect(() => {
     player.setSkipDurations(skipBackwardSeconds, skipForwardSeconds);
     localStorage.setItem(
@@ -140,6 +154,15 @@ export function Dashboard({ session }: { session: Session }) {
       }),
     );
   }, [skipBackwardSeconds, skipForwardSeconds, skipSettingsKey]);
+
+  async function saveSkipSettings(): Promise<void> {
+    await updateProfilePlaybackSettings(
+      { skipBackwardSeconds, skipForwardSeconds },
+      revision,
+    );
+    const nextSnapshot = await api.snapshot();
+    useSyncStore.getState().setSnapshot(nextSnapshot);
+  }
 
   const subscriptions = useQuery({
     queryKey: ["subscriptions"],
@@ -550,7 +573,7 @@ export function Dashboard({ session }: { session: Session }) {
                   <p className="eyebrow">Playback</p>
                   <h2>Skip intervals</h2>
                 </div>
-                <span>Used by player controls and keyboard shortcuts.</span>
+                <span>Synced across every client on this profile.</span>
               </div>
               <div className="skip-settings-fields">
                 <label>
@@ -567,6 +590,7 @@ export function Dashboard({ session }: { session: Session }) {
                           skipValue(event.target.value, 15),
                         )
                       }
+                      onBlur={() => void saveSkipSettings()}
                     />
                     seconds
                   </span>
@@ -583,6 +607,7 @@ export function Dashboard({ session }: { session: Session }) {
                       onChange={(event) =>
                         setSkipForwardSeconds(skipValue(event.target.value, 30))
                       }
+                      onBlur={() => void saveSkipSettings()}
                     />
                     seconds
                   </span>
