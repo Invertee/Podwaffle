@@ -22,6 +22,7 @@ import { log } from "./logging.js";
 import { openApiDocument } from "./api/openapi.js";
 import { createCatalogRouter } from "./api/catalog.js";
 import { createPlaybackRouter } from "./api/playback.js";
+import { createProfileRouter } from "./api/profile.js";
 
 export const BUILD_VERSION = process.env.PODWAFFLE_VERSION ?? "0.1.0";
 export const API_VERSION = "v1" as const;
@@ -309,6 +310,7 @@ export function createApp(dependencies: AppDependencies): Express {
     }
   });
 
+  authenticated.use(createProfileRouter(database, sync));
   authenticated.use(createCatalogRouter(database, sync, config));
   authenticated.use(createPlaybackRouter(database, sync, webSockets));
   api.use(authenticated);
