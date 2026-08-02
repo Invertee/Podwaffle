@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +18,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -85,6 +92,7 @@ function SeekBar({
 
 export default function NowPlayingScreen() {
   const router = useRouter();
+  const { height } = useWindowDimensions();
   const { cast, castStatus, toggleCast } = useCastAction();
   const presentation = usePlaybackPresentation();
   const media = presentation.media;
@@ -93,7 +101,7 @@ export default function NowPlayingScreen() {
   const backward = useAuthStore((state) => state.skipBackwardSeconds);
   const forward = useAuthStore((state) => state.skipForwardSeconds);
   const [infoOpen, setInfoOpen] = useState(false);
-  const dragY = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(height)).current;
 
   const episode = useQuery({
     queryKey: ["android-now-playing-episode", media?.episodeId],
@@ -101,6 +109,22 @@ export default function NowPlayingScreen() {
       api.episode(credentials!.serverUrl, credentials!.token, media!.episodeId!),
     enabled: Boolean(credentials && media?.episodeId),
   });
+
+  useEffect(() => {
+    Animated.timing(dragY, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [dragY]);
+
+  const collapsePlayer = useCallback(() => {
+    Animated.timing(dragY, {
+      toValue: height + 80,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(() => router.back());
+  }, [dragY, height, router]);
 
   const panResponder = useMemo(
     () =>
@@ -112,11 +136,7 @@ export default function NowPlayingScreen() {
         },
         onPanResponderRelease: (_event, gesture) => {
           if (gesture.dy > 90 || gesture.vy > 0.7) {
-            Animated.timing(dragY, {
-              toValue: 700,
-              duration: 180,
-              useNativeDriver: true,
-            }).start(() => router.back());
+            collapsePlayer();
             return;
           }
           Animated.spring(dragY, {
@@ -131,7 +151,7 @@ export default function NowPlayingScreen() {
           }).start();
         },
       }),
-    [dragY, router],
+    [collapsePlayer, dragY],
   );
 
   async function togglePlay() {
@@ -182,7 +202,7 @@ export default function NowPlayingScreen() {
               <HeaderButton
                 icon="back"
                 label="Collapse now playing"
-                onPress={() => router.back()}
+                onPress={collapsePlayer}
               />
               <View style={styles.headerCopy}>
                 <Text style={styles.headerEyebrow}>
@@ -403,7 +423,13 @@ function Transport({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: {
+    flex: 1,
+    backgroundColor: colors.bgPrimary,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    overflow: "hidden",
+  },
   scroll: { flex: 1 },
   content: {
     paddingHorizontal: spacing.lg,
