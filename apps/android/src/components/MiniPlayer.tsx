@@ -1,20 +1,21 @@
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  PanResponder,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 
 import { playbackController } from "../playback/controller";
 import { usePlaybackPresentation } from "../playback/presentation";
+import { useAuthStore } from "../stores/auth";
 import {
   colors,
-  fontSizes,
-  fontWeights,
   MINI_PLAYER_HEIGHT,
+  radii,
   spacing,
 } from "../styles/tokens";
 import { Icon } from "./Icon";
@@ -23,103 +24,131 @@ import { PlaybackDeviceModal } from "./PlaybackDeviceModal";
 export function MiniPlayer() {
   const router = useRouter();
   const playback = usePlaybackPresentation();
+  const snapshot = useAuthStore((state) => state.snapshot);
   const media = playback.media;
   const enabled = playback.hasMedia;
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
 
+  const activeEpisode =
+    snapshot?.playback?.episode?.id === media?.episodeId
+      ? snapshot.playback.episode
+      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
+  const artworkUrl =
+    activeEpisode?.podcastArtworkUrl ?? media?.artworkUrl ?? activeEpisode?.artworkUrl ?? null;
   const progress =
     media?.durationMs && media.durationMs > 0
       ? Math.max(0, Math.min(1, media.positionMs / media.durationMs))
       : 0;
 
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          enabled && gesture.dy < -8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderRelease: (_event, gesture) => {
+          if (enabled && (gesture.dy < -28 || gesture.vy < -0.35)) {
+            router.push("/now-playing");
+          }
+        },
+      }),
+    [enabled, router],
+  );
+
   return (
     <>
-      <View style={styles.container}>
+      <View style={styles.container} {...panResponder.panHandlers}>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
-        <Pressable
-          style={({ pressed }) => [
-            styles.openArea,
-            pressed && enabled && styles.pressed,
-          ]}
-          disabled={!enabled}
-          onPress={() => router.push("/now-playing")}
-          accessibilityRole="button"
-          accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
-        >
-          <View style={styles.copy}>
-            <Text style={styles.title} numberOfLines={1}>
-              {media?.title ?? "Nothing playing"}
-            </Text>
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {playback.remote
-                ? `${media?.podcastTitle ?? "Podcast"} · playing on ${playback.ownerDeviceName}`
-                : media?.source === "cast" && media.cast
-                  ? `Casting to ${media.cast.deviceName}`
-                  : media?.source === "download"
-                    ? `${media.podcastTitle ?? "Podcast"} · Offline`
-                    : media?.podcastTitle ?? "Choose an episode"}
-            </Text>
-          </View>
-        </Pressable>
 
-        <ChromeControl
-          icon="previous"
-          label="Skip backward"
-          disabled={!enabled}
-          onPress={() => playbackController.skipBackward()}
-        />
-        <Pressable
-          style={({ pressed }) => [
-            styles.control,
-            styles.play,
-            !enabled && styles.disabled,
-            pressed && enabled && styles.pressed,
-          ]}
-          disabled={!enabled}
-          onPress={() =>
-            void (playback.isPlaying
-              ? playbackController.pause()
-              : playbackController.play())
-          }
-          accessibilityRole="button"
-          accessibilityLabel={playback.isPlaying ? "Pause" : "Play"}
-        >
-          {media?.playbackStatus === "buffering" ? (
-            <ActivityIndicator size="small" color={colors.textOnAccent} />
-          ) : (
-            <Icon
-              name={playback.isPlaying ? "pause" : "play"}
-              size={17}
-              color={colors.textOnAccent}
-            />
-          )}
-        </Pressable>
-        <ChromeControl
-          icon="next"
-          label="Skip forward"
-          disabled={!enabled}
-          onPress={() => playbackController.skipForward()}
-        />
-        {enabled ? (
+        <View style={styles.sideSlot}>
           <Pressable
             style={({ pressed }) => [
-              styles.transfer,
-              playback.remote && styles.transferActive,
-              pressed && styles.pressed,
+              styles.artworkButton,
+              !enabled && styles.disabled,
+              pressed && enabled && styles.pressed,
             ]}
-            onPress={() => setDevicePickerOpen(true)}
+            disabled={!enabled}
+            onPress={() => router.push("/now-playing")}
             accessibilityRole="button"
-            accessibilityLabel="Choose playback device"
+            accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
           >
-            <Icon
-              name="device"
-              size={20}
-              color={playback.remote ? colors.accent : colors.textSecondary}
-            />
+            {artworkUrl ? (
+              <Image
+                source={{ uri: artworkUrl }}
+                style={styles.artwork}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={styles.artworkFallback}>
+                <Icon name="podcasts" size={22} color={colors.textMuted} />
+              </View>
+            )}
           </Pressable>
-        ) : null}
+        </View>
+
+        <View style={styles.controls}>
+          <ChromeControl
+            icon="previous"
+            label="Skip backward"
+            disabled={!enabled}
+            onPress={() => playbackController.skipBackward()}
+          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.control,
+              styles.play,
+              !enabled && styles.disabled,
+              pressed && enabled && styles.pressed,
+            ]}
+            disabled={!enabled}
+            onPress={() =>
+              void (playback.isPlaying
+                ? playbackController.pause()
+                : playbackController.play())
+            }
+            accessibilityRole="button"
+            accessibilityLabel={playback.isPlaying ? "Pause" : "Play"}
+          >
+            {media?.playbackStatus === "buffering" ? (
+              <ActivityIndicator size="small" color={colors.textOnAccent} />
+            ) : (
+              <Icon
+                name={playback.isPlaying ? "pause" : "play"}
+                size={18}
+                color={colors.textOnAccent}
+              />
+            )}
+          </Pressable>
+          <ChromeControl
+            icon="next"
+            label="Skip forward"
+            disabled={!enabled}
+            onPress={() => playbackController.skipForward()}
+          />
+        </View>
+
+        <View style={styles.sideSlot}>
+          {enabled ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.transfer,
+                playback.remote && styles.transferActive,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => setDevicePickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Choose playback device"
+            >
+              <Icon
+                name="device"
+                size={21}
+                color={playback.remote ? colors.accent : colors.textSecondary}
+              />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
       <PlaybackDeviceModal
         visible={devicePickerOpen}
@@ -152,7 +181,7 @@ function ChromeControl({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Icon name={icon} size={20} color={colors.textPrimary} />
+      <Icon name={icon} size={22} color={colors.textPrimary} />
     </Pressable>
   );
 }
@@ -164,51 +193,62 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.sm,
-    gap: 2,
   },
   progressTrack: {
     position: "absolute",
-    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
     height: 2,
     backgroundColor: colors.bgElevated,
   },
   progressFill: { height: 2, backgroundColor: colors.accent },
-  openArea: {
+  sideSlot: {
+    width: 56,
+    height: MINI_PLAYER_HEIGHT - 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  artworkButton: {
+    width: 50,
+    height: 50,
+    borderRadius: radii.md,
+    overflow: "hidden",
+    backgroundColor: colors.bgElevated,
+  },
+  artwork: { width: "100%", height: "100%" },
+  artworkFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgElevated,
+  },
+  controls: {
     flex: 1,
     minWidth: 0,
+    height: MINI_PLAYER_HEIGHT - 2,
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: spacing.xs,
-  },
-  copy: { minWidth: 0 },
-  title: {
-    color: colors.textPrimary,
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.semibold,
-  },
-  subtitle: {
-    color: colors.textSecondary,
-    fontSize: fontSizes.xs,
-    marginTop: 2,
+    gap: spacing.sm,
   },
   control: {
-    width: 34,
-    height: 36,
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 18,
+    borderRadius: 20,
   },
-  play: { width: 38, height: 38, backgroundColor: colors.accent },
+  play: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent },
   transfer: {
-    width: 34,
-    height: 36,
+    width: 42,
+    height: 42,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 18,
+    borderRadius: 21,
     backgroundColor: colors.accentDim,
   },
-  transferActive: { backgroundColor: colors.accentDim },
+  transferActive: { borderWidth: 1, borderColor: colors.accent },
   disabled: { opacity: 0.3 },
   pressed: { opacity: 0.65 },
 });
