@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.4.9",
+  version: "0.4.10",
   orientation: "portrait",
   icon: sharedPodwaffleIcon,
   scheme: "podwaffle",
@@ -20,10 +20,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "13",
+    buildNumber: "14",
   },
   android: {
-    versionCode: 13,
+    versionCode: 14,
     adaptiveIcon: {
       foregroundImage: sharedPodwaffleIcon,
       backgroundColor: "#0D1B2A",
@@ -49,6 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-router",
     "expo-asset",
     "expo-secure-store",
+    "./plugins/with-podwaffle-cast-volume.js",
     [
       "expo-build-properties",
       {
@@ -73,7 +74,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    nativeRuntimeVersion: "0.4-native-12",
+    nativeRuntimeVersion: "0.4-native-13",
     apiMinVersion: 1,
   },
 });
