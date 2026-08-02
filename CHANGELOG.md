@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Disabled Android Auto service discovery after the first integration could stall
+  the normal Android UI during startup; retained the implementation for an isolated
+  rework and updated Android to 0.4.8 / versionCode 12 / native runtime 0.4-native-11.
 - Added Android Auto media browsing with profile podcast tiles, compact episode
   lists, local playback and shared queue actions; kept Cast and episode-detail
   actions out of the car interface, added a cached offline catalogue, and updated
