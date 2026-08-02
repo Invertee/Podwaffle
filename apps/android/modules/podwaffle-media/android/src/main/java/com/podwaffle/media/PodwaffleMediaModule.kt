@@ -60,7 +60,7 @@ class PodwaffleMediaModule : Module() {
 
         AsyncFunction("configure") { input: Map<String, Any?> ->
             val configuration = NativeConfiguration.fromMap(input)
-            NativeConfigurationStore.current = configuration
+            NativeConfigurationPersistence.save(context, configuration)
             skipBackwardMs = configuration.skipBackwardMs
             skipForwardMs = configuration.skipForwardMs
             withServiceOnMain { service ->
@@ -69,6 +69,11 @@ class PodwaffleMediaModule : Module() {
                     maxStorageBytes = configuration.maxDownloadStorageBytes,
                 )
             }
+            true
+        }
+
+        AsyncFunction("clearConfiguration") {
+            NativeConfigurationPersistence.clear(context)
             true
         }
 
