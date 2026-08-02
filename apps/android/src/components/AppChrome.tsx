@@ -31,9 +31,8 @@ export function useChromeHeight(): number {
   const bottom = useSafeAreaInsets().bottom;
   const authenticated = useAuthStore((state) => state.status === "authenticated");
   const pathname = usePathname();
-  return authenticated && pathname !== "/now-playing"
-    ? APP_CHROME_HEIGHT + bottom
-    : 0;
+  if (!authenticated) return 0;
+  return (pathname === "/now-playing" ? TAB_BAR_HEIGHT : APP_CHROME_HEIGHT) + bottom;
 }
 
 export function AppChrome() {
@@ -41,17 +40,28 @@ export function AppChrome() {
   const router = useRouter();
   const pathname = usePathname();
   const authenticated = useAuthStore((state) => state.status === "authenticated");
+  const playerExpanded = pathname === "/now-playing";
 
-  if (!authenticated || pathname === "/now-playing") return null;
+  if (!authenticated) return null;
 
   return (
-    <View style={[styles.chrome, { paddingBottom: insets.bottom }]}>
-      <MiniPlayer />
+    <View
+      style={[
+        styles.chrome,
+        {
+          paddingBottom: insets.bottom,
+          minHeight: playerExpanded ? TAB_BAR_HEIGHT : APP_CHROME_HEIGHT,
+        },
+      ]}
+    >
+      {!playerExpanded ? <MiniPlayer /> : null}
       <View style={styles.navigation}>
         {navigation.map((item) => {
           const active =
             item.path === "/"
-              ? pathname === "/" || pathname.startsWith("/podcast/")
+              ? pathname === "/" ||
+                pathname.startsWith("/podcast/") ||
+                pathname === "/now-playing"
               : pathname === item.path;
           return (
             <Pressable
@@ -85,7 +95,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: APP_CHROME_HEIGHT,
     backgroundColor: colors.playerBg,
     borderTopWidth: 1,
     borderTopColor: colors.playerBorder,
