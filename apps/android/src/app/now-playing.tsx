@@ -103,6 +103,7 @@ export default function NowPlayingScreen() {
   const forward = useAuthStore((state) => state.skipForwardSeconds);
   const [infoOpen, setInfoOpen] = useState(false);
   const dragY = useRef(new Animated.Value(height)).current;
+  const scrollOffsetY = useRef(0);
 
   const episode = useQuery({
     queryKey: ["android-now-playing-episode", media?.episodeId],
@@ -131,7 +132,13 @@ export default function NowPlayingScreen() {
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gesture) =>
-          gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+          scrollOffsetY.current <= 4 &&
+          gesture.dy > 8 &&
+          Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          scrollOffsetY.current <= 4 &&
+          gesture.dy > 8 &&
+          Math.abs(gesture.dy) > Math.abs(gesture.dx),
         onPanResponderMove: (_event, gesture) => {
           dragY.setValue(Math.max(0, gesture.dy));
         },
@@ -197,13 +204,18 @@ export default function NowPlayingScreen() {
     <>
       <Animated.View
         style={[styles.container, { transform: [{ translateY: dragY }] }]}
+        {...panResponder.panHandlers}
       >
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
+          onScroll={(event) => {
+            scrollOffsetY.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
         >
-          <View style={styles.dragArea} {...panResponder.panHandlers}>
+          <View style={styles.dragArea}>
             <View style={styles.dragHandle} />
             <View style={styles.header}>
               <HeaderButton
