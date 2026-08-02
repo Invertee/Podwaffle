@@ -77,7 +77,7 @@ export function MiniPlayer() {
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
 
-        <View style={styles.sideSlot}>
+        <View style={styles.sideSlot} pointerEvents="box-none">
           <Pressable
             style={({ pressed }) => [
               styles.artworkButton,
@@ -104,7 +104,7 @@ export function MiniPlayer() {
           </Pressable>
         </View>
 
-        <View style={styles.controls}>
+        <View style={styles.controls} pointerEvents="box-none">
           <ChromeControl
             icon="previous"
             label="Skip backward"
@@ -145,7 +145,7 @@ export function MiniPlayer() {
           />
         </View>
 
-        <View style={styles.sideSlot}>
+        <View style={styles.sideSlot} pointerEvents="box-none">
           {enabled ? (
             <Pressable
               style={({ pressed }) => [
