@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.DefaultMediaItemConverter
 import androidx.media3.cast.SessionAvailabilityListener
@@ -18,10 +19,15 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONArray
 
 /**
@@ -65,6 +71,12 @@ class PodwaffleMediaService : MediaSessionService() {
     companion object {
         private const val DEFAULT_SKIP_BACK_MS = 15_000L
         private const val DEFAULT_SKIP_FORWARD_MS = 30_000L
+        private const val CAST_VOLUME_STEP = 0.05f
+        private const val ACTION_SKIP_BACK = "com.podwaffle.media.SKIP_BACK"
+        private const val ACTION_SKIP_FORWARD = "com.podwaffle.media.SKIP_FORWARD"
+
+        private val skipBackCommand = SessionCommand(ACTION_SKIP_BACK, Bundle.EMPTY)
+        private val skipForwardCommand = SessionCommand(ACTION_SKIP_FORWARD, Bundle.EMPTY)
 
         var instance: PodwaffleMediaService? = null
             private set
@@ -76,6 +88,27 @@ class PodwaffleMediaService : MediaSessionService() {
                 instance?.notifyStateChanged()
                 instance?.notifyCastStateChanged()
             }
+
+        /**
+         * Routes foreground hardware volume keys to the active Cast receiver.
+         * Returning false lets Android handle the phone's normal media volume.
+         */
+        @JvmStatic
+        fun handleVolumeKey(keyCode: Int): Boolean {
+            val service = instance ?: return false
+            val state = service.getCastState()
+            if (state["connected"] != true) return false
+            val delta = when (keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> CAST_VOLUME_STEP
+                KeyEvent.KEYCODE_VOLUME_DOWN -> -CAST_VOLUME_STEP
+                else -> return false
+            }
+            @Suppress("UNCHECKED_CAST")
+            val session = state["session"] as? Map<String, Any?>
+            val current = (session?.get("volume") as? Number)?.toFloat() ?: 0.5f
+            service.setCastVolume((current + delta).coerceIn(0f, 1f))
+            return true
+        }
     }
 
     private val localPlayerListener: Player.Listener by lazy {
@@ -84,6 +117,64 @@ class PodwaffleMediaService : MediaSessionService() {
 
     private val castPlayerListener: Player.Listener by lazy {
         createPlayerListener { castPlayer }
+    }
+
+    private val mediaSessionCallback = object : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val builder = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            if (!session.isMediaNotificationController(controller)) return builder.build()
+
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+                .buildUpon()
+                .add(skipBackCommand)
+                .add(skipForwardCommand)
+                .build()
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                .buildUpon()
+                // Keep the notification as transport controls rather than a
+                // second seek UI. The two explicit commands below still seek.
+                .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
+                .remove(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_NEXT)
+                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_BACK)
+                .remove(Player.COMMAND_SEEK_FORWARD)
+                .build()
+            val buttons = notificationButtons()
+            return builder
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommands)
+                .setCustomLayout(buttons)
+                .setMediaButtonPreferences(buttons)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            val configuration = NativeConfigurationStore.current
+            val offsetMs = when (customCommand.customAction) {
+                ACTION_SKIP_BACK -> -(
+                    configuration?.skipBackwardMs ?: DEFAULT_SKIP_BACK_MS
+                )
+                ACTION_SKIP_FORWARD ->
+                    configuration?.skipForwardMs ?: DEFAULT_SKIP_FORWARD_MS
+                else -> return Futures.immediateFuture(
+                    SessionResult(SessionError.ERROR_NOT_SUPPORTED),
+                )
+            }
+            skipBy(offsetMs)
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
     }
 
     private fun createPlayerListener(owner: () -> Player?): Player.Listener =
@@ -168,14 +259,19 @@ class PodwaffleMediaService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        val persistedConfiguration = NativeConfigurationPersistence.load(this)
         NotificationHelper.createNotificationChannels(this)
         downloadStore = PodwaffleDownloadStore(this) { name, payload ->
             eventEmitter?.invoke(name, payload)
         }
 
         val local = ExoPlayer.Builder(this)
-            .setSeekBackIncrementMs(DEFAULT_SKIP_BACK_MS)
-            .setSeekForwardIncrementMs(DEFAULT_SKIP_FORWARD_MS)
+            .setSeekBackIncrementMs(
+                persistedConfiguration?.skipBackwardMs ?: DEFAULT_SKIP_BACK_MS,
+            )
+            .setSeekForwardIncrementMs(
+                persistedConfiguration?.skipForwardMs ?: DEFAULT_SKIP_FORWARD_MS,
+            )
             .build()
             .also { player ->
                 player.setHandleAudioBecomingNoisy(true)
@@ -194,6 +290,8 @@ class PodwaffleMediaService : MediaSessionService() {
 
         val mediaButtons = notificationButtons()
         val sessionBuilder = MediaSession.Builder(this, local)
+            .setCallback(mediaSessionCallback)
+            .setCustomLayout(mediaButtons)
             .setMediaButtonPreferences(mediaButtons)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         val session = sessionBuilder.build()
@@ -656,30 +754,18 @@ class PodwaffleMediaService : MediaSessionService() {
         )
     }
 
-    private fun notificationButtons(): List<CommandButton> {
-        val backExtras = Bundle().apply {
-            putInt(DefaultMediaNotificationProvider.COMMAND_KEY_COMPACT_VIEW_INDEX, 0)
-        }
-        val forwardExtras = Bundle().apply {
-            putInt(DefaultMediaNotificationProvider.COMMAND_KEY_COMPACT_VIEW_INDEX, 2)
-        }
-        return listOf(
-            CommandButton.Builder()
-                .setDisplayName("Back 15 seconds")
-                .setIconResId(R.drawable.ic_podwaffle_replay_15)
-                .setPlayerCommand(Player.COMMAND_SEEK_BACK)
-                .setSlots(CommandButton.SLOT_BACK)
-                .setExtras(backExtras)
-                .build(),
-            CommandButton.Builder()
-                .setDisplayName("Forward 30 seconds")
-                .setIconResId(R.drawable.ic_podwaffle_forward_30)
-                .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
-                .setSlots(CommandButton.SLOT_FORWARD)
-                .setExtras(forwardExtras)
-                .build(),
-        )
-    }
+    private fun notificationButtons(): List<CommandButton> = listOf(
+        CommandButton.Builder(CommandButton.ICON_SKIP_BACK)
+            .setDisplayName("Skip back")
+            .setSessionCommand(skipBackCommand)
+            .setSlots(CommandButton.SLOT_BACK)
+            .build(),
+        CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD)
+            .setDisplayName("Skip forward")
+            .setSessionCommand(skipForwardCommand)
+            .setSlots(CommandButton.SLOT_FORWARD)
+            .build(),
+    )
 
     private fun startPositionUpdates() {
         positionNotifier = object : Runnable {
