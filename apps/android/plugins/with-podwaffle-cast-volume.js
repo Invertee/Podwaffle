@@ -169,8 +169,58 @@ function withAutomaticQueueDownloads(config) {
   }]);
 }
 
+function withAndroidAutoQueueDownloads(config) {
+  return withDangerousMod(config, ["android", async (mod) => {
+    const servicePath = path.join(
+      mod.modRequest.projectRoot,
+      "modules",
+      "podwaffle-media",
+      "android",
+      "src",
+      "main",
+      "java",
+      "com",
+      "podwaffle",
+      "media",
+      "PodwaffleAutoMediaService.kt",
+    );
+    let source = fs.readFileSync(servicePath, "utf8");
+    if (source.includes("Automatically cache Android Auto queue additions")) {
+      return mod;
+    }
+
+    const marker = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
+        if (media.isEmpty()) return false
+        PodwaffleMediaService.instance?.setQueue(`;
+    if (!source.includes(marker)) {
+      throw new Error("Could not locate the Android Auto queue update.");
+    }
+
+    const replacement = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
+        if (media.isEmpty()) return false
+        // Automatically cache Android Auto queue additions using the same
+        // idempotent DownloadManager store as the phone queue.
+        val store = requireDownloadStore()
+        items.mapNotNull(EpisodeMedia::fromMediaItem).forEach { queued ->
+            if (
+                queued.enclosureUrl.isNotBlank() &&
+                store.completedPath(queued.episodeId) == null
+            ) {
+                runCatching { store.add(queued.toMap(), "automatic") }
+            }
+        }
+        PodwaffleMediaService.instance?.setQueue(`;
+
+    source = source.replace(marker, replacement);
+    fs.writeFileSync(servicePath, source);
+    return mod;
+  }]);
+}
+
 module.exports = function withPodwaffleMediaControls(config) {
-  return withAutomaticQueueDownloads(
-    withBluetoothSkipKeys(withCastVolumeKeys(config)),
+  return withAndroidAutoQueueDownloads(
+    withAutomaticQueueDownloads(
+      withBluetoothSkipKeys(withCastVolumeKeys(config)),
+    ),
   );
 };
