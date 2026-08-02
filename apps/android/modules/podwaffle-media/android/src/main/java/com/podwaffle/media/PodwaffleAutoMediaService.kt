@@ -3,6 +3,7 @@ package com.podwaffle.media
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.cast.CastPlayer
@@ -13,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
@@ -44,8 +46,17 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
     private var librarySession: MediaLibrarySession? = null
     private var catalog: PodwaffleAutoCatalog? = null
     private var downloadStore: PodwaffleDownloadStore? = null
+    private var playbackReporter: PodwaffleAutoPlaybackReporter? = null
     private var attachAttempts = 0
     private var attachPlayerRunnable: Runnable? = null
+    private var stateReportRunnable: Runnable? = null
+    private var periodicStateRunnable: Runnable? = null
+
+    private val playbackListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            scheduleStateReport(STATE_CHANGE_DEBOUNCE_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -53,6 +64,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         NotificationHelper.createNotificationChannels(this)
         catalog = PodwaffleAutoCatalog(this)
         downloadStore = PodwaffleDownloadStore(this) { _, _ -> }
+        playbackReporter = PodwaffleAutoPlaybackReporter(this)
 
         val fallback = ExoPlayer.Builder(this)
             .setSeekBackIncrementMs(
@@ -141,12 +153,77 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         if (player is CastPlayer) return false
         if (playbackPlayer === player) return true
 
+        playbackPlayer?.removeListener(playbackListener)
         librarySession?.setPlayer(player)
         playbackPlayer = player
+        player.addListener(playbackListener)
         fallbackPlayer?.release()
         fallbackPlayer = null
         stopForeground(STOP_FOREGROUND_REMOVE)
+        startPeriodicStateReporting()
+        scheduleStateReport(0L)
         return true
+    }
+
+    private fun scheduleStateReport(delayMs: Long) {
+        stateReportRunnable?.let(mainHandler::removeCallbacks)
+        stateReportRunnable = Runnable {
+            stateReportRunnable = null
+            reportCurrentState()
+        }.also { runnable -> mainHandler.postDelayed(runnable, delayMs.coerceAtLeast(0L)) }
+    }
+
+    private fun startPeriodicStateReporting() {
+        periodicStateRunnable?.let(mainHandler::removeCallbacks)
+        periodicStateRunnable = object : Runnable {
+            override fun run() {
+                reportCurrentState()
+                mainHandler.postDelayed(this, STATE_REPORT_INTERVAL_MS)
+            }
+        }.also { runnable -> mainHandler.postDelayed(runnable, STATE_REPORT_INTERVAL_MS) }
+    }
+
+    private fun reportCurrentState() {
+        // The regular React Native controller already reports richer playback
+        // state and telemetry whenever its bridge is attached.
+        if (PodwaffleMediaService.eventEmitter != null) return
+        val player = playbackPlayer ?: return
+        val episodeId = player.currentMediaItem?.mediaId ?: return
+        val durationMs = player.duration.takeIf { it > 0L && it != C.TIME_UNSET }
+        val state = when {
+            player.playbackState == Player.STATE_ENDED -> "stopped"
+            player.isPlaying ||
+                (player.playWhenReady &&
+                    (player.playbackState == Player.STATE_READY ||
+                        player.playbackState == Player.STATE_BUFFERING)) -> "playing"
+            else -> "paused"
+        }
+        playbackReporter?.report(
+            episodeId = episodeId,
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+            durationMs = durationMs,
+            state = state,
+            playbackRate = player.playbackParameters.speed,
+        )
+    }
+
+    private fun styledRootParams(params: LibraryParams?): LibraryParams {
+        val extras = Bundle(params?.extras ?: Bundle.EMPTY).apply {
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+            )
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+            )
+        }
+        return LibraryParams.Builder()
+            .setRecent(params?.isRecent ?: false)
+            .setOffline(params?.isOffline ?: false)
+            .setSuggested(params?.isSuggested ?: false)
+            .setExtras(extras)
+            .build()
     }
 
     private fun createSessionActivity(): PendingIntent? {
@@ -162,7 +239,12 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
 
     override fun onDestroy() {
         attachPlayerRunnable?.let(mainHandler::removeCallbacks)
+        stateReportRunnable?.let(mainHandler::removeCallbacks)
+        periodicStateRunnable?.let(mainHandler::removeCallbacks)
         attachPlayerRunnable = null
+        stateReportRunnable = null
+        periodicStateRunnable = null
+        playbackPlayer?.removeListener(playbackListener)
         playbackPlayer = null
         serviceControllerFuture?.cancel(true)
         serviceControllerFuture = null
@@ -174,6 +256,8 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         fallbackPlayer = null
         downloadStore?.release()
         downloadStore = null
+        playbackReporter?.close()
+        playbackReporter = null
         catalog?.close()
         catalog = null
         super.onDestroy()
@@ -185,7 +269,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(
-            LibraryResult.ofItem(requireCatalog().rootItem(), params),
+            LibraryResult.ofItem(requireCatalog().rootItem(), styledRootParams(params)),
         )
 
         override fun onGetChildren(
@@ -286,15 +370,18 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {
             if (!attachMainPlayerIfAvailable()) {
-                return Futures.immediateFuture(mutableListOf())
+                return Futures.immediateFuture(mutableListOf<MediaItem>())
             }
             val resolved = requireCatalog().resolvePlayable(
                 mediaItems,
                 requireDownloadStore(),
             )
-            if (resolved.isEmpty()) return Futures.immediateFuture(mutableListOf())
+            if (resolved.isEmpty()) {
+                return Futures.immediateFuture(mutableListOf<MediaItem>())
+            }
 
-            val player = playbackPlayer ?: return Futures.immediateFuture(mutableListOf())
+            val player = playbackPlayer
+                ?: return Futures.immediateFuture(mutableListOf<MediaItem>())
             val combined = buildList {
                 for (index in 0 until player.mediaItemCount) {
                     add(player.getMediaItemAt(index))
@@ -316,16 +403,20 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
 
             // The shared player queue was updated directly above. Returning an
             // empty list prevents MediaSession from appending the same items twice.
-            return Futures.immediateFuture(mutableListOf())
+            return Futures.immediateFuture(mutableListOf<MediaItem>())
         }
     }
 
     private fun requireCatalog(): PodwaffleAutoCatalog =
         requireNotNull(catalog) { "Android Auto catalogue is unavailable" }
 
-    private fun requireDownloadStore(): PodwaffleDownloadStore =
-        PodwaffleMediaService.instance?.getDownloadStore()
+    private fun requireDownloadStore(): PodwaffleDownloadStore {
+        val serviceStore = runCatching {
+            PodwaffleMediaService.instance?.getDownloadStore()
+        }.getOrNull()
+        return serviceStore
             ?: requireNotNull(downloadStore) { "Download store is unavailable" }
+    }
 
     private companion object {
         const val AUTO_SESSION_ID = "podwaffle-android-auto"
@@ -334,5 +425,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
         const val ATTACH_RETRY_MS = 100L
         const val MAX_ATTACH_ATTEMPTS = 100
+        const val STATE_CHANGE_DEBOUNCE_MS = 250L
+        const val STATE_REPORT_INTERVAL_MS = 10_000L
     }
 }
