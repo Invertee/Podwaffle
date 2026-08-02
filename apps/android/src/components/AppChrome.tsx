@@ -30,7 +30,10 @@ const navigation: Array<{
 export function useChromeHeight(): number {
   const bottom = useSafeAreaInsets().bottom;
   const authenticated = useAuthStore((state) => state.status === "authenticated");
-  return authenticated ? APP_CHROME_HEIGHT + bottom : 0;
+  const pathname = usePathname();
+  return authenticated && pathname !== "/now-playing"
+    ? APP_CHROME_HEIGHT + bottom
+    : 0;
 }
 
 export function AppChrome() {
@@ -39,7 +42,7 @@ export function AppChrome() {
   const pathname = usePathname();
   const authenticated = useAuthStore((state) => state.status === "authenticated");
 
-  if (!authenticated) return null;
+  if (!authenticated || pathname === "/now-playing") return null;
 
   return (
     <View style={[styles.chrome, { paddingBottom: insets.bottom }]}>
