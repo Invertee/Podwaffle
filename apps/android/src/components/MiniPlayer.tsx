@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   PanResponder,
@@ -41,6 +41,10 @@ export function MiniPlayer() {
       ? Math.max(0, Math.min(1, media.positionMs / media.durationMs))
       : 0;
 
+  const openNowPlaying = useCallback(() => {
+    if (enabled) router.push("/now-playing");
+  }, [enabled, router]);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -48,17 +52,28 @@ export function MiniPlayer() {
           enabled && gesture.dy < -8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
         onPanResponderRelease: (_event, gesture) => {
           if (enabled && (gesture.dy < -28 || gesture.vy < -0.35)) {
-            router.push("/now-playing");
+            openNowPlaying();
           }
         },
       }),
-    [enabled, router],
+    [enabled, openNowPlaying],
   );
 
   return (
     <>
       <View style={styles.container} {...panResponder.panHandlers}>
-        <View style={styles.progressTrack}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.openSurface,
+            pressed && enabled && styles.surfacePressed,
+          ]}
+          disabled={!enabled}
+          onPress={openNowPlaying}
+          accessibilityRole="button"
+          accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
+        />
+
+        <View style={styles.progressTrack} pointerEvents="none">
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
 
@@ -70,7 +85,7 @@ export function MiniPlayer() {
               pressed && enabled && styles.pressed,
             ]}
             disabled={!enabled}
-            onPress={() => router.push("/now-playing")}
+            onPress={openNowPlaying}
             accessibilityRole="button"
             accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
           >
@@ -195,6 +210,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: spacing.sm,
   },
+  openSurface: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  surfacePressed: { backgroundColor: colors.bgOverlay },
   progressTrack: {
     position: "absolute",
     bottom: 0,
