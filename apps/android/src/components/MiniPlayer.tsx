@@ -29,9 +29,10 @@ export function MiniPlayer() {
   const enabled = playback.hasMedia;
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
 
+  const playbackEpisode = snapshot?.playback?.episode;
   const activeEpisode =
-    snapshot?.playback?.episode?.id === media?.episodeId
-      ? snapshot.playback.episode
+    playbackEpisode?.id === media?.episodeId
+      ? playbackEpisode
       : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
   const artworkUrl =
     activeEpisode?.podcastArtworkUrl ?? media?.artworkUrl ?? activeEpisode?.artworkUrl ?? null;
