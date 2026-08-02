@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added explicit Android notification/lock-screen skip-back and skip-forward
+  actions using profile-synchronised intervals, removed direct timeline seeking
+  from the notification controller where System UI permits, routed foreground
+  Android volume keys to an active Cast receiver, limited web volume controls to
+  Cast playback, updated Android to 0.4.10 / versionCode 14 / native runtime
+  0.4-native-13, and bumped the Home Assistant web add-on to 5.0.17.
+- Stabilised the Android startup subscriptions selector to stop a render loop
+  that blocked keyboard focus and press handlers, and updated Android to 0.4.9 /
+  versionCode 13 / native runtime 0.4-native-12.
 - Disabled Android Auto service discovery after the first integration could stall
   the normal Android UI during startup; retained the implementation for an isolated
   rework and updated Android to 0.4.8 / versionCode 12 / native runtime 0.4-native-11.
