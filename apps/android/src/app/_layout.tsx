@@ -226,7 +226,13 @@ function AppNavigator() {
           <Stack.Screen name="join" />
           <Stack.Screen name="podcast/[podcastId]" />
           <Stack.Screen name="queue" />
-          <Stack.Screen name="now-playing" />
+          <Stack.Screen
+            name="now-playing"
+            options={{
+              presentation: "transparentModal",
+              contentStyle: { backgroundColor: "transparent" },
+            }}
+          />
         </Stack>
       </View>
       <AppChrome />
