@@ -98,6 +98,7 @@ export default function NowPlayingScreen() {
   const media = presentation.media;
   const isPlaying = presentation.isPlaying;
   const credentials = useAuthStore((state) => state.credentials);
+  const snapshot = useAuthStore((state) => state.snapshot);
   const backward = useAuthStore((state) => state.skipBackwardSeconds);
   const forward = useAuthStore((state) => state.skipForwardSeconds);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -177,13 +178,18 @@ export default function NowPlayingScreen() {
     }
   }
 
+  const cachedEpisode =
+    snapshot?.playback?.episode?.id === media?.episodeId
+      ? snapshot.playback.episode
+      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
+  const infoEpisode = episode.data ?? cachedEpisode ?? null;
   const remaining = Math.max(
     0,
     (media?.durationMs ?? 0) - (media?.positionMs ?? 0),
   );
   const buffering = media?.playbackStatus === "buffering";
   const artworkUrl =
-    episode.data?.podcastArtworkUrl ?? media?.artworkUrl ?? episode.data?.artworkUrl ?? null;
+    infoEpisode?.podcastArtworkUrl ?? media?.artworkUrl ?? infoEpisode?.artworkUrl ?? null;
   const castBusy = castStatus === "connecting" || castStatus === "stopping";
 
   return (
@@ -357,11 +363,6 @@ export default function NowPlayingScreen() {
             )}
           </View>
 
-          {episode.error ? (
-            <Text style={styles.error}>
-              Episode information could not be loaded.
-            </Text>
-          ) : null}
           {media?.lastError ? (
             <Text style={styles.error}>
               {media.lastError.code}: {media.lastError.message}
@@ -372,8 +373,8 @@ export default function NowPlayingScreen() {
 
       <EpisodeInfoModal
         visible={infoOpen}
-        episode={episode.data ?? null}
-        loading={episode.isLoading}
+        episode={infoEpisode}
+        loading={episode.isLoading && !infoEpisode}
         onClose={() => setInfoOpen(false)}
       />
     </>
