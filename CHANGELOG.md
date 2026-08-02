@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Restored Android Auto discovery through an isolated Media3 library service,
+  re-enabled the Podcasts-to-Episodes browse tree with play/resume and queue
+  actions, automatically cached episodes queued from the car, and updated Android
+  to 0.4.13 / versionCode 17 / native runtime 0.4-native-16.
+- Automatically cached Android queue episodes using the existing bounded download
+  store and updated Android to 0.4.12 / versionCode 16 / native runtime
+  0.4-native-15.
+- Remapped Bluetooth, headset and car previous/next media keys to the configured
+  backward/forward skip intervals and updated Android to 0.4.11 / versionCode 15 /
+  native runtime 0.4-native-14.
 - Added explicit Android notification/lock-screen skip-back and skip-forward
   actions using profile-synchronised intervals, removed direct timeline seeking
   from the notification controller where System UI permits, routed foreground
