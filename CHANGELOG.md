@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Updated Android to 0.4.6 / versionCode 10 / native runtime 0.4-native-9,
+  aligned the launcher and splash artwork with the shared web/Home Assistant
+  Podwaffle icon, and bumped the Home Assistant web add-on to 5.0.16.
+- Bounded and compacted Android's offline episode cache, migrated away from the
+  unbounded v1 cache, pruned oldest entries before writes, and prevented a local
+  SQLite cache failure from hiding a successfully fetched episode list.
+- Added profile-synchronised skip intervals across web and Android, repaired
+  targeted device handoff, and added remote-position dead reckoning in the web
+  player while preserving server state as the authoritative playback position.
+- Changed Android system media actions to seek backward/play-pause/seek forward,
+  used podcast artwork for system media metadata, removed the Downloads tab, and
+  warmed compact offline episode catalogues for subscribed podcasts.
 - Removed the pre-application Android media-controller bootstrap that raced Expo
   module initialization in release builds, registered the MediaSession directly
   with MediaSessionService, and updated Android to 0.4.5 / native runtime 0.4-native-8.
