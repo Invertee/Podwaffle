@@ -178,9 +178,10 @@ export default function NowPlayingScreen() {
     }
   }
 
+  const playbackEpisode = snapshot?.playback?.episode;
   const cachedEpisode =
-    snapshot?.playback?.episode?.id === media?.episodeId
-      ? snapshot.playback.episode
+    playbackEpisode?.id === media?.episodeId
+      ? playbackEpisode
       : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
   const infoEpisode = episode.data ?? cachedEpisode ?? null;
   const remaining = Math.max(
