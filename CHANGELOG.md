@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Redesigned the Android playback chrome with podcast artwork and centred controls,
+  added swipe-up expansion and swipe-down collapse for Now Playing, removed the
+  duplicate collapsed controls while expanded, added library Cast access and an
+  episode-information sheet, centred the Now Playing info/Cast actions, removed
+  the Now Playing download action, and updated Android to 0.4.14 / versionCode 18 /
+  native runtime 0.4-native-17.
 - Restored Android Auto discovery through an isolated Media3 library service,
   re-enabled the Podcasts-to-Episodes browse tree with play/resume and queue
   actions, automatically cached episodes queued from the car, and updated Android
