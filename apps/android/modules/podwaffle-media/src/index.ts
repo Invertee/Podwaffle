@@ -147,6 +147,7 @@ export type MediaEventName =
 
 interface PodwaffleNativeModule {
   configure(config: PodwaffleMediaConfig): Promise<void>;
+  clearConfiguration(): Promise<void>;
   bind(): Promise<NativePlaybackState>;
   getState(): Promise<NativePlaybackState>;
   setQueue(input: NativeQueueSnapshot): Promise<void>;
@@ -191,6 +192,9 @@ const nativeModule =
 export const PodwaffleMediaModule = {
   configure(config: PodwaffleMediaConfig): Promise<void> {
     return nativeModule.configure(config);
+  },
+  clearConfiguration(): Promise<void> {
+    return nativeModule.clearConfiguration();
   },
   bind(): Promise<NativePlaybackState> {
     return nativeModule.bind();
