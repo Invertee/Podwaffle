@@ -108,6 +108,7 @@ async function clearPersistedState(): Promise<void> {
   await Promise.all([
     SecureStore.deleteItemAsync(CREDENTIALS_KEY),
     AsyncStorage.removeItem(SNAPSHOT_KEY),
+    PodwaffleMediaModule.clearConfiguration().catch(() => undefined),
   ]);
 }
 
