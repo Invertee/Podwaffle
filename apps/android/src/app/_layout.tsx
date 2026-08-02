@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect } from "react";
 import { Alert, AppState, Linking, StyleSheet, View } from "react-native";
@@ -202,14 +202,17 @@ function RuntimeBinder() {
 
 function AppNavigator() {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
   const authenticated = useAuthStore((state) => state.status === "authenticated");
+  const playerExpanded = pathname === "/now-playing";
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View
         style={[
           styles.navigator,
-          authenticated && { paddingBottom: APP_CHROME_HEIGHT + insets.bottom },
+          authenticated &&
+            !playerExpanded && { paddingBottom: APP_CHROME_HEIGHT + insets.bottom },
         ]}
       >
         <Stack
