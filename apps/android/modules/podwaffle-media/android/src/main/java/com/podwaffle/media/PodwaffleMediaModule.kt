@@ -92,6 +92,17 @@ class PodwaffleMediaModule : Module() {
             val snapshot = QueueSnapshot.fromMap(input)
             withServiceOnMain { service ->
                 val store = service.getDownloadStore()
+                // Automatically cache every queued episode. DownloadManager.add()
+                // is idempotent for queued, active and completed items, while a
+                // storage or network failure must never block the queue update.
+                snapshot.items.forEach { media ->
+                    if (
+                        media.enclosureUrl.isNotBlank() &&
+                        store.completedPath(media.episodeId) == null
+                    ) {
+                        runCatching { store.add(media.toMap(), "automatic") }
+                    }
+                }
                 val enriched = snapshot.items.map { media ->
                     media.withDownloadPath(
                         store.completedPath(media.episodeId) ?: media.localDownloadPath,

@@ -175,6 +175,34 @@ class PodwaffleMediaService : MediaSessionService() {
             skipBy(offsetMs)
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
+
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent,
+        ): Boolean {
+            @Suppress("DEPRECATION")
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                ?: return false
+            val offsetMs = when (event.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                KeyEvent.KEYCODE_MEDIA_REWIND -> -(
+                    NativeConfigurationStore.current?.skipBackwardMs
+                        ?: DEFAULT_SKIP_BACK_MS
+                )
+                KeyEvent.KEYCODE_MEDIA_NEXT,
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ->
+                    NativeConfigurationStore.current?.skipForwardMs
+                        ?: DEFAULT_SKIP_FORWARD_MS
+                else -> return false
+            }
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                skipBy(offsetMs)
+            }
+            // Consume both key-down and key-up so Media3 cannot also navigate
+            // to the previous or next episode in the queue.
+            return true
+        }
     }
 
     private fun createPlayerListener(owner: () -> Player?): Player.Listener =

@@ -261,6 +261,17 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         }
         val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
         if (media.isEmpty()) return false
+        // Automatically cache Android Auto queue additions using the same
+        // idempotent DownloadManager store as the phone queue.
+        val store = requireDownloadStore()
+        items.mapNotNull(EpisodeMedia::fromMediaItem).forEach { queued ->
+            if (
+                queued.enclosureUrl.isNotBlank() &&
+                store.completedPath(queued.episodeId) == null
+            ) {
+                runCatching { store.add(queued.toMap(), "automatic") }
+            }
+        }
         PodwaffleMediaService.instance?.setQueue(
             local = media.map { it.toMediaItem(useDownload = true) },
             remote = media.map { it.toMediaItem(useDownload = false) },
