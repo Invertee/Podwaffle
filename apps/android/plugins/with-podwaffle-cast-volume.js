@@ -1,4 +1,6 @@
-const { withMainActivity } = require("expo/config-plugins");
+const fs = require("node:fs");
+const path = require("node:path");
+const { withDangerousMod, withMainActivity } = require("expo/config-plugins");
 
 function addImport(source, statement) {
   if (source.includes(statement)) return source;
@@ -18,7 +20,7 @@ function addImport(source, statement) {
   return `${source.slice(0, insertAt)}\n\n${statement}${source.slice(insertAt)}`;
 }
 
-module.exports = function withPodwaffleCastVolume(config) {
+function withCastVolumeKeys(config) {
   return withMainActivity(config, (mod) => {
     if (mod.modResults.language !== "kt") {
       throw new Error("Podwaffle expects a Kotlin MainActivity.");
@@ -56,4 +58,73 @@ module.exports = function withPodwaffleCastVolume(config) {
     mod.modResults.contents = source;
     return mod;
   });
+}
+
+function withBluetoothSkipKeys(config) {
+  return withDangerousMod(config, ["android", async (mod) => {
+    const servicePath = path.join(
+      mod.modRequest.projectRoot,
+      "modules",
+      "podwaffle-media",
+      "android",
+      "src",
+      "main",
+      "java",
+      "com",
+      "podwaffle",
+      "media",
+      "PodwaffleMediaService.kt",
+    );
+    let source = fs.readFileSync(servicePath, "utf8");
+    if (source.includes("override fun onMediaButtonEvent(")) return mod;
+
+    const marker = `        }
+    }
+
+    private fun createPlayerListener`;
+    if (!source.includes(marker)) {
+      throw new Error("Could not locate the Podwaffle MediaSession callback.");
+    }
+
+    const method = `        }
+
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent,
+        ): Boolean {
+            @Suppress("DEPRECATION")
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                ?: return false
+            val offsetMs = when (event.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                KeyEvent.KEYCODE_MEDIA_REWIND -> -(
+                    NativeConfigurationStore.current?.skipBackwardMs
+                        ?: DEFAULT_SKIP_BACK_MS
+                )
+                KeyEvent.KEYCODE_MEDIA_NEXT,
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ->
+                    NativeConfigurationStore.current?.skipForwardMs
+                        ?: DEFAULT_SKIP_FORWARD_MS
+                else -> return false
+            }
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                skipBy(offsetMs)
+            }
+            // Consume both key-down and key-up so Media3 cannot also navigate
+            // to the previous or next episode in the queue.
+            return true
+        }
+    }
+
+    private fun createPlayerListener`;
+
+    source = source.replace(marker, method);
+    fs.writeFileSync(servicePath, source);
+    return mod;
+  }]);
+}
+
+module.exports = function withPodwaffleMediaControls(config) {
+  return withBluetoothSkipKeys(withCastVolumeKeys(config));
 };
