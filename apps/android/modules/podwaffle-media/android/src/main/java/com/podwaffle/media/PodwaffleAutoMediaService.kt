@@ -1,46 +1,44 @@
 package com.podwaffle.media
 
 import android.app.PendingIntent
-import android.content.ComponentName
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.cast.CastPlayer
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import java.util.concurrent.Executor
 
 /**
  * Android Auto browse service.
  *
  * Android Auto supplies the driver-safe UI. This service only exposes the
- * Podcasts -> Episodes hierarchy and forwards playback to the existing
- * Podwaffle media service through a MediaController. No Cast, show notes, or
+ * Podcasts -> Episodes hierarchy and attaches its library session to the same
+ * native player owned by PodwaffleMediaService. No Cast chooser, show notes, or
  * phone-only actions are advertised to the car host.
  */
 @UnstableApi
 class PodwaffleAutoMediaService : MediaLibraryService() {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val mainExecutor = Executor { command -> mainHandler.post(command) }
 
     private var fallbackPlayer: ExoPlayer? = null
-    private var mediaController: MediaController? = null
-    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var playbackPlayer: Player? = null
     private var librarySession: MediaLibrarySession? = null
     private var catalog: PodwaffleAutoCatalog? = null
     private var downloadStore: PodwaffleDownloadStore? = null
+    private var attachAttempts = 0
+    private var attachPlayerRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -75,7 +73,8 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         notificationProvider.setSmallIcon(R.drawable.ic_podwaffle_notification)
         setMediaNotificationProvider(notificationProvider)
 
-        connectToPlaybackService()
+        startService(Intent(this, PodwaffleMediaService::class.java))
+        schedulePlayerAttachment()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -85,56 +84,41 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         session: MediaSession,
         startInForegroundRequired: Boolean,
     ) {
-        if (mediaController == null) {
+        if (playbackPlayer == null) {
             super.onUpdateNotification(session, startInForegroundRequired)
         }
-        // Once connected, PodwaffleMediaService owns playback and its foreground
-        // notification. This browse-only service deliberately avoids a duplicate.
+        // PodwaffleMediaService owns the foreground notification once the Auto
+        // library is attached to its player, preventing a duplicate media card.
     }
 
-    private fun connectToPlaybackService() {
-        val token = SessionToken(
-            this,
-            ComponentName(this, PodwaffleMediaService::class.java),
-        )
-        val future = MediaController.Builder(this, token).buildAsync()
-        controllerFuture = future
-        future.addListener(
-            {
-                runCatching { future.get() }
-                    .onSuccess(::attachController)
-            },
-            mainExecutor,
-        )
+    private fun schedulePlayerAttachment() {
+        attachPlayerRunnable?.let(mainHandler::removeCallbacks)
+        attachPlayerRunnable = object : Runnable {
+            override fun run() {
+                if (attachMainPlayerIfAvailable()) return
+                attachAttempts += 1
+                if (attachAttempts < MAX_ATTACH_ATTEMPTS) {
+                    mainHandler.postDelayed(this, ATTACH_RETRY_MS)
+                }
+            }
+        }.also(mainHandler::post)
     }
 
-    private fun attachController(controller: MediaController) {
-        if (mediaController != null) {
-            controller.release()
-            return
+    private fun attachMainPlayerIfAvailable(allowCastHandoff: Boolean = false): Boolean {
+        val service = PodwaffleMediaService.instance ?: return false
+        if (allowCastHandoff && service.getCastState()["connected"] == true) {
+            service.stopCast(true)
         }
-        val fallback = fallbackPlayer
-        val pendingItems = fallback?.let { player ->
-            List(player.mediaItemCount) { index -> player.getMediaItemAt(index) }
-        }.orEmpty()
-        val pendingIndex = fallback?.currentMediaItemIndex ?: 0
-        val pendingPosition = fallback?.currentPosition?.coerceAtLeast(0L) ?: 0L
-        val pendingPlayWhenReady = fallback?.playWhenReady == true
+        val player = service.getPlayer() ?: return false
+        if (player is CastPlayer) return false
+        if (playbackPlayer === player) return true
 
-        mediaController = controller
-        librarySession?.setPlayer(controller)
-
-        if (pendingItems.isNotEmpty()) {
-            val index = pendingIndex.coerceIn(0, pendingItems.lastIndex)
-            controller.setMediaItems(pendingItems, index, pendingPosition)
-            controller.prepare()
-            controller.playWhenReady = pendingPlayWhenReady
-            if (pendingPlayWhenReady) controller.play()
-        }
-
-        fallback?.release()
+        librarySession?.setPlayer(player)
+        playbackPlayer = player
+        fallbackPlayer?.release()
         fallbackPlayer = null
         stopForeground(STOP_FOREGROUND_REMOVE)
+        return true
     }
 
     private fun createSessionActivity(): PendingIntent? {
@@ -149,10 +133,9 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        controllerFuture?.cancel(true)
-        controllerFuture = null
-        mediaController?.release()
-        mediaController = null
+        attachPlayerRunnable?.let(mainHandler::removeCallbacks)
+        attachPlayerRunnable = null
+        playbackPlayer = null
         librarySession?.release()
         librarySession = null
         fallbackPlayer?.release()
@@ -203,6 +186,17 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            // Selecting an Auto episode means local phone playback. An existing
+            // Cast session is stopped rather than exposed through the car UI.
+            if (!attachMainPlayerIfAvailable(allowCastHandoff = true)) {
+                return Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(
+                        emptyList(),
+                        C.INDEX_UNSET,
+                        C.TIME_UNSET,
+                    ),
+                )
+            }
             val resolved = requireCatalog().resolvePlayable(
                 mediaItems,
                 requireDownloadStore(),
@@ -260,11 +254,14 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         requireNotNull(catalog) { "Android Auto catalogue is unavailable" }
 
     private fun requireDownloadStore(): PodwaffleDownloadStore =
-        requireNotNull(downloadStore) { "Download store is unavailable" }
+        PodwaffleMediaService.instance?.getDownloadStore()
+            ?: requireNotNull(downloadStore) { "Download store is unavailable" }
 
     private companion object {
         const val AUTO_FALLBACK_NOTIFICATION_ID = 1003
         const val DEFAULT_SKIP_BACK_MS = 15_000L
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
+        const val ATTACH_RETRY_MS = 100L
+        const val MAX_ATTACH_ATTEMPTS = 100
     }
 }
