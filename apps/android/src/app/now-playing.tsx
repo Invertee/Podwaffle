@@ -20,6 +20,7 @@ import { EpisodeInfoModal } from "../components/EpisodeInfoModal";
 import { Icon } from "../components/Icon";
 import { useCastAction } from "../hooks/useCastAction";
 import { playbackController } from "../playback/controller";
+import { usePlaybackPresentation } from "../playback/presentation";
 import { useAuthStore } from "../stores/auth";
 import {
   colors,
@@ -84,7 +85,8 @@ function SeekBar({
 
 export default function NowPlayingScreen() {
   const router = useRouter();
-  const { cast, castStatus, presentation, toggleCast } = useCastAction();
+  const { cast, castStatus, toggleCast } = useCastAction();
+  const presentation = usePlaybackPresentation();
   const media = presentation.media;
   const isPlaying = presentation.isPlaying;
   const credentials = useAuthStore((state) => state.credentials);
@@ -280,7 +282,7 @@ export default function NowPlayingScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.tool,
-                pressed && media?.episodeId && styles.pressed,
+                pressed && Boolean(media?.episodeId) && styles.pressed,
                 !media?.episodeId && styles.disabled,
               ]}
               disabled={!media?.episodeId}
