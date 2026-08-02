@@ -1,29 +1,31 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
 
+const sharedPodwaffleIcon = "../../podwaffle/icon.png";
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.4.5",
+  version: "0.4.6",
   orientation: "portrait",
-  icon: "./assets/icon.png",
+  icon: sharedPodwaffleIcon,
   scheme: "podwaffle",
   userInterfaceStyle: "dark",
   newArchEnabled: false,
   splash: {
-    image: "./assets/splash-icon.png",
+    image: sharedPodwaffleIcon,
     resizeMode: "contain",
     backgroundColor: "#0D1B2A",
   },
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "9",
+    buildNumber: "10",
   },
   android: {
-    versionCode: 9,
+    versionCode: 10,
     adaptiveIcon: {
-      foregroundImage: "./assets/adaptive-icon.png",
+      foregroundImage: sharedPodwaffleIcon,
       backgroundColor: "#0D1B2A",
     },
     package: "com.podwaffle.app",
@@ -60,7 +62,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-splash-screen",
       {
-        image: "./assets/splash-icon.png",
+        image: sharedPodwaffleIcon,
         imageWidth: 200,
         resizeMode: "contain",
         backgroundColor: "#0D1B2A",
@@ -71,7 +73,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    nativeRuntimeVersion: "0.4-native-8",
+    nativeRuntimeVersion: "0.4-native-9",
     apiMinVersion: 1,
   },
 });
