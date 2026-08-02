@@ -104,10 +104,11 @@ function RuntimeBinder() {
   const profilePlaybackSettings = useAuthStore(
     (state) => state.snapshot?.profile.settings.playback,
   );
-  const subscriptionIds = useAuthStore(
-    (state) => state.snapshot?.subscriptions.map((item) => item.id) ?? [],
+  const snapshotSubscriptions = useAuthStore(
+    (state) => state.snapshot?.subscriptions,
   );
-  const subscriptionSignature = subscriptionIds.join(":");
+  const subscriptionSignature =
+    snapshotSubscriptions?.map((item) => item.id).join(":") ?? "";
   const queueSignature = useAuthStore((state) =>
     state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
   );
@@ -163,9 +164,12 @@ function RuntimeBinder() {
   ]);
 
   useEffect(() => {
-    if (!credentials || !profileId || subscriptionIds.length === 0) return;
-    void warmEpisodeCache(profileId, subscriptionIds, (podcastId) =>
-      api.episodes(credentials.serverUrl, credentials.token, podcastId),
+    if (!credentials || !profileId || !snapshotSubscriptions?.length) return;
+    void warmEpisodeCache(
+      profileId,
+      snapshotSubscriptions.map((item) => item.id),
+      (podcastId) =>
+        api.episodes(credentials.serverUrl, credentials.token, podcastId),
     );
   }, [credentials, profileId, subscriptionSignature]);
 
