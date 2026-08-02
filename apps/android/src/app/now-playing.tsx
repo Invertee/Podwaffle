@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   type LayoutChangeEvent,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,13 +16,11 @@ import {
 } from "react-native";
 
 import { api } from "../api/client";
-import { DownloadAction } from "../components/DownloadAction";
+import { EpisodeInfoModal } from "../components/EpisodeInfoModal";
 import { Icon } from "../components/Icon";
+import { useCastAction } from "../hooks/useCastAction";
 import { playbackController } from "../playback/controller";
-import { usePlaybackPresentation } from "../playback/presentation";
 import { useAuthStore } from "../stores/auth";
-import { useNativeMediaStore } from "../stores/nativeMedia";
-import { usePlayerUiStore } from "../stores/playerUi";
 import {
   colors,
   fontSizes,
@@ -84,15 +84,14 @@ function SeekBar({
 
 export default function NowPlayingScreen() {
   const router = useRouter();
-  const presentation = usePlaybackPresentation();
+  const { cast, castStatus, presentation, toggleCast } = useCastAction();
   const media = presentation.media;
-  const cast = useNativeMediaStore((state) => state.castState);
   const isPlaying = presentation.isPlaying;
   const credentials = useAuthStore((state) => state.credentials);
   const backward = useAuthStore((state) => state.skipBackwardSeconds);
   const forward = useAuthStore((state) => state.skipForwardSeconds);
-  const castStatus = usePlayerUiStore((state) => state.castStatus);
-  const castError = usePlayerUiStore((state) => state.castError);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const dragY = useRef(new Animated.Value(0)).current;
 
   const episode = useQuery({
     queryKey: ["android-now-playing-episode", media?.episodeId],
@@ -100,6 +99,38 @@ export default function NowPlayingScreen() {
       api.episode(credentials!.serverUrl, credentials!.token, media!.episodeId!),
     enabled: Boolean(credentials && media?.episodeId),
   });
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderMove: (_event, gesture) => {
+          dragY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          if (gesture.dy > 90 || gesture.vy > 0.7) {
+            Animated.timing(dragY, {
+              toValue: 700,
+              duration: 180,
+              useNativeDriver: true,
+            }).start(() => router.back());
+            return;
+          }
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragY, router],
+  );
 
   async function togglePlay() {
     try {
@@ -113,13 +144,9 @@ export default function NowPlayingScreen() {
     }
   }
 
-  async function toggleCast() {
+  async function changeCast() {
     try {
-      if (presentation.remote) {
-        throw new Error("Move playback to this device before starting Cast.");
-      }
-      if (cast.connected) await playbackController.stopCasting(true);
-      else await playbackController.startCasting();
+      await toggleCast();
     } catch (error) {
       Alert.alert(
         "Google Cast",
@@ -133,160 +160,201 @@ export default function NowPlayingScreen() {
     (media?.durationMs ?? 0) - (media?.positionMs ?? 0),
   );
   const buffering = media?.playbackStatus === "buffering";
+  const artworkUrl =
+    episode.data?.podcastArtworkUrl ?? media?.artworkUrl ?? episode.data?.artworkUrl ?? null;
+  const castBusy = castStatus === "connecting" || castStatus === "stopping";
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.header}>
-        <HeaderButton
-          icon="back"
-          label="Back"
-          onPress={() => router.back()}
-        />
-        <View style={styles.headerCopy}>
-          <Text style={styles.headerEyebrow}>
-            {presentation.remote
-              ? "REMOTE PLAYBACK"
-              : cast.connected
-                ? "CASTING"
-                : media?.source === "download"
-                  ? "PLAYING OFFLINE"
-                  : "NOW PLAYING"}
-          </Text>
-          {presentation.remote ? (
-            <Text style={styles.headerDevice} numberOfLines={1}>
-              Playing on {presentation.ownerDeviceName}
+    <>
+      <Animated.View
+        style={[styles.container, { transform: [{ translateY: dragY }] }]}
+      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.dragArea} {...panResponder.panHandlers}>
+            <View style={styles.dragHandle} />
+            <View style={styles.header}>
+              <HeaderButton
+                icon="back"
+                label="Collapse now playing"
+                onPress={() => router.back()}
+              />
+              <View style={styles.headerCopy}>
+                <Text style={styles.headerEyebrow}>
+                  {presentation.remote
+                    ? "REMOTE PLAYBACK"
+                    : cast.connected
+                      ? "CASTING"
+                      : media?.source === "download"
+                        ? "PLAYING OFFLINE"
+                        : "NOW PLAYING"}
+                </Text>
+                {presentation.remote ? (
+                  <Text style={styles.headerDevice} numberOfLines={1}>
+                    Playing on {presentation.ownerDeviceName}
+                  </Text>
+                ) : cast.session ? (
+                  <Text style={styles.headerDevice} numberOfLines={1}>
+                    {cast.session.deviceName}
+                  </Text>
+                ) : null}
+              </View>
+              <HeaderButton
+                icon="queue"
+                label="Open queue"
+                onPress={() => router.push("/queue")}
+              />
+            </View>
+          </View>
+
+          <View style={styles.artworkFrame}>
+            {artworkUrl ? (
+              <Image
+                source={{ uri: artworkUrl }}
+                style={styles.artwork}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={styles.artworkFallback}>
+                <Text style={styles.artworkFallbackText}>PW</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.titles}>
+            <Text style={styles.episodeTitle} numberOfLines={3}>
+              {media?.title ?? "Nothing playing"}
             </Text>
-          ) : cast.session ? (
-            <Text style={styles.headerDevice} numberOfLines={1}>
-              {cast.session.deviceName}
+            <Text style={styles.podcastTitle} numberOfLines={1}>
+              {media?.podcastTitle ?? "Choose an episode from your library"}
+            </Text>
+          </View>
+
+          <View style={styles.progressSection}>
+            <SeekBar
+              positionMs={media?.positionMs ?? 0}
+              bufferedPositionMs={media?.bufferedPositionMs ?? 0}
+              durationMs={media?.durationMs ?? null}
+              onSeek={(position) => void playbackController.seekTo(position)}
+            />
+            <View style={styles.timestamps}>
+              <Text style={styles.timestamp}>{formatMs(media?.positionMs ?? 0)}</Text>
+              <Text style={styles.timestamp}>-{formatMs(remaining)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.controls}>
+            <Transport
+              icon="previous"
+              label={`Back ${backward} seconds`}
+              onPress={() => playbackController.skipBackward()}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
+              onPress={() => void togglePlay()}
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            >
+              {buffering ? (
+                <ActivityIndicator size="large" color={colors.textOnAccent} />
+              ) : (
+                <Icon
+                  name={isPlaying ? "pause" : "play"}
+                  size={30}
+                  color={colors.textOnAccent}
+                />
+              )}
+            </Pressable>
+            <Transport
+              icon="next"
+              label={`Forward ${forward} seconds`}
+              onPress={() => playbackController.skipForward()}
+            />
+          </View>
+
+          <View style={styles.tools}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.tool,
+                pressed && media?.episodeId && styles.pressed,
+                !media?.episodeId && styles.disabled,
+              ]}
+              disabled={!media?.episodeId}
+              onPress={() => setInfoOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Episode information"
+            >
+              <Icon name="info" size={21} color={colors.textSecondary} />
+              <Text style={styles.toolLabel}>Episode info</Text>
+            </Pressable>
+
+            {presentation.remote ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.tool,
+                  styles.toolActive,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => void playbackController.takeOverPlayback()}
+                accessibilityRole="button"
+                accessibilityLabel="Move playback to this device"
+              >
+                <Icon name="device" size={21} color={colors.accent} />
+                <Text style={[styles.toolLabel, styles.toolActiveText]}>Play here</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.tool,
+                  cast.connected && styles.toolActive,
+                  pressed && !castBusy && styles.pressed,
+                  castBusy && styles.disabled,
+                ]}
+                disabled={castBusy}
+                onPress={() => void changeCast()}
+                accessibilityRole="button"
+                accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
+              >
+                {castBusy ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : (
+                  <Icon
+                    name="cast"
+                    size={21}
+                    color={cast.connected ? colors.accent : colors.textSecondary}
+                  />
+                )}
+                <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
+                  {cast.connected ? "Stop Cast" : "Cast"}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {episode.error ? (
+            <Text style={styles.error}>
+              Episode information could not be loaded.
             </Text>
           ) : null}
-        </View>
-        <HeaderButton
-          icon="queue"
-          label="Open queue"
-          onPress={() => router.push("/queue")}
-        />
-      </View>
-
-      <View style={styles.artworkFrame}>
-        {media?.artworkUrl ? (
-          <Image
-            source={{ uri: media.artworkUrl }}
-            style={styles.artwork}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-          />
-        ) : (
-          <View style={styles.artworkFallback}>
-            <Text style={styles.artworkFallbackText}>PW</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.titles}>
-        <Text style={styles.episodeTitle} numberOfLines={3}>
-          {media?.title ?? "Nothing playing"}
-        </Text>
-        <Text style={styles.podcastTitle} numberOfLines={1}>
-          {media?.podcastTitle ?? "Choose an episode from your library"}
-        </Text>
-      </View>
-
-      <View style={styles.progressSection}>
-        <SeekBar
-          positionMs={media?.positionMs ?? 0}
-          bufferedPositionMs={media?.bufferedPositionMs ?? 0}
-          durationMs={media?.durationMs ?? null}
-          onSeek={(position) => void playbackController.seekTo(position)}
-        />
-        <View style={styles.timestamps}>
-          <Text style={styles.timestamp}>{formatMs(media?.positionMs ?? 0)}</Text>
-          <Text style={styles.timestamp}>-{formatMs(remaining)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.controls}>
-        <Transport
-          icon="previous"
-          label={`Back ${backward} seconds`}
-          onPress={() => playbackController.skipBackward()}
-        />
-        <Pressable
-          style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
-          onPress={() => void togglePlay()}
-          accessibilityRole="button"
-          accessibilityLabel={isPlaying ? "Pause" : "Play"}
-        >
-          {buffering ? (
-            <ActivityIndicator size="large" color={colors.textOnAccent} />
-          ) : (
-            <Icon
-              name={isPlaying ? "pause" : "play"}
-              size={30}
-              color={colors.textOnAccent}
-            />
-          )}
-        </Pressable>
-        <Transport
-          icon="next"
-          label={`Forward ${forward} seconds`}
-          onPress={() => playbackController.skipForward()}
-        />
-      </View>
-
-      <View style={styles.tools}>
-        {presentation.remote ? (
-          <Pressable
-            style={({ pressed }) => [styles.tool, styles.toolActive, pressed && styles.pressed]}
-            onPress={() => void playbackController.takeOverPlayback()}
-            accessibilityRole="button"
-            accessibilityLabel="Move playback to this device"
-          >
-            <Icon name="device" size={20} color={colors.accent} />
-            <Text style={[styles.toolLabel, styles.toolActiveText]}>Play here</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            style={({ pressed }) => [
-              styles.tool,
-              cast.connected && styles.toolActive,
-              pressed && styles.pressed,
-              castStatus === "connecting" && styles.disabled,
-            ]}
-            disabled={castStatus === "connecting"}
-            onPress={() => void toggleCast()}
-            accessibilityRole="button"
-            accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
-          >
-            {castStatus === "connecting" ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : (
-              <Icon
-                name="cast"
-                size={20}
-                color={cast.connected ? colors.accent : colors.textSecondary}
-              />
-            )}
-            <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
-              {cast.connected ? "Stop Cast" : "Cast"}
+          {media?.lastError ? (
+            <Text style={styles.error}>
+              {media.lastError.code}: {media.lastError.message}
             </Text>
-          </Pressable>
-        )}
-        {episode.data ? <DownloadAction episode={episode.data} /> : null}
-      </View>
+          ) : null}
+        </ScrollView>
+      </Animated.View>
 
-      {castError ? <Text style={styles.error}>{castError}</Text> : null}
-      {media?.lastError ? (
-        <Text style={styles.error}>
-          {media.lastError.code}: {media.lastError.message}
-        </Text>
-      ) : null}
-    </ScrollView>
+      <EpisodeInfoModal
+        visible={infoOpen}
+        episode={episode.data ?? null}
+        loading={episode.isLoading}
+        onClose={() => setInfoOpen(false)}
+      />
+    </>
   );
 }
 
@@ -334,11 +402,20 @@ function Transport({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
+  scroll: { flex: 1 },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.xl,
     gap: spacing.lg,
+  },
+  dragArea: { gap: spacing.xs },
+  dragHandle: {
+    width: 44,
+    height: 4,
+    alignSelf: "center",
+    borderRadius: 2,
+    backgroundColor: colors.textMuted,
   },
   header: {
     width: "100%",
@@ -363,9 +440,9 @@ const styles = StyleSheet.create({
   },
   headerDevice: { color: colors.accent, fontSize: fontSizes.xs, marginTop: 2 },
   artworkFrame: {
-    width: "50%",
+    width: "68%",
     aspectRatio: 1,
-    maxWidth: 220,
+    maxWidth: 320,
     alignSelf: "center",
     borderRadius: radii.xl,
     overflow: "hidden",
@@ -378,17 +455,19 @@ const styles = StyleSheet.create({
     fontSize: 64,
     fontWeight: fontWeights.bold,
   },
-  titles: { gap: spacing.xs },
+  titles: { gap: spacing.xs, alignItems: "center" },
   episodeTitle: {
     color: colors.textPrimary,
     fontSize: fontSizes.xxl,
     lineHeight: 30,
     fontWeight: fontWeights.bold,
+    textAlign: "center",
   },
   podcastTitle: {
     color: colors.accent,
     fontSize: fontSizes.md,
     fontWeight: fontWeights.medium,
+    textAlign: "center",
   },
   progressSection: { gap: spacing.xs },
   seekTouch: { height: 28, justifyContent: "center" },
@@ -447,12 +526,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: colors.accent,
   },
-  tools: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  tools: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
   tool: {
     minHeight: 46,
+    minWidth: 132,
     paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: spacing.sm,
     borderRadius: radii.full,
     borderWidth: 1,
@@ -471,6 +557,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239, 68, 68, 0.1)",
     padding: spacing.md,
     borderRadius: radii.md,
+    textAlign: "center",
   },
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.45 },
