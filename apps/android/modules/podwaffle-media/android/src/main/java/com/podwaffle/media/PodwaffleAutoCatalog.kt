@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
@@ -40,17 +41,30 @@ class PodwaffleAutoCatalog(private val context: Context) {
     )
     private val episodeMemory = ConcurrentHashMap<String, AutoEpisode>()
 
-    fun rootItem(): MediaItem = MediaItem.Builder()
-        .setMediaId(ROOT_ID)
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle("Podcasts")
-                .setDisplayTitle("Podcasts")
-                .setIsBrowsable(true)
-                .setIsPlayable(false)
-                .build(),
-        )
-        .build()
+    fun rootItem(): MediaItem {
+        val style = Bundle().apply {
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+            )
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+            )
+        }
+        return MediaItem.Builder()
+            .setMediaId(ROOT_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("Podcasts")
+                    .setDisplayTitle("Podcasts")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setExtras(style)
+                    .build(),
+            )
+            .build()
+    }
 
     fun children(
         parentId: String,
@@ -96,8 +110,11 @@ class PodwaffleAutoCatalog(private val context: Context) {
         if (item.mediaId == ROOT_ID || item.mediaId.startsWith(PODCAST_PREFIX)) {
             null
         } else {
-            episode(item.mediaId)?.toMediaItem(downloadStore)
-                ?: item.takeIf { it.localConfiguration != null }
+            // Android Auto normally sends the full item returned by browsing.
+            // Prefer it so playback selection never blocks the player thread on
+            // a network lookup. The memory/disk catalogue is the legacy fallback.
+            item.takeIf { it.localConfiguration != null }
+                ?: episode(item.mediaId)?.toMediaItem(downloadStore)
         }
     }
 
@@ -149,17 +166,18 @@ class PodwaffleAutoCatalog(private val context: Context) {
     private fun subscriptions(): List<AutoPodcast> {
         val fresh = runCatching {
             val response = requestJson("/api/v1/subscriptions")
-            val items = response.optJSONArray("subscriptions")
-                .toPodcasts()
-                .sortedBy { it.title.lowercase() }
+            val items = response.optJSONArray("subscriptions").toPodcasts()
             cache(PODCASTS_KEY, JSONArray().apply { items.forEach { put(it.toJson()) } })
+            pruneUnsubscribedEpisodeCaches(items.map(AutoPodcast::id).toSet())
             items
         }.getOrNull()
         return fresh ?: cachedArray(PODCASTS_KEY).toPodcasts()
     }
 
     private fun episodes(podcastId: String): List<AutoEpisode> {
-        val podcast = subscriptions().firstOrNull { it.id == podcastId }
+        val podcast = cachedArray(PODCASTS_KEY)
+            .toPodcasts()
+            .firstOrNull { it.id == podcastId }
         val key = episodesKey(podcastId)
         val fresh = runCatching {
             val response = requestJson("/api/v1/podcasts/$podcastId/episodes")
@@ -182,7 +200,10 @@ class PodwaffleAutoCatalog(private val context: Context) {
         val cached = preferences.all
             .asSequence()
             .filter { (key, _) -> key.startsWith(EPISODES_KEY_PREFIX) }
-            .mapNotNull { (_, raw) -> (raw as? String)?.let(::JSONArray) }
+            .mapNotNull { (_, raw) ->
+                val value = raw as? String ?: return@mapNotNull null
+                runCatching { JSONArray(value) }.getOrNull()
+            }
             .flatMap { array -> array.toEpisodes(null).asSequence() }
             .firstOrNull { it.id == episodeId }
         if (cached != null) {
@@ -234,12 +255,25 @@ class PodwaffleAutoCatalog(private val context: Context) {
     }
 
     private fun cache(key: String, value: JSONArray) {
-        preferences.edit().putString(key, value.toString()).apply()
+        runCatching {
+            preferences.edit().putString(key, value.toString()).apply()
+        }
     }
 
     private fun cachedArray(key: String): JSONArray = runCatching {
         JSONArray(preferences.getString(key, "[]") ?: "[]")
     }.getOrElse { JSONArray() }
+
+    private fun pruneUnsubscribedEpisodeCaches(activePodcastIds: Set<String>) {
+        val staleKeys = preferences.all.keys.filter { key ->
+            key.startsWith(EPISODES_KEY_PREFIX) &&
+                key.removePrefix(EPISODES_KEY_PREFIX) !in activePodcastIds
+        }
+        if (staleKeys.isEmpty()) return
+        preferences.edit().also { editor ->
+            staleKeys.forEach(editor::remove)
+        }.apply()
+    }
 
     private fun unavailableItem(mediaId: String): MediaItem = MediaItem.Builder()
         .setMediaId(mediaId.ifBlank { "podwaffle:auto:unavailable" })
@@ -271,10 +305,6 @@ class PodwaffleAutoCatalog(private val context: Context) {
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 20_000
 
-        fun podcastId(parentId: String): String? = parentId
-            .takeIf { it.startsWith(PODCAST_PREFIX) }
-            ?.removePrefix(PODCAST_PREFIX)
-
         fun clear(context: Context) {
             context.applicationContext
                 .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -293,20 +323,29 @@ private data class AutoPodcast(
     val author: String?,
     val artworkUrl: String?,
 ) {
-    fun toMediaItem(): MediaItem = MediaItem.Builder()
-        .setMediaId("podwaffle:auto:podcast:$id")
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(title)
-                .setDisplayTitle(title)
-                .setArtist(author)
-                .setSubtitle(author)
-                .setArtworkUri(artworkUrl?.let(Uri::parse))
-                .setIsBrowsable(true)
-                .setIsPlayable(false)
-                .build(),
-        )
-        .build()
+    fun toMediaItem(): MediaItem {
+        val style = Bundle().apply {
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+            )
+        }
+        return MediaItem.Builder()
+            .setMediaId("podwaffle:auto:podcast:$id")
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setDisplayTitle(title)
+                    .setArtist(author)
+                    .setSubtitle(author)
+                    .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setExtras(style)
+                    .build(),
+            )
+            .build()
+    }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
