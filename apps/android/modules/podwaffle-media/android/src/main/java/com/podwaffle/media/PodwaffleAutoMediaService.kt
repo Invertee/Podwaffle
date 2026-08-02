@@ -12,6 +12,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
@@ -20,6 +21,9 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -38,6 +42,11 @@ import java.util.concurrent.Executor
 class PodwaffleAutoMediaService : MediaLibraryService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mainExecutor = Executor { command -> mainHandler.post(command) }
+    private val addToQueueCommand = SessionCommand(COMMAND_ADD_TO_QUEUE, Bundle.EMPTY)
+    private val addToQueueButton = CommandButton.Builder(CommandButton.ICON_QUEUE_ADD)
+        .setDisplayName("Add to queue")
+        .setSessionCommand(addToQueueCommand)
+        .build()
 
     private var fallbackPlayer: ExoPlayer? = null
     private var playbackPlayer: Player? = null
@@ -83,6 +92,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         val callback = AutoLibraryCallback()
         val sessionBuilder = MediaLibrarySession.Builder(this, fallback, callback)
             .setId(AUTO_SESSION_ID)
+            .setCommandButtonsForMediaItems(listOf(addToQueueButton))
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         librarySession = sessionBuilder.build()
 
@@ -226,6 +236,40 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             .build()
     }
 
+    private fun withQueueCommand(item: MediaItem): MediaItem {
+        if (item.mediaMetadata.isPlayable != true) return item
+        return item.buildUpon()
+            .setMediaMetadata(
+                item.mediaMetadata.buildUpon()
+                    .setSupportedCommands(listOf(COMMAND_ADD_TO_QUEUE))
+                    .build(),
+            )
+            .build()
+    }
+
+    private fun enqueueResolvedItems(items: List<MediaItem>): Boolean {
+        if (items.isEmpty() || !attachMainPlayerIfAvailable()) return false
+        val player = playbackPlayer ?: return false
+        val combined = buildList {
+            for (index in 0 until player.mediaItemCount) {
+                add(player.getMediaItemAt(index))
+            }
+            val existingIds = map(MediaItem::mediaId).toMutableSet()
+            items.forEach { item ->
+                if (existingIds.add(item.mediaId)) add(item)
+            }
+        }
+        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
+        if (media.isEmpty()) return false
+        PodwaffleMediaService.instance?.setQueue(
+            local = media.map { it.toMediaItem(useDownload = true) },
+            remote = media.map { it.toMediaItem(useDownload = false) },
+            requestedIndex = player.currentMediaItemIndex.coerceAtLeast(0),
+        )
+        requireCatalog().queueOnServer(items.map(MediaItem::mediaId))
+        return true
+    }
+
     private fun createSessionActivity(): PendingIntent? {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -264,6 +308,19 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
     }
 
     private inner class AutoLibraryCallback : MediaLibrarySession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .add(addToQueueCommand)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(commands)
+                .build()
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -279,26 +336,54 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             page: Int,
             pageSize: Int,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            requireCatalog().children(
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val result = requireCatalog().children(
                 parentId = parentId,
                 page = page,
                 pageSize = pageSize,
                 params = params,
                 downloadStore = requireDownloadStore(),
             )
+            if (browser.maxCommandsForMediaItems <= 0) return result
+            return Futures.transform(
+                result,
+                { libraryResult ->
+                    val items = libraryResult.value
+                    if (libraryResult.resultCode != LibraryResult.RESULT_SUCCESS || items == null) {
+                        libraryResult
+                    } else {
+                        LibraryResult.ofItemList(items.map(::withQueueCommand), libraryResult.params)
+                    }
+                },
+                mainExecutor,
+            )
+        }
 
         override fun onGetItem(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             mediaId: String,
-        ): ListenableFuture<LibraryResult<MediaItem>> =
-            requireCatalog().item(mediaId, requireDownloadStore())
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val result = requireCatalog().item(mediaId, requireDownloadStore())
+            if (browser.maxCommandsForMediaItems <= 0) return result
+            return Futures.transform(
+                result,
+                { libraryResult ->
+                    val item = libraryResult.value
+                    if (libraryResult.resultCode != LibraryResult.RESULT_SUCCESS || item == null) {
+                        libraryResult
+                    } else {
+                        LibraryResult.ofItem(withQueueCommand(item), libraryResult.params)
+                    }
+                },
+                mainExecutor,
+            )
+        }
 
         override fun onSetMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
-            mediaItems: MutableList<MediaItem>,
+            mediaItems: List<MediaItem>,
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
@@ -367,43 +452,50 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         override fun onAddMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
-            mediaItems: MutableList<MediaItem>,
-        ): ListenableFuture<MutableList<MediaItem>> {
-            if (!attachMainPlayerIfAvailable()) {
-                return Futures.immediateFuture(mutableListOf<MediaItem>())
-            }
+            mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> {
             val resolved = requireCatalog().resolvePlayable(
                 mediaItems,
                 requireDownloadStore(),
             )
-            if (resolved.isEmpty()) {
-                return Futures.immediateFuture(mutableListOf<MediaItem>())
-            }
+            enqueueResolvedItems(resolved)
+            // The shared player queue was updated directly. Returning an empty
+            // list prevents MediaSession from appending the same items twice.
+            return Futures.immediateFuture(emptyList())
+        }
 
-            val player = playbackPlayer
-                ?: return Futures.immediateFuture(mutableListOf<MediaItem>())
-            val combined = buildList {
-                for (index in 0 until player.mediaItemCount) {
-                    add(player.getMediaItemAt(index))
-                }
-                val existingIds = map(MediaItem::mediaId).toMutableSet()
-                resolved.forEach { item ->
-                    if (existingIds.add(item.mediaId)) add(item)
-                }
-            }
-            val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
-            if (media.isNotEmpty()) {
-                PodwaffleMediaService.instance?.setQueue(
-                    local = media.map { it.toMediaItem(useDownload = true) },
-                    remote = media.map { it.toMediaItem(useDownload = false) },
-                    requestedIndex = player.currentMediaItemIndex.coerceAtLeast(0),
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != COMMAND_ADD_TO_QUEUE) {
+                return Futures.immediateFuture(
+                    SessionResult(SessionError.ERROR_NOT_SUPPORTED),
                 )
             }
-            requireCatalog().queueOnServer(resolved.map(MediaItem::mediaId))
-
-            // The shared player queue was updated directly above. Returning an
-            // empty list prevents MediaSession from appending the same items twice.
-            return Futures.immediateFuture(mutableListOf<MediaItem>())
+            val mediaId = args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)
+            if (mediaId.isNullOrBlank()) {
+                return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+            }
+            return Futures.transform(
+                requireCatalog().item(mediaId, requireDownloadStore()),
+                { result ->
+                    val item = result.value
+                    if (
+                        result.resultCode == LibraryResult.RESULT_SUCCESS &&
+                        item != null &&
+                        item.mediaMetadata.isPlayable == true &&
+                        enqueueResolvedItems(listOf(item))
+                    ) {
+                        SessionResult(SessionResult.RESULT_SUCCESS)
+                    } else {
+                        SessionResult(SessionError.ERROR_INVALID_STATE)
+                    }
+                },
+                mainExecutor,
+            )
         }
     }
 
@@ -418,14 +510,15 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             ?: requireNotNull(downloadStore) { "Download store is unavailable" }
     }
 
-    private companion object {
-        const val AUTO_SESSION_ID = "podwaffle-android-auto"
-        const val AUTO_FALLBACK_NOTIFICATION_ID = 1003
-        const val DEFAULT_SKIP_BACK_MS = 15_000L
-        const val DEFAULT_SKIP_FORWARD_MS = 30_000L
-        const val ATTACH_RETRY_MS = 100L
-        const val MAX_ATTACH_ATTEMPTS = 100
-        const val STATE_CHANGE_DEBOUNCE_MS = 250L
-        const val STATE_REPORT_INTERVAL_MS = 10_000L
+    companion object {
+        const val COMMAND_ADD_TO_QUEUE = "com.podwaffle.media.command.ADD_TO_QUEUE"
+        private const val AUTO_SESSION_ID = "podwaffle-android-auto"
+        private const val AUTO_FALLBACK_NOTIFICATION_ID = 1003
+        private const val DEFAULT_SKIP_BACK_MS = 15_000L
+        private const val DEFAULT_SKIP_FORWARD_MS = 30_000L
+        private const val ATTACH_RETRY_MS = 100L
+        private const val MAX_ATTACH_ATTEMPTS = 100
+        private const val STATE_CHANGE_DEBOUNCE_MS = 250L
+        private const val STATE_REPORT_INTERVAL_MS = 10_000L
     }
 }
