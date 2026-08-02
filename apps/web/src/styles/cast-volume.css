@@ -1,0 +1,7 @@
+.player-tools .volume-control {
+  display: none;
+}
+
+.player-tools:has(.cast-controls) .volume-control {
+  display: flex;
+}
