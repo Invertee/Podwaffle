@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added Android Auto media browsing with profile podcast tiles, compact episode
+  lists, local playback and shared queue actions; kept Cast and episode-detail
+  actions out of the car interface, added a cached offline catalogue, and updated
+  Android to 0.4.7 / versionCode 11 / native runtime 0.4-native-10.
 - Updated Android to 0.4.6 / versionCode 10 / native runtime 0.4-native-9,
   aligned the launcher and splash artwork with the shared web/Home Assistant
   Podwaffle icon, and bumped the Home Assistant web add-on to 5.0.16.
