@@ -125,6 +125,52 @@ function withBluetoothSkipKeys(config) {
   }]);
 }
 
+function withAutomaticQueueDownloads(config) {
+  return withDangerousMod(config, ["android", async (mod) => {
+    const modulePath = path.join(
+      mod.modRequest.projectRoot,
+      "modules",
+      "podwaffle-media",
+      "android",
+      "src",
+      "main",
+      "java",
+      "com",
+      "podwaffle",
+      "media",
+      "PodwaffleMediaModule.kt",
+    );
+    let source = fs.readFileSync(modulePath, "utf8");
+    if (source.includes("Automatically cache every queued episode")) return mod;
+
+    const marker = `                val store = service.getDownloadStore()
+                val enriched = snapshot.items.map { media ->`;
+    if (!source.includes(marker)) {
+      throw new Error("Could not locate the native setQueue download store.");
+    }
+
+    const replacement = `                val store = service.getDownloadStore()
+                // Automatically cache every queued episode. DownloadManager.add()
+                // is idempotent for queued, active and completed items, while a
+                // storage or network failure must never block the queue update.
+                snapshot.items.forEach { media ->
+                    if (
+                        media.enclosureUrl.isNotBlank() &&
+                        store.completedPath(media.episodeId) == null
+                    ) {
+                        runCatching { store.add(media.toMap(), "automatic") }
+                    }
+                }
+                val enriched = snapshot.items.map { media ->`;
+
+    source = source.replace(marker, replacement);
+    fs.writeFileSync(modulePath, source);
+    return mod;
+  }]);
+}
+
 module.exports = function withPodwaffleMediaControls(config) {
-  return withBluetoothSkipKeys(withCastVolumeKeys(config));
+  return withAutomaticQueueDownloads(
+    withBluetoothSkipKeys(withCastVolumeKeys(config)),
+  );
 };
