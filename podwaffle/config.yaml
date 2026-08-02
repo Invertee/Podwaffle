@@ -42,7 +42,7 @@ schema:
   log_level: list(debug|info|warn|error)
   cast_receiver_app_id: str?
   firebase_enabled: bool
-  firebase_project_id: str
+  firebase_project_id: str?
   firebase_service_account_path: str
   backup_retention_count: int(1,100)
 ports:
