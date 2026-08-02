@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   FlatList,
@@ -22,6 +23,7 @@ import {
   withProfileRevision,
 } from "../../api/profileMutations";
 import { Icon } from "../../components/Icon";
+import { useCastAction } from "../../hooks/useCastAction";
 import { useAuthStore } from "../../stores/auth";
 import {
   colors,
@@ -154,6 +156,7 @@ export default function PodcastsScreen() {
   const queueCount = useAuthStore((state) => state.snapshot?.queue.length ?? 0);
   const connection = useAuthStore((state) => state.connection);
   const refresh = useAuthStore((state) => state.refresh);
+  const { cast, castStatus, toggleCast } = useCastAction();
   const [mode, setMode] = useState<"tiles" | "list">("tiles");
   const [reordering, setReordering] = useState(false);
   const [reorderBusy, setReorderBusy] = useState(false);
@@ -162,6 +165,7 @@ export default function PodcastsScreen() {
   const columns = width >= 720 ? 5 : width >= 480 ? 4 : 3;
   const tileSize =
     (width - spacing.md * 2 - spacing.sm * (columns - 1)) / columns;
+  const castBusy = castStatus === "connecting" || castStatus === "stopping";
 
   useEffect(() => {
     setSubscriptions(snapshotSubscriptions);
@@ -188,6 +192,17 @@ export default function PodcastsScreen() {
         params: { podcastId: item.id },
       } as never,
     );
+  }
+
+  async function changeCast() {
+    try {
+      await toggleCast();
+    } catch (error) {
+      Alert.alert(
+        "Google Cast",
+        error instanceof Error ? error.message : "Cast could not be changed.",
+      );
+    }
   }
 
   async function movePodcast(from: number, to: number) {
@@ -251,6 +266,28 @@ export default function PodcastsScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.castButton,
+              cast.connected && styles.castButtonActive,
+              castBusy && styles.disabled,
+              pressed && !castBusy && styles.pressed,
+            ]}
+            disabled={castBusy}
+            onPress={() => void changeCast()}
+            accessibilityRole="button"
+            accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
+          >
+            {castBusy ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Icon
+                name="cast"
+                size={20}
+                color={cast.connected ? colors.accent : colors.textSecondary}
+              />
+            )}
+          </Pressable>
           <Pressable
             style={({ pressed }) => [styles.queueButton, pressed && styles.pressed]}
             onPress={() => router.push("/queue" as never)}
@@ -423,6 +460,20 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     flexWrap: "wrap",
     gap: spacing.sm,
+  },
+  castButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.md,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  castButtonActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentDim,
   },
   queueButton: {
     minHeight: 40,
