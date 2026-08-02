@@ -63,6 +63,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
 
         val callback = AutoLibraryCallback()
         val sessionBuilder = MediaLibrarySession.Builder(this, fallback, callback)
+            .setId(AUTO_SESSION_ID)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         librarySession = sessionBuilder.build()
 
@@ -223,6 +224,18 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             } else {
                 startPositionMs.coerceAtLeast(0L)
             }
+
+            // Keep the main service's persisted local/remote queue metadata in
+            // step with the item selected by Android Auto. The library session
+            // will apply the same resolved item after this callback returns.
+            EpisodeMedia.fromMediaItem(resolved[index])?.let { media ->
+                PodwaffleMediaService.instance?.playEpisode(
+                    local = media.toMediaItem(useDownload = true),
+                    remote = media.toMediaItem(useDownload = false),
+                    startPositionMs = requestedPosition,
+                    autoplay = false,
+                )
+            }
             requireCatalog().acquirePlayback(
                 resolved[index].mediaId,
                 requestedPosition,
@@ -258,6 +271,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             ?: requireNotNull(downloadStore) { "Download store is unavailable" }
 
     private companion object {
+        const val AUTO_SESSION_ID = "podwaffle-android-auto"
         const val AUTO_FALLBACK_NOTIFICATION_ID = 1003
         const val DEFAULT_SKIP_BACK_MS = 15_000L
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
