@@ -25,7 +25,7 @@ import { useAuthStore } from "../stores/auth";
 import { useDownloadsStore } from "../stores/downloads";
 import { useNativeMediaStore } from "../stores/nativeMedia";
 import { syncRuntime } from "../sync/runtime";
-import { APP_CHROME_HEIGHT, colors } from "../styles/tokens";
+import { APP_CHROME_HEIGHT, colors, TAB_BAR_HEIGHT } from "../styles/tokens";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 2 } },
@@ -211,8 +211,10 @@ function AppNavigator() {
       <View
         style={[
           styles.navigator,
-          authenticated &&
-            !playerExpanded && { paddingBottom: APP_CHROME_HEIGHT + insets.bottom },
+          authenticated && {
+            paddingBottom:
+              (playerExpanded ? TAB_BAR_HEIGHT : APP_CHROME_HEIGHT) + insets.bottom,
+          },
         ]}
       >
         <Stack
