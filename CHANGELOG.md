@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Made Android local playback offline-first, enabled uninterrupted native queue
+  advancement, retained paused media controls as a foreground session, added
+  media-button playback resumption, promoted completed queue downloads into the
+  active native playlist, proactively warmed podcast artwork on disk, and updated
+  Android to 0.4.16 / versionCode 20 / native runtime 0.4-native-18.
+- Made the complete Android mini-player surface open Now Playing, expanded the
+  swipe-down collapse gesture across the full player surface, kept the main bottom
+  navigation visible on Now Playing, and updated Android to 0.4.15 / versionCode 19.
 - Redesigned the Android playback chrome with podcast artwork and centred controls,
   added swipe-up expansion and swipe-down collapse for Now Playing, removed the
   duplicate collapsed controls while expanded, added library Cast access and an
