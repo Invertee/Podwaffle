@@ -183,10 +183,6 @@ WHEN EXISTS (
     0
   ) = 0
 BEGIN
-  UPDATE queue_items
-  SET sort_index = sort_index + 1
-  WHERE profile_id = OLD.profile_id;
-
   INSERT OR IGNORE INTO queue_items(
     id, profile_id, episode_id, sort_index, added_at
   ) VALUES (
