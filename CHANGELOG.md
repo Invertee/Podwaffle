@@ -2,11 +2,15 @@
 
 ## Unreleased
 
-- Unified current playback and the shared queue so the loaded episode is always
-  queue item zero across web, Android and Cast, backfilled existing profiles,
-  refreshed the web queue after playback sync, published Android native media
-  transitions before completion handling, updated Android to 0.4.17 / versionCode
-  21 / native runtime 0.4-native-19, and bumped the Home Assistant add-on to 5.0.18.
+- Repaired SQLite queue trigger conflict handling when playback switches to an
+  already-queued episode, restored immutable caching for generated web assets,
+  distinguished revoked credentials from an unsigned session lookup, added the
+  schema 4 repair migration, and bumped the Home Assistant add-on to 5.0.19.
+- Unified current playback and the shared queue so the active episode is always
+  queue item zero across Android, web and Cast, protected it during queue edits,
+  fixed Android's offline native transition ordering, updated Android to 0.4.17 /
+  versionCode 21 / native runtime 0.4-native-19, and bumped the Home Assistant
+  add-on to 5.0.18.
 - Made Android local playback offline-first, enabled uninterrupted native queue
   advancement, retained paused media controls as a foreground session, added
   media-button playback resumption, promoted completed queue downloads into the
