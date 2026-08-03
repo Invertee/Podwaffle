@@ -11,23 +11,26 @@ export function ArtworkCacheWarmer() {
     (state) => state.snapshot?.playback?.episode,
   );
 
-  const artworkUrls = useMemo(
-    () => [
-      ...(subscriptions ?? []).map((podcast) => podcast.artworkUrl),
-      ...(queue ?? []).flatMap((item) => [
-        item.episode.podcastArtworkUrl,
-        item.episode.artworkUrl,
-      ]),
-      playbackEpisode?.podcastArtworkUrl,
-      playbackEpisode?.artworkUrl,
-    ],
+  const signature = useMemo(
+    () =>
+      [
+        ...(subscriptions ?? []).map((podcast) => podcast.artworkUrl),
+        ...(queue ?? []).flatMap((item) => [
+          item.episode.podcastArtworkUrl,
+          item.episode.artworkUrl,
+        ]),
+        playbackEpisode?.podcastArtworkUrl,
+        playbackEpisode?.artworkUrl,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .join("\n"),
     [playbackEpisode, queue, subscriptions],
   );
-  const signature = artworkUrls.filter(Boolean).join("\n");
 
   useEffect(() => {
     if (connection !== "online" || !signature) return;
-    void warmArtworkCache(artworkUrls);
+    void warmArtworkCache(signature.split("\n"));
   }, [connection, signature]);
 
   return null;
