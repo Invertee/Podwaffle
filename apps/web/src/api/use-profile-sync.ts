@@ -28,6 +28,7 @@ export function useProfileSync(authenticated: boolean): void {
         queryClient.invalidateQueries({ queryKey: ["episodes"] }),
         queryClient.invalidateQueries({ queryKey: ["in-progress"] }),
         queryClient.invalidateQueries({ queryKey: ["history"] }),
+        queryClient.invalidateQueries({ queryKey: ["queue"] }),
       ]);
     };
 
