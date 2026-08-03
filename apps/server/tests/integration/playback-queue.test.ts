@@ -10,6 +10,15 @@ afterEach(async () => {
   while (runtimes.length) await runtimes.pop()?.close();
 });
 
+type QueueResponseItem = {
+  id: string;
+  episode: { id: string };
+};
+
+function episodeIds(items: QueueResponseItem[]): string[] {
+  return items.map((item) => item.episode.id);
+}
+
 describe("playback queue invariant", () => {
   it("keeps the current episode at queue position zero and advances from it", async () => {
     const created = await testRuntime();
@@ -82,12 +91,13 @@ describe("playback queue invariant", () => {
       })
       .expect(200);
 
-    const initialQueue = await client.get("/api/v1/queue").expect(200);
-    expect(
-      (initialQueue.body.queue as Array<{ episode: { id: string } }>).map(
-        (item) => item.episode.id,
-      ),
-    ).toEqual([firstEpisodeId, secondEpisodeId, thirdEpisodeId]);
+    const initialQueue = (await client.get("/api/v1/queue").expect(200)).body
+      .queue as QueueResponseItem[];
+    expect(episodeIds(initialQueue)).toEqual([
+      firstEpisodeId,
+      secondEpisodeId,
+      thirdEpisodeId,
+    ]);
 
     await client
       .post("/api/v1/playback/lease")
@@ -99,12 +109,37 @@ describe("playback queue invariant", () => {
       })
       .expect(200);
 
-    const reorderedQueue = await client.get("/api/v1/queue").expect(200);
-    expect(
-      (reorderedQueue.body.queue as Array<{ episode: { id: string } }>).map(
-        (item) => item.episode.id,
-      ),
-    ).toEqual([thirdEpisodeId, firstEpisodeId, secondEpisodeId]);
+    const pinnedQueue = (await client.get("/api/v1/queue").expect(200)).body
+      .queue as QueueResponseItem[];
+    expect(episodeIds(pinnedQueue)).toEqual([
+      thirdEpisodeId,
+      firstEpisodeId,
+      secondEpisodeId,
+    ]);
+
+    const current = pinnedQueue[0]!;
+    const attemptedOrder = [...pinnedQueue.slice(1), current].map(
+      (item) => item.id,
+    );
+    const reordered = await client
+      .put("/api/v1/queue/order")
+      .send({ commandId: randomUUID(), queueItemIds: attemptedOrder })
+      .expect(200);
+    expect(episodeIds(reordered.body.queue as QueueResponseItem[])).toEqual([
+      thirdEpisodeId,
+      firstEpisodeId,
+      secondEpisodeId,
+    ]);
+
+    const removed = await client
+      .delete(`/api/v1/queue/items/${current.id}`)
+      .send({ commandId: randomUUID() })
+      .expect(200);
+    expect(episodeIds(removed.body.queue as QueueResponseItem[])).toEqual([
+      thirdEpisodeId,
+      firstEpisodeId,
+      secondEpisodeId,
+    ]);
 
     const completed = await client
       .post(`/api/v1/episodes/${thirdEpisodeId}/progress`)
@@ -114,11 +149,10 @@ describe("playback queue invariant", () => {
         durationMs: 60_000,
       })
       .expect(200);
-    expect(
-      (completed.body.queue as Array<{ episode: { id: string } }>).map(
-        (item) => item.episode.id,
-      ),
-    ).toEqual([firstEpisodeId, secondEpisodeId]);
+    expect(episodeIds(completed.body.queue as QueueResponseItem[])).toEqual([
+      firstEpisodeId,
+      secondEpisodeId,
+    ]);
     expect((await client.get("/api/v1/playback")).body.playback).toMatchObject({
       episode: { id: firstEpisodeId },
       positionMs: 0,
