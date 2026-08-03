@@ -20,6 +20,22 @@ function addImport(source, statement) {
   return `${source.slice(0, insertAt)}\n\n${statement}${source.slice(insertAt)}`;
 }
 
+function mediaSourcePath(projectRoot, fileName) {
+  return path.join(
+    projectRoot,
+    "modules",
+    "podwaffle-media",
+    "android",
+    "src",
+    "main",
+    "java",
+    "com",
+    "podwaffle",
+    "media",
+    fileName,
+  );
+}
+
 function withCastVolumeKeys(config) {
   return withMainActivity(config, (mod) => {
     if (mod.modResults.language !== "kt") {
@@ -62,17 +78,8 @@ function withCastVolumeKeys(config) {
 
 function withBluetoothSkipKeys(config) {
   return withDangerousMod(config, ["android", async (mod) => {
-    const servicePath = path.join(
+    const servicePath = mediaSourcePath(
       mod.modRequest.projectRoot,
-      "modules",
-      "podwaffle-media",
-      "android",
-      "src",
-      "main",
-      "java",
-      "com",
-      "podwaffle",
-      "media",
       "PodwaffleMediaService.kt",
     );
     let source = fs.readFileSync(servicePath, "utf8");
@@ -125,19 +132,189 @@ function withBluetoothSkipKeys(config) {
   }]);
 }
 
+function withBackgroundPlaybackReliability(config) {
+  return withDangerousMod(config, ["android", async (mod) => {
+    const servicePath = mediaSourcePath(
+      mod.modRequest.projectRoot,
+      "PodwaffleMediaService.kt",
+    );
+    let source = fs.readFileSync(servicePath, "utf8");
+
+    source = source.replace(
+      "player.setPauseAtEndOfMediaItems(true)",
+      "player.setPauseAtEndOfMediaItems(false)",
+    );
+
+    const downloadCallback = `        downloadStore = PodwaffleDownloadStore(this) { name, payload ->
+            eventEmitter?.invoke(name, payload)
+        }`;
+    const reliableDownloadCallback = `        downloadStore = PodwaffleDownloadStore(this) { name, payload ->
+            if (name == "download.state.changed" && payload["state"] == "completed") {
+                val episodeId = payload["episodeId"] as? String
+                val localPath = payload["localPath"] as? String
+                if (episodeId != null && localPath != null) {
+                    promoteDownloadedQueueItem(episodeId, localPath)
+                }
+            }
+            eventEmitter?.invoke(name, payload)
+        }`;
+    if (source.includes(downloadCallback)) {
+      source = source.replace(downloadCallback, reliableDownloadCallback);
+    }
+
+    if (!source.includes("override fun onPlaybackResumption(")) {
+      const callbackEnd = `            return true
+        }
+    }
+
+    private fun createPlayerListener`;
+      const resumptionCallback = `            return true
+        }
+
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            return try {
+                val raw = playbackPreferences.getString("items", null)
+                    ?: return Futures.immediateFailedFuture(
+                        IllegalStateException("No saved playback is available"),
+                    )
+                val array = JSONArray(raw)
+                val media = buildList {
+                    for (index in 0 until array.length()) {
+                        val item = EpisodeMedia.fromJson(array.getJSONObject(index))
+                        add(
+                            item.withDownloadPath(
+                                downloadStore?.completedPath(item.episodeId)
+                                    ?: item.localDownloadPath,
+                            ),
+                        )
+                    }
+                }
+                if (media.isEmpty()) {
+                    return Futures.immediateFailedFuture(
+                        IllegalStateException("No saved playback is available"),
+                    )
+                }
+                localItems = media.map { it.toMediaItem(useDownload = true) }
+                remoteItems = media.map { it.toMediaItem(useDownload = false) }
+                val savedId = playbackPreferences.getString("mediaId", null)
+                val savedIndex = playbackPreferences.getInt("index", 0)
+                val index = media.indexOfFirst { it.episodeId == savedId }
+                    .takeIf { it >= 0 }
+                    ?: savedIndex.coerceIn(0, media.lastIndex)
+                val position = playbackPreferences.getLong("position", 0L)
+                    .coerceAtLeast(0L)
+                localPlayer?.playbackParameters = PlaybackParameters(
+                    playbackPreferences.getFloat("rate", 1f).coerceIn(0.5f, 4f),
+                )
+                lastMediaItem = localItems.getOrNull(index)
+                lastObservedMediaId = lastMediaItem?.mediaId
+                lastObservedPositionMs = position
+                lastObservedDurationMs = media.getOrNull(index)?.durationMs
+                Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(
+                        localItems,
+                        index,
+                        position,
+                    ),
+                )
+            } catch (error: Exception) {
+                Futures.immediateFailedFuture(error)
+            }
+        }
+    }
+
+    private fun createPlayerListener`;
+      if (!source.includes(callbackEnd)) {
+        throw new Error("Could not locate the MediaSession callback ending.");
+      }
+      source = source.replace(callbackEnd, resumptionCallback);
+    }
+
+    if (!source.includes("private fun promoteDownloadedQueueItem(")) {
+      const notificationMarker = `    private fun notificationButtons(): List<CommandButton> = listOf(`;
+      const promotionMethod = `    private fun promoteDownloadedQueueItem(
+        episodeId: String,
+        localPath: String,
+    ) {
+        val index = localItems.indexOfFirst { it.mediaId == episodeId }
+        if (index < 0) return
+        val media = EpisodeMedia.fromMediaItem(localItems[index])
+            ?.withDownloadPath(localPath)
+            ?: return
+        val updated = media.toMediaItem(useDownload = true)
+        localItems = localItems.toMutableList().also { it[index] = updated }
+        val local = localPlayer
+        if (
+            local != null &&
+            index < local.mediaItemCount &&
+            index != local.currentMediaItemIndex
+        ) {
+            local.replaceMediaItem(index, updated)
+        }
+        persistPlayback()
+    }
+
+${notificationMarker}`;
+      if (!source.includes(notificationMarker)) {
+        throw new Error("Could not locate the notification button builder.");
+      }
+      source = source.replace(notificationMarker, promotionMethod);
+    }
+
+    const restoreItems = `            localItems = media.map { it.toMediaItem(useDownload = true) }
+            remoteItems = media.map { it.toMediaItem(useDownload = false) }`;
+    const restoreDownloadedItems = `            val restoredMedia = media.map { item ->
+                item.withDownloadPath(
+                    downloadStore?.completedPath(item.episodeId)
+                        ?: item.localDownloadPath,
+                )
+            }
+            localItems = restoredMedia.map { it.toMediaItem(useDownload = true) }
+            remoteItems = restoredMedia.map { it.toMediaItem(useDownload = false) }`;
+    if (source.includes(restoreItems)) {
+      source = source.replace(restoreItems, restoreDownloadedItems);
+    }
+
+    if (!source.includes("override fun onUpdateNotification(")) {
+      const taskMarker = `    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (activePlayer?.isPlaying != true && !isCasting()) stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }`;
+      const lifecycleReplacement = `    override fun onUpdateNotification(
+        session: MediaSession,
+        startInForegroundRequired: Boolean,
+    ) {
+        // Keep a loaded paused episode in the foreground so Android retains the
+        // media controls instead of destroying the playback service after idle.
+        super.onUpdateNotification(
+            session,
+            startInForegroundRequired || session.player.currentMediaItem != null,
+        )
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // The playback service, queue and notification are independent of the
+        // React Native task. Persist state but do not stop a paused session.
+        persistPlayback()
+    }`;
+      if (!source.includes(taskMarker)) {
+        throw new Error("Could not locate the playback service task handler.");
+      }
+      source = source.replace(taskMarker, lifecycleReplacement);
+    }
+
+    fs.writeFileSync(servicePath, source);
+    return mod;
+  }]);
+}
+
 function withAutomaticQueueDownloads(config) {
   return withDangerousMod(config, ["android", async (mod) => {
-    const modulePath = path.join(
+    const modulePath = mediaSourcePath(
       mod.modRequest.projectRoot,
-      "modules",
-      "podwaffle-media",
-      "android",
-      "src",
-      "main",
-      "java",
-      "com",
-      "podwaffle",
-      "media",
       "PodwaffleMediaModule.kt",
     );
     let source = fs.readFileSync(modulePath, "utf8");
@@ -171,32 +348,25 @@ function withAutomaticQueueDownloads(config) {
 
 function withAndroidAutoQueueDownloads(config) {
   return withDangerousMod(config, ["android", async (mod) => {
-    const servicePath = path.join(
+    const servicePath = mediaSourcePath(
       mod.modRequest.projectRoot,
-      "modules",
-      "podwaffle-media",
-      "android",
-      "src",
-      "main",
-      "java",
-      "com",
-      "podwaffle",
-      "media",
       "PodwaffleAutoMediaService.kt",
     );
     let source = fs.readFileSync(servicePath, "utf8");
-    if (source.includes("Automatically cache Android Auto queue additions")) {
-      return mod;
-    }
+    source = source.replace(
+      "player.setPauseAtEndOfMediaItems(true)",
+      "player.setPauseAtEndOfMediaItems(false)",
+    );
 
-    const marker = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
+    if (!source.includes("Automatically cache Android Auto queue additions")) {
+      const marker = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
         if (media.isEmpty()) return false
         PodwaffleMediaService.instance?.setQueue(`;
-    if (!source.includes(marker)) {
-      throw new Error("Could not locate the Android Auto queue update.");
-    }
+      if (!source.includes(marker)) {
+        throw new Error("Could not locate the Android Auto queue update.");
+      }
 
-    const replacement = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
+      const replacement = `        val media = combined.mapNotNull(EpisodeMedia::fromMediaItem)
         if (media.isEmpty()) return false
         // Automatically cache Android Auto queue additions using the same
         // idempotent DownloadManager store as the phone queue.
@@ -210,8 +380,9 @@ function withAndroidAutoQueueDownloads(config) {
             }
         }
         PodwaffleMediaService.instance?.setQueue(`;
+      source = source.replace(marker, replacement);
+    }
 
-    source = source.replace(marker, replacement);
     fs.writeFileSync(servicePath, source);
     return mod;
   }]);
@@ -220,7 +391,9 @@ function withAndroidAutoQueueDownloads(config) {
 module.exports = function withPodwaffleMediaControls(config) {
   return withAndroidAutoQueueDownloads(
     withAutomaticQueueDownloads(
-      withBluetoothSkipKeys(withCastVolumeKeys(config)),
+      withBackgroundPlaybackReliability(
+        withBluetoothSkipKeys(withCastVolumeKeys(config)),
+      ),
     ),
   );
 };
