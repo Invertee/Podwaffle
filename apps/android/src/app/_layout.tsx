@@ -11,6 +11,8 @@ import {
 
 import { api } from "../api/client";
 import { warmEpisodeCache } from "../api/queryCache";
+import { AppChrome } from "../components/AppChrome";
+import { ArtworkCacheWarmer } from "../components/ArtworkCacheWarmer";
 import {
   MEDIA_EVENTS,
   PodwaffleMediaModule,
@@ -19,13 +21,12 @@ import {
   type NativeEpisodeCompletion,
   type NativePlaybackState,
 } from "../native-media/index";
-import { AppChrome } from "../components/AppChrome";
 import { playbackController } from "../playback/controller";
 import { useAuthStore } from "../stores/auth";
 import { useDownloadsStore } from "../stores/downloads";
 import { useNativeMediaStore } from "../stores/nativeMedia";
-import { syncRuntime } from "../sync/runtime";
 import { APP_CHROME_HEIGHT, colors, TAB_BAR_HEIGHT } from "../styles/tokens";
+import { syncRuntime } from "../sync/runtime";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 2 } },
@@ -249,6 +250,7 @@ export default function RootLayout() {
         <StatusBar style="light" backgroundColor={colors.bgPrimary} />
         <NativeMediaBinder />
         <RuntimeBinder />
+        <ArtworkCacheWarmer />
         <AppNavigator />
       </SafeAreaProvider>
     </QueryClientProvider>
