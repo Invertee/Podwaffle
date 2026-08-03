@@ -183,13 +183,7 @@ function withBackgroundPlaybackReliability(config) {
                 val array = JSONArray(raw)
                 val media = buildList {
                     for (index in 0 until array.length()) {
-                        val item = EpisodeMedia.fromJson(array.getJSONObject(index))
-                        add(
-                            item.withDownloadPath(
-                                downloadStore?.completedPath(item.episodeId)
-                                    ?: item.localDownloadPath,
-                            ),
-                        )
+                        add(EpisodeMedia.fromJson(array.getJSONObject(index)))
                     }
                 }
                 if (media.isEmpty()) {
@@ -275,7 +269,7 @@ ${notificationMarker}`;
             localItems = restoredMedia.map { it.toMediaItem(useDownload = true) }
             remoteItems = restoredMedia.map { it.toMediaItem(useDownload = false) }`;
     if (source.includes(restoreItems)) {
-      source = source.replace(restoreItems, restoreDownloadedItems);
+      source = source.split(restoreItems).join(restoreDownloadedItems);
     }
 
     if (!source.includes("override fun onUpdateNotification(")) {
