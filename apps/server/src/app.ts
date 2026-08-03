@@ -321,7 +321,6 @@ export function createApp(dependencies: AppDependencies): Express {
     process.env.PODWAFFLE_WEB_DIST ??
     resolve(import.meta.dirname, "../../web/dist");
   if (existsSync(webDistPath)) {
-    app.use(express.static(webDistPath, { index: false, maxAge: 0 }));
     app.use(
       "/assets",
       express.static(resolve(webDistPath, "assets"), {
@@ -329,6 +328,7 @@ export function createApp(dependencies: AppDependencies): Express {
         maxAge: "1y",
       }),
     );
+    app.use(express.static(webDistPath, { index: false, maxAge: 0 }));
     app.get("*splat", (request, response, next) => {
       if (
         request.path.startsWith("/api/") ||
