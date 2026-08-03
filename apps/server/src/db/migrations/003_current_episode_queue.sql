@@ -24,39 +24,45 @@ WHERE playback.episode_id IS NOT NULL
   );
 
 UPDATE queue_items
-SET sort_index = CASE
-  WHEN episode_id = (
+SET sort_index = sort_index + 1
+WHERE profile_id IN (
+  SELECT playback.profile_id
+  FROM playback_state AS playback
+  JOIN queue_items AS current
+    ON current.profile_id = playback.profile_id
+   AND current.episode_id = playback.episode_id
+  WHERE playback.episode_id IS NOT NULL
+    AND current.sort_index <> 0
+)
+  AND episode_id <> (
     SELECT playback.episode_id
     FROM playback_state AS playback
     WHERE playback.profile_id = queue_items.profile_id
-  ) THEN 0
-  ELSE 1 + (
-    SELECT COUNT(*)
-    FROM queue_items AS prior
-    WHERE prior.profile_id = queue_items.profile_id
-      AND prior.episode_id <> (
-        SELECT playback.episode_id
-        FROM playback_state AS playback
-        WHERE playback.profile_id = queue_items.profile_id
-      )
-      AND (
-        prior.sort_index < queue_items.sort_index
-        OR (
-          prior.sort_index = queue_items.sort_index
-          AND prior.id < queue_items.id
-        )
-      )
-  )
-END
-WHERE profile_id IN (
-  SELECT profile_id
-  FROM playback_state
-  WHERE episode_id IS NOT NULL
-);
+  );
+
+UPDATE queue_items
+SET sort_index = 0
+WHERE episode_id = (
+  SELECT playback.episode_id
+  FROM playback_state AS playback
+  WHERE playback.profile_id = queue_items.profile_id
+)
+  AND profile_id IN (
+    SELECT profile_id
+    FROM playback_state
+    WHERE episode_id IS NOT NULL
+  );
 
 CREATE TRIGGER playback_queue_head_after_insert
 AFTER INSERT ON playback_state
 WHEN NEW.episode_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM queue_items AS queued
+    WHERE queued.profile_id = NEW.profile_id
+      AND queued.episode_id = NEW.episode_id
+      AND queued.sort_index = 0
+  )
 BEGIN
   INSERT OR IGNORE INTO queue_items(
     id, profile_id, episode_id, sort_index, added_at
@@ -74,28 +80,26 @@ BEGIN
   );
 
   UPDATE queue_items
-  SET sort_index = CASE
-    WHEN episode_id = NEW.episode_id THEN 0
-    ELSE 1 + (
-      SELECT COUNT(*)
-      FROM queue_items AS prior
-      WHERE prior.profile_id = NEW.profile_id
-        AND prior.episode_id <> NEW.episode_id
-        AND (
-          prior.sort_index < queue_items.sort_index
-          OR (
-            prior.sort_index = queue_items.sort_index
-            AND prior.id < queue_items.id
-          )
-        )
-    )
-  END
-  WHERE profile_id = NEW.profile_id;
+  SET sort_index = sort_index + 1
+  WHERE profile_id = NEW.profile_id
+    AND episode_id <> NEW.episode_id;
+
+  UPDATE queue_items
+  SET sort_index = 0
+  WHERE profile_id = NEW.profile_id
+    AND episode_id = NEW.episode_id;
 END;
 
 CREATE TRIGGER playback_queue_head_after_episode_update
 AFTER UPDATE OF episode_id ON playback_state
 WHEN NEW.episode_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM queue_items AS queued
+    WHERE queued.profile_id = NEW.profile_id
+      AND queued.episode_id = NEW.episode_id
+      AND queued.sort_index = 0
+  )
 BEGIN
   INSERT OR IGNORE INTO queue_items(
     id, profile_id, episode_id, sort_index, added_at
@@ -113,21 +117,12 @@ BEGIN
   );
 
   UPDATE queue_items
-  SET sort_index = CASE
-    WHEN episode_id = NEW.episode_id THEN 0
-    ELSE 1 + (
-      SELECT COUNT(*)
-      FROM queue_items AS prior
-      WHERE prior.profile_id = NEW.profile_id
-        AND prior.episode_id <> NEW.episode_id
-        AND (
-          prior.sort_index < queue_items.sort_index
-          OR (
-            prior.sort_index = queue_items.sort_index
-            AND prior.id < queue_items.id
-          )
-        )
-    )
-  END
-  WHERE profile_id = NEW.profile_id;
+  SET sort_index = sort_index + 1
+  WHERE profile_id = NEW.profile_id
+    AND episode_id <> NEW.episode_id;
+
+  UPDATE queue_items
+  SET sort_index = 0
+  WHERE profile_id = NEW.profile_id
+    AND episode_id = NEW.episode_id;
 END;
