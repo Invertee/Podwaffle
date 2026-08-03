@@ -72,10 +72,6 @@ export function requireAuth(database: PodwaffleDatabase) {
     }
     const auth = authenticateToken(database, token);
     if (!auth) {
-      if (request.path === "/me") {
-        response.status(204).end();
-        return;
-      }
       next(
         new ApiError(
           401,
