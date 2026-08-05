@@ -6,9 +6,14 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.util.UnstableApi
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 /** Runs bounded download maintenance and played-episode cleanup once per day. */
 @OptIn(UnstableApi::class)
@@ -23,25 +28,7 @@ class PodwaffleCacheMaintenanceJobService : JobService() {
             var retry = false
             try {
                 val configuration = NativeConfigurationPersistence.load(applicationContext)
-                if (configuration != null) {
-                    val existingStore = PodwaffleMediaService.instance?.getDownloadStore()
-                    val temporaryStore = existingStore == null
-                    val store = existingStore
-                        ?: PodwaffleDownloadStore(applicationContext) { _, _ -> }
-                    try {
-                        store.maintenance(
-                            maxAutomaticAgeDays = configuration.downloadRetentionDays,
-                            maxStorageBytes = configuration.maxDownloadStorageBytes,
-                        )
-                        PodwaffleCachePolicy.cleanupPlayed(
-                            applicationContext,
-                            store,
-                            PodwaffleCachePolicy.protectedEpisodeIds(applicationContext),
-                        )
-                    } finally {
-                        if (temporaryStore) store.release()
-                    }
-                }
+                if (configuration != null) runMaintenance(configuration)
             } catch (_: Exception) {
                 retry = true
             } finally {
@@ -58,10 +45,45 @@ class PodwaffleCacheMaintenanceJobService : JobService() {
         return true
     }
 
+    private fun runMaintenance(configuration: NativeConfiguration) {
+        val service = PodwaffleMediaService.instance
+        if (service != null) {
+            val task = FutureTask(Callable {
+                maintain(service.getDownloadStore(), configuration)
+            })
+            Handler(Looper.getMainLooper()).post(task)
+            task.get(MAIN_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            return
+        }
+
+        val store = PodwaffleDownloadStore(applicationContext) { _, _ -> }
+        try {
+            maintain(store, configuration)
+        } finally {
+            store.release()
+        }
+    }
+
+    private fun maintain(
+        store: PodwaffleDownloadStore,
+        configuration: NativeConfiguration,
+    ) {
+        store.maintenance(
+            maxAutomaticAgeDays = configuration.downloadRetentionDays,
+            maxStorageBytes = configuration.maxDownloadStorageBytes,
+        )
+        PodwaffleCachePolicy.cleanupPlayed(
+            applicationContext,
+            store,
+            PodwaffleCachePolicy.protectedEpisodeIds(applicationContext),
+        )
+    }
+
     companion object {
         private const val JOB_ID = 0x50574348
         private const val INTERVAL_MS = 24L * 60L * 60L * 1_000L
         private const val FLEX_MS = 6L * 60L * 60L * 1_000L
+        private const val MAIN_OPERATION_TIMEOUT_SECONDS = 30L
         private val EXECUTOR = Executors.newSingleThreadExecutor()
 
         fun schedule(context: Context) {
