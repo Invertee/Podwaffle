@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("episode end handling", () => {
-  it("does not advance the queue at the played threshold", async () => {
+  it("does not complete or advance the queue before actual media end", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);
     const client = supertest.agent(created.baseUrl);
@@ -94,7 +94,7 @@ describe("episode end handling", () => {
         durationMs: 60_000,
       })
       .expect(200);
-    expect(nearEnd.body.episode.played).toBe(true);
+    expect(nearEnd.body.episode.played).toBe(false);
     expect(
       (nearEnd.body.queue as Array<{ episode: { id: string } }>).map(
         (item) => item.episode.id,
