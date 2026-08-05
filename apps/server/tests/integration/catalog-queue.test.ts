@@ -156,7 +156,7 @@ describe("podcast catalog, episode state, and queue", () => {
     samRevision = (progress.body as { revision: number }).revision;
     expect(
       (progress.body as { episode: { played: boolean } }).episode.played,
-    ).toBe(true);
+    ).toBe(false);
 
     const manualUnplayed = await sam
       .patch(`/api/v1/episodes/${episodes[0]!.id}/state`)
