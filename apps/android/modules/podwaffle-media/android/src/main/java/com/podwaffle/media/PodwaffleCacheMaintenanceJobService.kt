@@ -6,10 +6,12 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import androidx.media3.common.util.UnstableApi
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 /** Runs bounded download maintenance and played-episode cleanup once per day. */
+@UnstableApi
 class PodwaffleCacheMaintenanceJobService : JobService() {
     private var work: Future<*>? = null
     @Volatile
