@@ -20,6 +20,10 @@ import {
   refreshProfile,
   withProfileRevision,
 } from "../../api/profileMutations";
+import {
+  PodwaffleCacheModule,
+  type NativeCacheSummary,
+} from "../../native-media";
 import { playbackController } from "../../playback/controller";
 import { useAuthStore } from "../../stores/auth";
 import {
@@ -38,6 +42,12 @@ function formatListeningTime(ms: number): string {
   const hours = Math.floor(totalMinutes / 60);
   if (hours < 24) return `${hours}h ${totalMinutes % 60}m`;
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1_000)} KB`;
+  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
 }
 
 export default function ProfileScreen() {
@@ -63,9 +73,18 @@ export default function ProfileScreen() {
   const [forwardInput, setForwardInput] = useState(String(skipForwardSeconds));
   const [savingSettings, setSavingSettings] = useState(false);
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
+  const [cacheSummary, setCacheSummary] = useState<NativeCacheSummary>({
+    completedCount: 0,
+    completedBytes: 0,
+  });
+  const [cacheLoading, setCacheLoading] = useState(false);
+  const [cacheError, setCacheError] = useState<string | null>(null);
 
   useEffect(() => setBackwardInput(String(skipBackwardSeconds)), [skipBackwardSeconds]);
   useEffect(() => setForwardInput(String(skipForwardSeconds)), [skipForwardSeconds]);
+  useEffect(() => {
+    void refreshCache(true);
+  }, []);
 
   const stats = useQuery({
     queryKey: ["android-stats", period],
@@ -79,6 +98,64 @@ export default function ProfileScreen() {
     enabled: Boolean(credentials),
     initialData: snapshot?.devices,
   });
+
+  async function refreshCache(runMaintenance = false) {
+    setCacheLoading(true);
+    setCacheError(null);
+    try {
+      if (runMaintenance) await PodwaffleCacheModule.runMaintenance();
+      setCacheSummary(await PodwaffleCacheModule.getSummary());
+    } catch (cacheFailure) {
+      setCacheError(
+        cacheFailure instanceof Error
+          ? cacheFailure.message
+          : "Episode cache information could not be loaded.",
+      );
+    } finally {
+      setCacheLoading(false);
+    }
+  }
+
+  async function clearCache() {
+    setCacheLoading(true);
+    setCacheError(null);
+    try {
+      const result = await PodwaffleCacheModule.clearCompleted();
+      setCacheSummary(await PodwaffleCacheModule.getSummary());
+      Alert.alert(
+        "Episode cache cleared",
+        result.removedCount === 0
+          ? "No removable episode downloads were found. Current and queued episodes were retained."
+          : `${result.removedCount} episode${result.removedCount === 1 ? "" : "s"} removed, freeing ${formatBytes(result.freedBytes)}.`,
+      );
+      if (result.errors.length > 0) {
+        setCacheError(result.errors.join("\n"));
+      }
+    } catch (cacheFailure) {
+      setCacheError(
+        cacheFailure instanceof Error
+          ? cacheFailure.message
+          : "The episode cache could not be cleared.",
+      );
+    } finally {
+      setCacheLoading(false);
+    }
+  }
+
+  function confirmClearCache() {
+    Alert.alert(
+      "Clear cached episodes?",
+      "Completed downloads will be removed. The current episode and anything still queued will be retained.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear cache",
+          style: "destructive",
+          onPress: () => void clearCache(),
+        },
+      ],
+    );
+  }
 
   async function saveSkipSettings() {
     setSavingSettings(true);
@@ -315,6 +392,37 @@ export default function ProfileScreen() {
       <View style={styles.card}>
         <View style={styles.cardHeading}>
           <View>
+            <Text style={styles.eyebrow}>OFFLINE STORAGE</Text>
+            <Text style={styles.cardTitle}>Episode cache</Text>
+          </View>
+          {cacheLoading ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : null}
+        </View>
+        <Text style={styles.cardDescription}>
+          Played downloads are retained for one day, then removed by daily maintenance. Current and queued episodes are always protected.
+        </Text>
+        <Row label="Cached episodes" value={String(cacheSummary.completedCount)} />
+        <Row label="Storage used" value={formatBytes(cacheSummary.completedBytes)} />
+        {cacheError ? <Text style={styles.error}>{cacheError}</Text> : null}
+        <Pressable
+          style={({ pressed }) => [
+            styles.cacheButton,
+            pressed && styles.pressed,
+            cacheLoading && styles.disabled,
+          ]}
+          disabled={cacheLoading}
+          onPress={confirmClearCache}
+          accessibilityRole="button"
+          accessibilityLabel="Clear cached episodes"
+        >
+          <Text style={styles.cacheButtonText}>Clear cached episodes</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.cardHeading}>
+          <View>
             <Text style={styles.eyebrow}>SECURITY</Text>
             <Text style={styles.cardTitle}>Connected devices</Text>
           </View>
@@ -390,7 +498,14 @@ export default function ProfileScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
           style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}
-          onPress={() => void Promise.all([refresh(), stats.refetch(), devices.refetch()])}
+          onPress={() =>
+            void Promise.all([
+              refresh(),
+              stats.refetch(),
+              devices.refetch(),
+              refreshCache(),
+            ])
+          }
           accessibilityRole="button"
         >
           <Text style={styles.refreshText}>Sync now</Text>
@@ -547,6 +662,21 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
   },
   statLabel: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 4 },
+  cacheButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentDim,
+    marginTop: spacing.sm,
+  },
+  cacheButtonText: {
+    color: colors.accent,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+  },
   deviceCount: {
     color: colors.textSecondary,
     fontSize: fontSizes.sm,
