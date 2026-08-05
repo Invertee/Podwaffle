@@ -89,6 +89,7 @@ class PodwaffleCacheMaintenanceJobService : JobService() {
         fun schedule(context: Context) {
             val scheduler = context.applicationContext
                 .getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+            if (scheduler.getPendingJob(JOB_ID) != null) return
             val job = JobInfo.Builder(
                 JOB_ID,
                 ComponentName(
