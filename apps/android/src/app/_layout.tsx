@@ -15,6 +15,7 @@ import { AppChrome } from "../components/AppChrome";
 import { ArtworkCacheWarmer } from "../components/ArtworkCacheWarmer";
 import {
   MEDIA_EVENTS,
+  PodwaffleCacheModule,
   PodwaffleMediaModule,
   type NativeCastState,
   type NativeDownload,
@@ -48,7 +49,7 @@ function NativeMediaBinder() {
       if (castState) playbackController.handleCastState(castState);
       setBound(true);
       await useDownloadsStore.getState().load();
-      void PodwaffleMediaModule.runDownloadMaintenance();
+      void PodwaffleCacheModule.runMaintenance();
     } catch (error) {
       console.warn("[NativeMediaBinder] Failed to bind:", error);
       setBound(false);
