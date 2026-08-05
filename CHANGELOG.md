@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Required an actual media-end report before queue advancement, cleared Android's
+  final native playlist into a true idle state, retained played episode downloads
+  for 24 hours, added persisted daily cache maintenance and manual cache statistics
+  and clearing below Android listening statistics, updated Android to 0.4.18 /
+  versionCode 22 / native runtime 0.4-native-20, added schema 5, and bumped the
+  Home Assistant add-on to 5.0.20.
 - Repaired SQLite queue trigger conflict handling when playback switches to an
   already-queued episode, restored immutable caching for generated web assets,
   distinguished revoked credentials from an unsigned session lookup, added the
