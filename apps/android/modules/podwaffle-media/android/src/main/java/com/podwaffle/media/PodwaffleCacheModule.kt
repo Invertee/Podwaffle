@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.util.UnstableApi
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.Callable
@@ -11,6 +12,7 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
 /** Expo bridge for cache statistics, manual clearing and maintenance. */
+@UnstableApi
 class PodwaffleCacheModule : Module() {
     private val context: Context
         get() = requireNotNull(appContext.reactContext) { "ReactContext is null" }
