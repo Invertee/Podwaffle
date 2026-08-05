@@ -88,16 +88,12 @@ object PodwaffleCachePolicy {
                 return@removeMatching false
             }
             val playedAt = preferences.getLong(key(profileId, episodeId), 0L)
-            if (playedAt <= 0L || nowMs - playedAt < graceMs) {
-                return@removeMatching false
-            }
+            if (playedAt <= 0L) return@removeMatching false
             val downloadedAt = (download["downloadedAt"] as? String)
                 ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
-            if (downloadedAt != null && downloadedAt > playedAt) {
-                preferences.edit().remove(key(profileId, episodeId)).apply()
-                return@removeMatching false
-            }
-            true
+                ?: 0L
+            val retainFrom = maxOf(playedAt, downloadedAt)
+            nowMs - retainFrom >= graceMs
         }
     }
 
