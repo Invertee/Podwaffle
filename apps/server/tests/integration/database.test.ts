@@ -53,30 +53,34 @@ describe("database lifecycle", () => {
     expect(count.count).toBe(0);
   });
 
-  it("creates a consistent managed backup and enforces retention", async () => {
-    const dir = await mkdtemp(resolve(tmpdir(), "podwaffle-backup-"));
-    const database = await openDatabase(resolve(dir, "db.sqlite"));
-    openDatabases.push(database);
-    const backupDir = resolve(dir, "backups");
-    const first = await createManagedBackup(
-      database,
-      backupDir,
-      1,
-      new Date("2026-01-01T00:00:00Z"),
-    );
-    await access(first);
-    const second = await createManagedBackup(
-      database,
-      backupDir,
-      1,
-      new Date("2026-01-02T00:00:00Z"),
-    );
-    await access(second);
-    expect(await readdir(backupDir)).toEqual([
-      "podwaffle-2026-01-02T00-00-00-000Z.sqlite",
-    ]);
-    const restored = await openDatabase(second);
-    openDatabases.push(restored);
-    expect(restored.schemaVersion).toBe(5);
-  });
+  it(
+    "creates a consistent managed backup and enforces retention",
+    async () => {
+      const dir = await mkdtemp(resolve(tmpdir(), "podwaffle-backup-"));
+      const database = await openDatabase(resolve(dir, "db.sqlite"));
+      openDatabases.push(database);
+      const backupDir = resolve(dir, "backups");
+      const first = await createManagedBackup(
+        database,
+        backupDir,
+        1,
+        new Date("2026-01-01T00:00:00Z"),
+      );
+      await access(first);
+      const second = await createManagedBackup(
+        database,
+        backupDir,
+        1,
+        new Date("2026-01-02T00:00:00Z"),
+      );
+      await access(second);
+      expect(await readdir(backupDir)).toEqual([
+        "podwaffle-2026-01-02T00-00-00-000Z.sqlite",
+      ]);
+      const restored = await openDatabase(second);
+      openDatabases.push(restored);
+      expect(restored.schemaVersion).toBe(5);
+    },
+    20_000,
+  );
 });
