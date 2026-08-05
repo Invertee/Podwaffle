@@ -14,3 +14,9 @@ export {
   type NativeMediaError,
   type NativeEpisodeCompletion,
 } from "../../modules/podwaffle-media/src/index";
+
+export {
+  PodwaffleCacheModule,
+  type NativeCacheSummary,
+  type NativeCacheMaintenanceResult,
+} from "../../modules/podwaffle-media/src/cache";
