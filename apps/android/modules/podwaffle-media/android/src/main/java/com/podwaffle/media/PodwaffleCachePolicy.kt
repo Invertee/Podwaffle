@@ -38,14 +38,16 @@ object PodwaffleCachePolicy {
     }
 
     fun protectedEpisodeIds(context: Context): Set<String> {
-        val raw = context.applicationContext
+        val preferences = context.applicationContext
             .getSharedPreferences(PLAYBACK_PREFERENCES, Context.MODE_PRIVATE)
-            .getString("items", null)
-            ?: return emptySet()
+        val raw = preferences.getString("items", null) ?: return emptySet()
         return runCatching {
             val items = JSONArray(raw)
+            val currentIndex = preferences
+                .getInt("index", 0)
+                .coerceIn(0, (items.length() - 1).coerceAtLeast(0))
             buildSet {
-                for (index in 0 until items.length()) {
+                for (index in currentIndex until items.length()) {
                     val episodeId = items.getJSONObject(index).optString("episodeId")
                     if (episodeId.isNotBlank()) add(episodeId)
                 }
