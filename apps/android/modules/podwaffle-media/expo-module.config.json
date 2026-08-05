@@ -2,6 +2,9 @@
   "name": "podwaffle-media",
   "platforms": ["android"],
   "android": {
-    "modules": ["com.podwaffle.media.PodwaffleMediaModule"]
+    "modules": [
+      "com.podwaffle.media.PodwaffleMediaModule",
+      "com.podwaffle.media.PodwaffleCacheModule"
+    ]
   }
 }
