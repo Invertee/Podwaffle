@@ -152,6 +152,47 @@ module.exports = function withPodwaffleQueueTransitions(config) {
       fs.writeFileSync(autoPath, autoSource);
     }
 
+    const downloadStorePath = path.join(mediaRoot, "PodwaffleDownloadStore.kt");
+    let downloadSource = fs.readFileSync(downloadStorePath, "utf8");
+    if (!downloadSource.includes("Protect current and queued downloads during maintenance")) {
+      const maintenanceAnchor = `    fun maintenance(
+        maxAutomaticAgeDays: Int = 30,
+        maxStorageBytes: Long = 2_000_000_000L,
+    ): Map<String, Any?> {`;
+      const maintenanceReplacement = `    fun maintenance(
+        maxAutomaticAgeDays: Int = 30,
+        maxStorageBytes: Long = 2_000_000_000L,
+        // Protect current and queued downloads during maintenance.
+        protectedEpisodeIds: Set<String> =
+            PodwaffleCachePolicy.protectedEpisodeIds(context),
+    ): Map<String, Any?> {`;
+      const staleAnchor = `                val staleAutomatic =
+                    entry.reason == "automatic" &&
+                        entry.createdAtMs < cutoff &&`;
+      const staleReplacement = `                val staleAutomatic =
+                    entry.reason == "automatic" &&
+                        entry.episodeId !in protectedEpisodeIds &&
+                        entry.createdAtMs < cutoff &&`;
+      const storageAnchor = `.filter { it.first.reason == "automatic" }
+                .sortedBy { it.first.createdAtMs }) {`;
+      const storageReplacement = `.filter {
+                    it.first.reason == "automatic" &&
+                        it.first.episodeId !in protectedEpisodeIds
+                }
+                .sortedBy { it.first.createdAtMs }) {`;
+      for (const [anchor, replacement, message] of [
+        [maintenanceAnchor, maintenanceReplacement, "maintenance signature"],
+        [staleAnchor, staleReplacement, "automatic age cleanup"],
+        [storageAnchor, storageReplacement, "automatic storage cleanup"],
+      ]) {
+        if (!downloadSource.includes(anchor)) {
+          throw new Error(`Could not locate download ${message}.`);
+        }
+        downloadSource = downloadSource.replace(anchor, replacement);
+      }
+      fs.writeFileSync(downloadStorePath, downloadSource);
+    }
+
     return mod;
   }]);
 };
