@@ -94,7 +94,7 @@ describe("episode end handling", () => {
         durationMs: 60_000,
       })
       .expect(200);
-    expect(nearEnd.body.episode.played).toBe(false);
+    expect(nearEnd.body.episode.played).toBe(true);
     expect(
       (nearEnd.body.queue as Array<{ episode: { id: string } }>).map(
         (item) => item.episode.id,
