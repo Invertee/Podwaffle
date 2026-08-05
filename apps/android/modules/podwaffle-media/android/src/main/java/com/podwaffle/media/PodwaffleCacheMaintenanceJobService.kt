@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 /** Runs bounded download maintenance and played-episode cleanup once per day. */
-@UnstableApi
+@OptIn(UnstableApi::class)
 class PodwaffleCacheMaintenanceJobService : JobService() {
     private var work: Future<*>? = null
     @Volatile
