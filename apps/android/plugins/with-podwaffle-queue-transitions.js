@@ -4,7 +4,7 @@ const { withDangerousMod } = require("expo/config-plugins");
 
 module.exports = function withPodwaffleQueueTransitions(config) {
   return withDangerousMod(config, ["android", async (mod) => {
-    const servicePath = path.join(
+    const mediaRoot = path.join(
       mod.modRequest.projectRoot,
       "modules",
       "podwaffle-media",
@@ -15,14 +15,12 @@ module.exports = function withPodwaffleQueueTransitions(config) {
       "com",
       "podwaffle",
       "media",
-      "PodwaffleMediaService.kt",
     );
+    const servicePath = path.join(mediaRoot, "PodwaffleMediaService.kt");
     let source = fs.readFileSync(servicePath, "utf8");
-    if (source.includes("Publish the new queue state before completion")) {
-      return mod;
-    }
 
-    const previous = `            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+    if (!source.includes("Publish the new queue state before completion")) {
+      const previous = `            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (activeOwner() == null) return
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                     lastMediaItem?.let(::notifyItemEnded)
@@ -33,7 +31,7 @@ module.exports = function withPodwaffleQueueTransitions(config) {
                 lastObservedDurationMs = null
                 persistPlayback()
             }`;
-    const replacement = `            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+      const replacement = `            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (activeOwner() == null) return
                 val completedItem = if (
                     reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
@@ -57,11 +55,87 @@ module.exports = function withPodwaffleQueueTransitions(config) {
                 }
             }`;
 
-    if (!source.includes(previous)) {
-      throw new Error("Could not locate the native media transition listener.");
+      if (!source.includes(previous)) {
+        throw new Error("Could not locate the native media transition listener.");
+      }
+      source = source.replace(previous, replacement);
     }
-    source = source.replace(previous, replacement);
+
+    if (!source.includes("Retain played downloads for one day")) {
+      const playedAnchor = `        lastCompletedMediaId = media.episodeId
+        persistPlayback()`;
+      const playedReplacement = `        lastCompletedMediaId = media.episodeId
+        // Retain played downloads for one day before scheduled cleanup.
+        PodwaffleCachePolicy.markPlayed(this, media.episodeId)
+        persistPlayback()`;
+      if (!source.includes(playedAnchor)) {
+        throw new Error("Could not locate native episode completion persistence.");
+      }
+      source = source.replace(playedAnchor, playedReplacement);
+    }
+
+    if (!source.includes("Clear the final native playlist")) {
+      const endAnchor = `        eventEmitter?.invoke(
+            "media.item.ended",
+            mapOf(
+                "episodeId" to media.episodeId,
+                "positionMs" to positionMs,
+                "durationMs" to durationMs,
+                "source" to source,
+            ),
+        )
+    }
+
+    private fun persistPlayback()`;
+      const endReplacement = `        val advancedToNext = activePlayer?.currentMediaItem?.mediaId
+            ?.let { it != media.episodeId }
+            ?: false
+        eventEmitter?.invoke(
+            "media.item.ended",
+            mapOf(
+                "episodeId" to media.episodeId,
+                "positionMs" to positionMs,
+                "durationMs" to durationMs,
+                "source" to source,
+            ),
+        )
+        if (!advancedToNext) {
+            // Clear the final native playlist after publishing completion. This
+            // removes the media notification and prevents a later queue refresh
+            // from reconstructing the episode that just finished.
+            handler.post {
+                val currentId = activePlayer?.currentMediaItem?.mediaId
+                if (currentId == null || currentId == media.episodeId) stop()
+            }
+        }
+    }
+
+    private fun persistPlayback()`;
+      if (!source.includes(endAnchor)) {
+        throw new Error("Could not locate the native episode completion event.");
+      }
+      source = source.replace(endAnchor, endReplacement);
+    }
+
     fs.writeFileSync(servicePath, source);
+
+    const modulePath = path.join(mediaRoot, "PodwaffleMediaModule.kt");
+    let moduleSource = fs.readFileSync(modulePath, "utf8");
+    if (!moduleSource.includes("Cancel played-cache cleanup when queued")) {
+      const queueAnchor = `                snapshot.items.forEach { media ->
+                    if (`;
+      const queueReplacement = `                snapshot.items.forEach { media ->
+                    // Cancel played-cache cleanup when queued again so a retained
+                    // file cannot be deleted while it is current or coming up.
+                    PodwaffleCachePolicy.markQueued(context, media.episodeId)
+                    if (`;
+      if (!moduleSource.includes(queueAnchor)) {
+        throw new Error("Could not locate automatic queue downloads.");
+      }
+      moduleSource = moduleSource.replace(queueAnchor, queueReplacement);
+      fs.writeFileSync(modulePath, moduleSource);
+    }
+
     return mod;
   }]);
 };
