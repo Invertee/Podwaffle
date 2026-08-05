@@ -136,6 +136,22 @@ module.exports = function withPodwaffleQueueTransitions(config) {
       fs.writeFileSync(modulePath, moduleSource);
     }
 
+    const autoPath = path.join(mediaRoot, "PodwaffleAutoMediaService.kt");
+    let autoSource = fs.readFileSync(autoPath, "utf8");
+    if (!autoSource.includes("Cancel played-cache cleanup for Android Auto")) {
+      const autoQueueAnchor = `        items.mapNotNull(EpisodeMedia::fromMediaItem).forEach { queued ->
+            if (`;
+      const autoQueueReplacement = `        items.mapNotNull(EpisodeMedia::fromMediaItem).forEach { queued ->
+            // Cancel played-cache cleanup for Android Auto queue additions.
+            PodwaffleCachePolicy.markQueued(this, queued.episodeId)
+            if (`;
+      if (!autoSource.includes(autoQueueAnchor)) {
+        throw new Error("Could not locate Android Auto automatic queue downloads.");
+      }
+      autoSource = autoSource.replace(autoQueueAnchor, autoQueueReplacement);
+      fs.writeFileSync(autoPath, autoSource);
+    }
+
     return mod;
   }]);
 };
