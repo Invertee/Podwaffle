@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("episode end handling", () => {
-  it("does not complete or advance the queue before actual media end", async () => {
+  it("waits for actual media end and becomes idle after the final item", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);
     const client = supertest.agent(created.baseUrl);
@@ -103,7 +103,7 @@ describe("episode end handling", () => {
     expect((await client.get("/api/v1/playback").expect(200)).body.playback)
       .toMatchObject({ episode: { id: firstEpisodeId } });
 
-    const ended = await client
+    const firstEnded = await client
       .post(`/api/v1/episodes/${firstEpisodeId}/progress`)
       .send({
         commandId: randomUUID(),
@@ -111,13 +111,37 @@ describe("episode end handling", () => {
         durationMs: 60_000,
       })
       .expect(200);
-    expect(ended.body.episode.played).toBe(true);
+    expect(firstEnded.body.episode.played).toBe(true);
     expect(
-      (ended.body.queue as Array<{ episode: { id: string } }>).map(
+      (firstEnded.body.queue as Array<{ episode: { id: string } }>).map(
         (item) => item.episode.id,
       ),
     ).toEqual([secondEpisodeId]);
     expect((await client.get("/api/v1/playback").expect(200)).body.playback)
       .toMatchObject({ episode: { id: secondEpisodeId }, positionMs: 0 });
+
+    const finalEnded = await client
+      .post(`/api/v1/episodes/${secondEpisodeId}/progress`)
+      .send({
+        commandId: randomUUID(),
+        positionMs: 90_000,
+        durationMs: 90_000,
+      })
+      .expect(200);
+    expect(finalEnded.body.episode.played).toBe(true);
+    expect(finalEnded.body.queue).toEqual([]);
+    expect((await client.get("/api/v1/playback").expect(200)).body.playback)
+      .toMatchObject({
+        episode: null,
+        positionMs: 0,
+        durationMs: null,
+        state: "stopped",
+        mode: "local",
+        activeDeviceId: null,
+        leaseExpiresAt: null,
+        castOwnerDeviceId: null,
+        castSessionId: null,
+        ownedByCurrentDevice: false,
+      });
   });
 });
