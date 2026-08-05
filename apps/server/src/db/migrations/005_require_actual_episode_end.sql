@@ -1,13 +1,43 @@
--- An episode may be considered played near its end, but queue advancement must
--- only happen once reported playback reaches the actual duration. Enforce that
--- invariant in SQLite so Android, web and Cast share the same completion rule,
--- including episodes deliberately marked unplayed.
+-- Automatic played state and queue advancement require the actual reported media
+-- end. Manual played/unplayed choices remain untouched. Exact-end queue movement
+-- is enforced in SQLite so Android, web and Cast share the same completion rule.
 
+DROP TRIGGER IF EXISTS episode_state_require_actual_end_after_insert;
+DROP TRIGGER IF EXISTS episode_state_require_actual_end_after_update;
 DROP TRIGGER IF EXISTS queue_current_restore_after_delete;
 
--- Queue edits still preserve an active item, including one marked played at the
--- presentation threshold. The normal end path is allowed through only when the
--- stored position has reached the stored duration.
+CREATE TRIGGER episode_state_require_actual_end_after_insert
+AFTER INSERT ON episode_state
+WHEN NEW.manual_play_state = 'none'
+  AND NEW.played = 1
+  AND NEW.duration_ms IS NOT NULL
+  AND NEW.duration_ms > 0
+  AND NEW.position_ms < NEW.duration_ms
+BEGIN
+  UPDATE episode_state
+  SET played = 0,
+      played_at = NULL
+  WHERE profile_id = NEW.profile_id
+    AND episode_id = NEW.episode_id;
+END;
+
+CREATE TRIGGER episode_state_require_actual_end_after_update
+AFTER UPDATE OF position_ms, duration_ms, played, manual_play_state ON episode_state
+WHEN NEW.manual_play_state = 'none'
+  AND NEW.played = 1
+  AND NEW.duration_ms IS NOT NULL
+  AND NEW.duration_ms > 0
+  AND NEW.position_ms < NEW.duration_ms
+BEGIN
+  UPDATE episode_state
+  SET played = 0,
+      played_at = NULL
+  WHERE profile_id = NEW.profile_id
+    AND episode_id = NEW.episode_id;
+END;
+
+-- Queue edits preserve an active item until its stored position reaches its
+-- stored duration. This also protects episodes deliberately marked unplayed.
 CREATE TRIGGER queue_current_restore_after_delete
 AFTER DELETE ON queue_items
 WHEN EXISTS (
