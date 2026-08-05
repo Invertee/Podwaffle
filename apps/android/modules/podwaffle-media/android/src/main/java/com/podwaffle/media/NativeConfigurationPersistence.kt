@@ -33,6 +33,7 @@ object NativeConfigurationPersistence {
             .putString(KEY_CONFIGURATION, value.toString())
             .apply()
         NativeConfigurationStore.current = configuration
+        PodwaffleCacheMaintenanceJobService.schedule(context.applicationContext)
     }
 
     fun load(context: Context): NativeConfiguration? {
@@ -69,6 +70,8 @@ object NativeConfigurationPersistence {
             .edit()
             .clear()
             .apply()
+        PodwaffleCacheMaintenanceJobService.cancel(context.applicationContext)
+        PodwaffleCachePolicy.clear(context.applicationContext)
         NativeConfigurationStore.current = null
         PodwaffleAutoCatalog.clear(context)
     }
