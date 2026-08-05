@@ -12,7 +12,7 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
 /** Expo bridge for cache statistics, manual clearing and maintenance. */
-@UnstableApi
+@OptIn(UnstableApi::class)
 class PodwaffleCacheModule : Module() {
     private val context: Context
         get() = requireNotNull(appContext.reactContext) { "ReactContext is null" }
