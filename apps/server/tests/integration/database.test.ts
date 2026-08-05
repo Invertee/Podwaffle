@@ -19,16 +19,16 @@ describe("database lifecycle", () => {
     const dir = await mkdtemp(resolve(tmpdir(), "podwaffle-db-"));
     const path = resolve(dir, "db.sqlite");
     const first = await openDatabase(path);
-    expect(first.schemaVersion).toBe(4);
+    expect(first.schemaVersion).toBe(5);
     first.close();
 
     const reopened = await openDatabase(path);
     openDatabases.push(reopened);
-    expect(reopened.schemaVersion).toBe(4);
+    expect(reopened.schemaVersion).toBe(5);
     const count = reopened.db
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(count.count).toBe(4);
+    expect(count.count).toBe(5);
   });
 
   it("rolls back failed transactions", async () => {
@@ -77,6 +77,6 @@ describe("database lifecycle", () => {
     ]);
     const restored = await openDatabase(second);
     openDatabases.push(restored);
-    expect(restored.schemaVersion).toBe(4);
+    expect(restored.schemaVersion).toBe(5);
   });
 });
