@@ -3,7 +3,9 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Snapshot, SyncEvent, SyncEventType } from "@podwaffle/contracts";
 import type { PodwaffleDatabase } from "../db/connection.js";
 import {
+  deviceIsPlaybackTarget,
   listProfileDevices,
+  publicDevicePlatform,
   type DeviceRow,
 } from "../db/repositories/devices.js";
 import { getProfile } from "../db/repositories/profiles.js";
@@ -21,12 +23,13 @@ export function mapDevice(row: DeviceRow, currentDeviceId?: string) {
   return {
     id: row.id,
     name: row.name,
-    platform: row.platform,
+    platform: publicDevicePlatform(row),
     appVersion: row.app_version,
     runtimeVersion: row.runtime_version,
     lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
     current: row.id === currentDeviceId,
+    playbackTarget: deviceIsPlaybackTarget(row),
   };
 }
 
