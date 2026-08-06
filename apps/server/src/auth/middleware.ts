@@ -1,8 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
-import type { DeviceRow } from "../db/repositories/devices.js";
+import type { DeviceRow, DeviceScope } from "../db/repositories/devices.js";
 import type { ProfileRow } from "../db/repositories/profiles.js";
 import type { PodwaffleDatabase } from "../db/connection.js";
-import { authenticateDevice } from "../db/repositories/devices.js";
+import {
+  authenticateDevice,
+  deviceHasScope,
+} from "../db/repositories/devices.js";
 import { getProfile } from "../db/repositories/profiles.js";
 import { ApiError } from "../api/errors.js";
 
@@ -82,6 +85,27 @@ export function requireAuth(database: PodwaffleDatabase) {
       return;
     }
     request.auth = auth;
+    next();
+  };
+}
+
+export function requireScope(scope: DeviceScope) {
+  return (request: Request, _response: Response, next: NextFunction): void => {
+    const device = request.auth?.device;
+    if (!device) {
+      next(new ApiError(401, "AUTH_REQUIRED", "Authentication is required"));
+      return;
+    }
+    if (!deviceHasScope(device, scope)) {
+      next(
+        new ApiError(
+          403,
+          "INSUFFICIENT_SCOPE",
+          `This device credential does not allow ${scope}`,
+        ),
+      );
+      return;
+    }
     next();
   };
 }
