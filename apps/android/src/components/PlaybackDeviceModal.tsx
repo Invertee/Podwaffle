@@ -67,15 +67,17 @@ export function PlaybackDeviceModal({
 
   const ordered = useMemo(
     () =>
-      [...devices].sort((a, b) => {
-        const rank = (device: Device) => {
-          if (device.current) return 0;
-          if (device.id === playback?.activeDeviceId) return 1;
-          if (Date.now() - Date.parse(device.lastSeenAt) < 5 * 60_000) return 2;
-          return 3;
-        };
-        return rank(a) - rank(b) || a.name.localeCompare(b.name);
-      }),
+      devices
+        .filter((device) => device.playbackTarget !== false)
+        .sort((a, b) => {
+          const rank = (device: Device) => {
+            if (device.current) return 0;
+            if (device.id === playback?.activeDeviceId) return 1;
+            if (Date.now() - Date.parse(device.lastSeenAt) < 5 * 60_000) return 2;
+            return 3;
+          };
+          return rank(a) - rank(b) || a.name.localeCompare(b.name);
+        }),
     [devices, playback?.activeDeviceId],
   );
 
