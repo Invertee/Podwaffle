@@ -48,14 +48,16 @@ export function PlaybackDevicePicker({
 
   const ordered = useMemo(
     () =>
-      [...devices].sort((a, b) => {
-        const rank = (device: Device) => {
-          if (device.current) return 0;
-          if (Date.now() - Date.parse(device.lastSeenAt) < 5 * 60_000) return 1;
-          return 2;
-        };
-        return rank(a) - rank(b) || a.name.localeCompare(b.name);
-      }),
+      devices
+        .filter((device) => device.playbackTarget !== false)
+        .sort((a, b) => {
+          const rank = (device: Device) => {
+            if (device.current) return 0;
+            if (Date.now() - Date.parse(device.lastSeenAt) < 5 * 60_000) return 1;
+            return 2;
+          };
+          return rank(a) - rank(b) || a.name.localeCompare(b.name);
+        }),
     [devices],
   );
 
