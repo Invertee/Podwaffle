@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from uuid import uuid4
@@ -11,6 +12,7 @@ from aiohttp import (
     ClientSession,
     ClientTimeout,
     ClientWebSocketResponse,
+    WSServerHandshakeError,
 )
 
 
@@ -83,10 +85,16 @@ class PodwaffleApi:
                     except (ValueError, ClientError):
                         body = {}
                 if response.status == 401:
-                    message = _error_message(body) or "Podwaffle credentials were rejected"
+                    message = (
+                        _error_message(body)
+                        or "Podwaffle credentials were rejected"
+                    )
                     raise PodwaffleAuthError(message)
                 if response.status >= 400:
-                    message = _error_message(body) or f"Podwaffle request failed ({response.status})"
+                    message = (
+                        _error_message(body)
+                        or f"Podwaffle request failed ({response.status})"
+                    )
                     raise PodwaffleApiError(message)
                 return body
         except PodwaffleApiError:
@@ -168,12 +176,20 @@ class PodwaffleApi:
         )
         url = urlunsplit((scheme, split.netloc, split.path, query, ""))
         try:
-            return await self.session.ws_connect(
-                url,
-                heartbeat=30,
-                ssl=self.verify_ssl,
-                timeout=self.timeout,
-            )
+            async with asyncio.timeout(20):
+                return await self.session.ws_connect(
+                    url,
+                    heartbeat=30,
+                    ssl=self.verify_ssl,
+                )
+        except WSServerHandshakeError as err:
+            if err.status == 401:
+                raise PodwaffleAuthError(
+                    "Podwaffle credentials were rejected"
+                ) from err
+            raise PodwaffleConnectionError(
+                f"Podwaffle live sync failed ({err.status})"
+            ) from err
         except (TimeoutError, ClientError) as err:
             raise PodwaffleConnectionError(
                 "Podwaffle live sync could not be reached"
