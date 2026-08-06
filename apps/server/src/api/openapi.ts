@@ -23,7 +23,11 @@ export function openApiDocument() {
     info: {
       title: "Podwaffle API",
       version: BUILD_VERSION,
-      description: `Podwaffle ${API_VERSION} REST and durable synchronisation API`,
+      description:
+        `Podwaffle ${API_VERSION} REST and durable synchronisation API. ` +
+        "Home Assistant joins use profile-scoped controller credentials that may " +
+        "read snapshots, sync and statistics and relay playback commands without " +
+        "becoming a playback target.",
     },
     servers: [{ url: "/" }],
     paths: {
@@ -37,7 +41,10 @@ export function openApiDocument() {
         post: {
           requestBody: { required: true },
           responses: {
-            "201": { description: "Device enrolled" },
+            "201": {
+              description:
+                "Device enrolled; platform home_assistant receives controller scopes",
+            },
             "401": { description: "Invalid join code" },
           },
         },
@@ -70,7 +77,10 @@ export function openApiDocument() {
               schema: { type: "string", format: "uuid" },
             },
           ],
-          responses: { "200": { description: "Device revoked" } },
+          responses: {
+            "200": { description: "Device revoked" },
+            "403": { description: "Credential lacks devices:write" },
+          },
         },
       },
       "/api/v1/snapshot": {
@@ -173,7 +183,10 @@ export function openApiDocument() {
       "/api/v1/playback/lease": {
         post: {
           security: authenticated,
-          responses: { "200": { description: "Playback ownership acquired" } },
+          responses: {
+            "200": { description: "Playback ownership acquired" },
+            "403": { description: "Controller credentials cannot own playback" },
+          },
         },
         delete: {
           security: authenticated,
@@ -206,7 +219,25 @@ export function openApiDocument() {
         post: {
           security: authenticated,
           responses: {
-            "202": { description: "Command relayed to the Cast owner" },
+            "202": { description: "Command relayed to the playback owner" },
+            "409": { description: "No active owner or invalid playback target" },
+          },
+        },
+      },
+      "/api/v1/playback/commands/{commandId}": {
+        get: {
+          security: authenticated,
+          parameters: [
+            {
+              name: "commandId",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          responses: {
+            "200": { description: "Playback command status" },
+            "404": { description: "Command is not visible to this device" },
           },
         },
       },
