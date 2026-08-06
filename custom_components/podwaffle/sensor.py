@@ -1,0 +1,175 @@
+"""Sensor entities for Podwaffle profiles."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTime
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from . import coordinators_for_entry
+from .coordinator import PodwaffleCoordinator
+from .entity import PodwaffleEntity
+
+SENSORS: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
+        key="queue_remaining",
+        name="Queue remaining",
+        icon="mdi:playlist-clock",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="queue_episodes",
+        name="Queue episodes",
+        icon="mdi:playlist-music",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="listening_today",
+        name="Listening today",
+        icon="mdi:timer-music-outline",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="listening_30d",
+        name="Listening 30 days",
+        icon="mdi:calendar-clock",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="episodes_completed_30d",
+        name="Episodes completed 30 days",
+        icon="mdi:check-circle-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="current_streak",
+        name="Current listening streak",
+        icon="mdi:fire",
+        native_unit_of_measurement="d",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="subscriptions",
+        name="Subscriptions",
+        icon="mdi:podcast",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Podwaffle profile sensors."""
+    async_add_entities(
+        PodwaffleSensor(coordinator, description)
+        for coordinator in coordinators_for_entry(hass, entry).values()
+        for description in SENSORS
+    )
+
+
+class PodwaffleSensor(PodwaffleEntity, SensorEntity):
+    """A statistic or queue measurement for one profile."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: PodwaffleCoordinator,
+        description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.profile_id}_{description.key}"
+
+    @property
+    def native_value(self) -> int | float | None:
+        """Return the current sensor value."""
+        key = self.entity_description.key
+        if key == "queue_remaining":
+            remaining, _unknown = _queue_remaining(self.coordinator.data.snapshot)
+            return round(remaining / 1000)
+        if key == "queue_episodes":
+            queue = self.coordinator.data.snapshot.get("queue")
+            return len(queue) if isinstance(queue, list) else 0
+        if key == "listening_today":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_today.get("listenedMs")
+            )
+        if key == "listening_30d":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_30d.get("listenedMs")
+            )
+        if key == "episodes_completed_30d":
+            return _number(self.coordinator.data.stats_30d.get("episodesCompleted"))
+        if key == "current_streak":
+            return _number(self.coordinator.data.stats_30d.get("currentStreak"))
+        if key == "subscriptions":
+            return _number(self.coordinator.data.stats_30d.get("subscriptions"))
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.key != "queue_remaining":
+            return None
+        _remaining, unknown = _queue_remaining(self.coordinator.data.snapshot)
+        return {"unknown_duration_episodes": unknown}
+
+
+def _number(value: Any) -> int:
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _milliseconds_as_seconds(value: Any) -> int:
+    return round(_number(value) / 1000)
+
+
+def _queue_remaining(snapshot: dict[str, Any]) -> tuple[int, int]:
+    queue = snapshot.get("queue")
+    playback = snapshot.get("playback")
+    if not isinstance(queue, list):
+        return 0, 0
+    playback = playback if isinstance(playback, dict) else {}
+    active_episode = playback.get("episode")
+    active_id = active_episode.get("id") if isinstance(active_episode, dict) else None
+    position_ms = _number(playback.get("positionMs"))
+    playback_duration = playback.get("durationMs")
+    total = 0
+    unknown = 0
+    for item in queue:
+        if not isinstance(item, dict):
+            continue
+        episode = item.get("episode")
+        if not isinstance(episode, dict):
+            continue
+        duration = episode.get("durationMs")
+        if episode.get("id") == active_id and isinstance(
+            playback_duration, (int, float)
+        ):
+            duration = playback_duration
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            unknown += 1
+            continue
+        total += max(0, round(duration) - position_ms) if episode.get("id") == active_id else round(duration)
+    return total, unknown
