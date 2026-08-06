@@ -167,6 +167,26 @@ export const syncEventSchema = z.object({
   createdAt: z.string(),
 });
 
+export const serverMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("sync.event"), event: syncEventSchema }),
+  z.object({
+    type: z.literal("playback.command"),
+    command: playbackCommandSchema.extend({
+      requestedByDeviceId: z.uuid(),
+    }),
+  }),
+  z.object({
+    type: z.literal("playback.command.cancelled"),
+    commandId: z.uuid().optional(),
+    reason: z.string(),
+  }),
+  z.object({
+    type: z.literal("server.notice"),
+    code: z.string(),
+    message: z.string(),
+  }),
+]);
+
 export const playbackCommandResultSchema = z.object({
   commandId: z.uuid(),
   status: z.enum(["accepted", "rejected"]),
