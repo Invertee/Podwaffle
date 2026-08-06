@@ -1,7 +1,7 @@
 import type { QueueItem } from "@podwaffle/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 
-import { api } from "../api/client";
+import { ApiClientError, api } from "../api/client";
 import {
   authenticatedConnection,
   refreshProfile,
@@ -35,12 +35,12 @@ export default function QueueScreen() {
   const router = useRouter();
   const credentials = useAuthStore((state) => state.credentials);
   const cachedQueue = useAuthStore((state) => state.snapshot?.queue ?? []);
-  const currentEpisodeId = useNativeMediaStore(
-    (state) => state.state?.episodeId ?? null,
-  );
+  const nativePlayback = useNativeMediaStore((state) => state.state);
+  const currentEpisodeId = nativePlayback?.episodeId ?? null;
   const [orderedQueue, setOrderedQueue] = useState(cachedQueue);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const operationInFlight = useRef(false);
 
   const queue = useQuery({
     queryKey: ["android-queue"],
@@ -52,6 +52,16 @@ export default function QueueScreen() {
   useEffect(() => {
     setOrderedQueue(queue.data ?? []);
   }, [queue.data]);
+
+  const durationSummary = useMemo(
+    () => summarizeQueueDuration(orderedQueue, nativePlayback),
+    [
+      orderedQueue,
+      nativePlayback?.episodeId,
+      nativePlayback?.positionMs,
+      nativePlayback?.durationMs,
+    ],
+  );
 
   async function manualRefresh() {
     if (refreshing) return;
@@ -70,7 +80,10 @@ export default function QueueScreen() {
       token: string,
       revision: number,
     ) => Promise<unknown>,
+    ignoreMissing = false,
   ) {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setBusyItemId(itemId);
     try {
       const { serverUrl, token } = authenticatedConnection();
@@ -80,17 +93,31 @@ export default function QueueScreen() {
       await refreshProfile();
       await queue.refetch();
     } catch (error) {
+      if (
+        ignoreMissing &&
+        error instanceof ApiClientError &&
+        error.status === 404
+      ) {
+        // A rapid second tap or a live queue update can make the local row stale
+        // after the first removal has already succeeded. Treat that as the desired
+        // final state and reconcile instead of showing an error.
+        await refreshProfile().catch(() => undefined);
+        await queue.refetch().catch(() => undefined);
+        return;
+      }
       Alert.alert(
         "Queue update failed",
         error instanceof Error ? error.message : "The queue could not be updated.",
       );
     } finally {
+      operationInFlight.current = false;
       setBusyItemId(null);
     }
   }
 
   async function move(from: number, to: number) {
-    if (from === to || busyItemId) return;
+    if (from === to || busyItemId || operationInFlight.current) return;
+    operationInFlight.current = true;
     const prior = orderedQueue;
     const next = [...orderedQueue];
     next.splice(to, 0, ...next.splice(from, 1));
@@ -117,22 +144,32 @@ export default function QueueScreen() {
           : "The queue order could not be saved.",
       );
     } finally {
+      operationInFlight.current = false;
       setBusyItemId(null);
     }
   }
 
   function confirmClear() {
-    Alert.alert("Clear queue?", "All queued episodes will be removed.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: () =>
-          void mutate("clear", (serverUrl, token, revision) =>
-            api.clearQueue(serverUrl, token, revision),
-          ),
-      },
-    ]);
+    const keepsCurrent = orderedQueue.some(
+      (item) => item.episode.id === currentEpisodeId,
+    );
+    Alert.alert(
+      "Clear queue?",
+      keepsCurrent
+        ? "All upcoming episodes will be removed. The current episode will stay."
+        : "All queued episodes will be removed.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () =>
+            void mutate("clear", (serverUrl, token, revision) =>
+              api.clearQueue(serverUrl, token, revision),
+            ),
+        },
+      ],
+    );
   }
 
   return (
@@ -148,8 +185,9 @@ export default function QueueScreen() {
         </Pressable>
         <View style={styles.headerCopy}>
           <Text style={styles.title}>Queue</Text>
-          <Text style={styles.subtitle}>
+          <Text style={styles.subtitle} numberOfLines={1}>
             {orderedQueue.length} episode{orderedQueue.length === 1 ? "" : "s"}
+            {` · ${durationSummary}`}
           </Text>
         </View>
         {orderedQueue.length > 0 ? (
@@ -157,7 +195,9 @@ export default function QueueScreen() {
             style={({ pressed }) => [
               styles.clearButton,
               pressed && styles.pressed,
+              Boolean(busyItemId) && styles.disabled,
             ]}
+            disabled={Boolean(busyItemId)}
             onPress={confirmClear}
             accessibilityRole="button"
             accessibilityLabel="Clear queue"
@@ -194,8 +234,11 @@ export default function QueueScreen() {
               anyBusy={Boolean(busyItemId)}
               onMove={(to) => void move(index, to)}
               onRemove={() =>
-                void mutate(item.id, (serverUrl, token, revision) =>
-                  api.removeQueue(serverUrl, token, item.id, revision),
+                void mutate(
+                  item.id,
+                  (serverUrl, token, revision) =>
+                    api.removeQueue(serverUrl, token, item.id, revision),
+                  true,
                 )
               }
             />
@@ -213,6 +256,43 @@ export default function QueueScreen() {
       )}
     </View>
   );
+}
+
+function summarizeQueueDuration(
+  items: QueueItem[],
+  playback: {
+    episodeId: string | null;
+    positionMs: number;
+    durationMs: number | null;
+  } | null,
+): string {
+  if (items.length === 0) return "0 min remaining";
+  let totalMs = 0;
+  let unknownDurations = 0;
+
+  for (const item of items) {
+    const active = item.episode.id === playback?.episodeId;
+    const durationMs = active
+      ? (playback.durationMs ?? item.episode.durationMs)
+      : item.episode.durationMs;
+    if (!durationMs || durationMs <= 0) {
+      unknownDurations += 1;
+      continue;
+    }
+    totalMs += active
+      ? Math.max(0, durationMs - playback.positionMs)
+      : durationMs;
+  }
+
+  if (totalMs <= 0 && unknownDurations > 0) {
+    return unknownDurations === 1
+      ? "duration unknown"
+      : `${unknownDurations} durations unknown`;
+  }
+  const known = `${formatDurationMs(totalMs)} remaining`;
+  return unknownDurations > 0
+    ? `${known} · ${unknownDurations} unknown`
+    : known;
 }
 
 function QueueRow({
@@ -259,9 +339,9 @@ function QueueRow({
           style={({ pressed }) => [
             styles.primaryAction,
             pressed && styles.pressed,
-            busy && styles.disabled,
+            (busy || anyBusy) && styles.disabled,
           ]}
-          disabled={busy || !item.episode.enclosureUrl}
+          disabled={anyBusy || !item.episode.enclosureUrl}
           onPress={() =>
             void playbackController.playEpisode(item.episode).catch((error) =>
               Alert.alert(
@@ -281,9 +361,9 @@ function QueueRow({
           style={({ pressed }) => [
             styles.iconButton,
             pressed && styles.pressed,
-            (anyBusy || index === 0) && styles.disabled,
+            (anyBusy || active || index === 0) && styles.disabled,
           ]}
-          disabled={anyBusy || index === 0}
+          disabled={anyBusy || active || index === 0}
           onPress={() => onMove(index - 1)}
           accessibilityRole="button"
           accessibilityLabel={`Move ${item.episode.title} earlier`}
@@ -294,9 +374,9 @@ function QueueRow({
           style={({ pressed }) => [
             styles.iconButton,
             pressed && styles.pressed,
-            (anyBusy || index === count - 1) && styles.disabled,
+            (anyBusy || active || index === count - 1) && styles.disabled,
           ]}
-          disabled={anyBusy || index === count - 1}
+          disabled={anyBusy || active || index === count - 1}
           onPress={() => onMove(index + 1)}
           accessibilityRole="button"
           accessibilityLabel={`Move ${item.episode.title} later`}
@@ -308,12 +388,16 @@ function QueueRow({
             styles.iconButton,
             styles.removeButton,
             pressed && styles.pressed,
-            busy && styles.disabled,
+            (anyBusy || active) && styles.disabled,
           ]}
-          disabled={busy}
+          disabled={anyBusy || active}
           onPress={onRemove}
           accessibilityRole="button"
-          accessibilityLabel={`Remove ${item.episode.title}`}
+          accessibilityLabel={
+            active
+              ? `${item.episode.title} is currently playing and cannot be removed`
+              : `Remove ${item.episode.title}`
+          }
         >
           {busy ? (
             <ActivityIndicator size="small" color={colors.error} />
