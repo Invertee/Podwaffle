@@ -9,7 +9,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
 )
-from homeassistant.components.media_player.const import MediaPlayerState
+from homeassistant.components.media_player.const import MediaPlayerState, MediaType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -80,9 +80,13 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
         return value if isinstance(value, str) else None
 
     @property
-    def media_series_title(self) -> str | None:
+    def media_artist(self) -> str | None:
         value = self._episode.get("podcastTitle")
         return value if isinstance(value, str) else None
+
+    @property
+    def media_series_title(self) -> str | None:
+        return self.media_artist
 
     @property
     def media_content_id(self) -> str | None:
@@ -91,7 +95,7 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
 
     @property
     def media_content_type(self) -> str | None:
-        return "podcast" if self._episode else None
+        return MediaType.PODCAST if self._episode else None
 
     @property
     def media_duration(self) -> float | None:
