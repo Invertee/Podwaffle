@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import (
     PodwaffleApi,
+    PodwaffleApiError,
     PodwaffleAuthError,
     PodwaffleConnectionError,
 )
@@ -48,6 +49,7 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"Podwaffle {profile['profile_name']}",
             update_interval=UPDATE_INTERVAL,
         )
@@ -87,7 +89,7 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
             )
         except PodwaffleAuthError as err:
             raise ConfigEntryAuthFailed from err
-        except PodwaffleConnectionError as err:
+        except PodwaffleApiError as err:
             raise UpdateFailed(str(err)) from err
 
     def async_start_live_sync(self) -> None:
