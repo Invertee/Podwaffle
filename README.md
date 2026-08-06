@@ -1,6 +1,6 @@
 # Podwaffle
 
-Podwaffle is a self-hosted podcast system for the Web and Android clients, hostable in Home Assistant (and elsewhere). 
+Podwaffle is a self-hosted podcast system for the Web and Android clients, hostable in Home Assistant (and elsewhere).
 
 ## Requirements
 
@@ -81,13 +81,38 @@ forwarded public scheme is HTTPS.
 never cached. Fingerprinted `/assets/*` responses are immutable; the application
 shell is not cached.
 
+## Home Assistant integration
+
+The repository includes a HACS-compatible custom integration under
+`custom_components/podwaffle`. It creates one Home Assistant device per selected
+Podwaffle profile, containing a `media_player`, queue-duration/count sensors and
+listening-statistic sensors.
+
+The media player controls the Android, web or Cast client currently owning that
+profile's playback. Home Assistant does not render the audio itself. Play, pause,
+seek, next and previous are delivered through Podwaffle's existing live playback
+command channel.
+
+Install through HACS as a custom integration repository, or copy
+`custom_components/podwaffle` to `/config/custom_components/podwaffle`, restart
+Home Assistant and add **Podwaffle** from **Settings → Devices & services**. The
+config flow uses the direct Podwaffle URL on port `3000`, not its ingress panel
+URL. See [`docs/home-assistant-integration.md`](docs/home-assistant-integration.md)
+for setup, entities and security details.
+
 ## Authentication
 
 Clients list enabled profiles and join with the configured code. Comparison is
 timing-safe. Web credentials use a year-long HttpOnly, SameSite=Lax cookie and are
 never placed in local storage. Android joins use the same endpoint with
-`platform: "android"` and receive a bearer token. Only a SHA-256 hash of the
-256-bit random device token is stored.
+`platform: "android"` and receive a bearer token. Home Assistant uses
+`platform: "home_assistant"` and receives one restricted controller token for each
+selected profile. Only a SHA-256 hash of each 256-bit random device token is stored.
+
+Home Assistant controller credentials may read snapshots, live sync and statistics
+and relay playback commands. They cannot become playback targets, acquire the
+playback lease, mutate the library, report telemetry or revoke devices. Existing
+web and Android credentials retain full profile access.
 
 Join attempts are rate-limited by proxy-aware source IP. Active devices are listed
 at `/api/v1/devices`; revocation immediately invalidates REST and WebSocket access.
