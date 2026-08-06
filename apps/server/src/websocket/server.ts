@@ -11,6 +11,10 @@ import {
   parseCookies,
   DEVICE_COOKIE,
 } from "../auth/middleware.js";
+import {
+  deviceHasScope,
+  deviceIsPlaybackTarget,
+} from "../db/repositories/devices.js";
 import type { SyncService } from "../sync/service.js";
 import { log } from "../logging.js";
 import { applyCastCommandResult } from "../api/playback.js";
@@ -26,6 +30,7 @@ interface Client {
   socket: WebSocket;
   profileId: string;
   deviceId: string;
+  playbackTarget: boolean;
 }
 
 export class PodwaffleWebSocketServer {
@@ -59,8 +64,9 @@ export class PodwaffleWebSocketServer {
       this.webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
         const client: Client = {
           socket: webSocket,
-          profileId: auth.profileId,
-          deviceId: auth.deviceId,
+          profileId: auth.profile.id,
+          deviceId: auth.device.id,
+          playbackTarget: deviceIsPlaybackTarget(auth.device),
         };
         this.clients.add(client);
         webSocket.on("close", () => this.clients.delete(client));
@@ -87,6 +93,14 @@ export class PodwaffleWebSocketServer {
           } else {
             if (parsed.data.type === "client.heartbeat") webSocket.pong();
             if (parsed.data.type === "playback.command.result") {
+              if (!client.playbackTarget) {
+                this.sendNotice(
+                  webSocket,
+                  "PLAYBACK_TARGET_REQUIRED",
+                  "Controller devices cannot submit playback results",
+                );
+                return;
+              }
               try {
                 applyCastCommandResult(
                   this.database,
@@ -137,7 +151,7 @@ export class PodwaffleWebSocketServer {
     const bearer = url.searchParams.get("token") ?? undefined;
     const cookie = parseCookies(request.headers.cookie)[DEVICE_COOKIE];
     const auth = authenticateToken(this.database, bearer ?? cookie);
-    if (!auth) return undefined;
+    if (!auth || !deviceHasScope(auth.device, "sync:read")) return undefined;
 
     // Reverse proxies commonly omit the external port from X-Forwarded-Host.
     // Compare hostnames rather than complete host:port values so a public URL
@@ -160,7 +174,7 @@ export class PodwaffleWebSocketServer {
         return undefined;
       }
     }
-    return { profileId: auth.profile.id, deviceId: auth.device.id };
+    return auth;
   }
 
   private sendEvent(socket: WebSocket, event: SyncEvent): void {
@@ -196,6 +210,7 @@ export class PodwaffleWebSocketServer {
       if (
         client.profileId === profileId &&
         client.deviceId === ownerDeviceId &&
+        client.playbackTarget &&
         client.socket.readyState === WebSocket.OPEN
       ) {
         this.sendMessage(client.socket, {
