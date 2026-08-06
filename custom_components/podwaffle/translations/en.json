@@ -1,0 +1,48 @@
+{
+  "title": "Podwaffle",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Podwaffle",
+        "description": "Connect Home Assistant to the direct Podwaffle server address.",
+        "data": {
+          "base_url": "Server URL",
+          "join_code": "Join code",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "base_url": "For example, http://192.168.1.20:3000.",
+          "join_code": "The code configured in the Podwaffle add-on.",
+          "verify_ssl": "Disable only for a trusted local server using a self-signed certificate."
+        }
+      },
+      "profiles": {
+        "title": "Select Podwaffle profiles",
+        "description": "A media player and listening sensors will be created for each selected profile.",
+        "data": {
+          "profile_ids": "Profiles"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Podwaffle",
+        "description": "Enter the current Podwaffle join code to replace revoked controller credentials.",
+        "data": {
+          "join_code": "Join code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to Podwaffle.",
+      "invalid_auth": "The Podwaffle join code is invalid.",
+      "invalid_url": "Enter a complete HTTP or HTTPS URL.",
+      "no_profiles": "Podwaffle did not return any enabled profiles.",
+      "profiles_required": "Select at least one profile.",
+      "unknown": "Podwaffle returned an unexpected response."
+    },
+    "abort": {
+      "already_configured": "This Podwaffle server is already configured.",
+      "reauth_failed": "The Podwaffle config entry could not be found.",
+      "reauth_successful": "Podwaffle has been reconnected."
+    }
+  }
+}
