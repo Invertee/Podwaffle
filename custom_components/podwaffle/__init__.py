@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -38,7 +38,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         for raw_profile in profiles:
-            profile = PodwaffleProfileConfig(**dict(raw_profile))
+            profile = cast(PodwaffleProfileConfig, dict(raw_profile))
             api = PodwaffleApi(
                 session,
                 base_url,
