@@ -149,17 +149,36 @@ class PodwaffleApi:
         **parameters: Any,
     ) -> dict[str, Any]:
         """Relay a media control command to the active Podwaffle client."""
+        command_id = str(uuid4())
         result = await self._request(
             "POST",
             "/api/v1/playback/commands",
-            payload={"commandId": str(uuid4()), "action": action, **parameters},
+            payload={"commandId": command_id, "action": action, **parameters},
         )
-        if result.get("status") == "pending" and not result.get("delivered"):
+        status = result.get("status")
+        if status == "pending" and not result.get("delivered"):
             raise PodwaffleCommandError(
                 "The active Podwaffle playback device is not connected"
             )
-        if result.get("status") == "rejected":
-            raise PodwaffleCommandError("The playback device rejected the command")
+        if status in {"rejected", "cancelled"}:
+            raise PodwaffleCommandError(_command_error(result))
+        if status != "pending":
+            return result
+
+        # The REST dispatch is intentionally asynchronous. Poll its requester-only
+        # status endpoint briefly so Home Assistant actions report a client-side
+        # rejection rather than appearing successful. The later WebSocket state
+        # event remains authoritative for entity state.
+        for _attempt in range(20):
+            await asyncio.sleep(0.25)
+            confirmed = await self._request(
+                "GET", f"/api/v1/playback/commands/{command_id}"
+            )
+            confirmed_status = confirmed.get("status")
+            if confirmed_status == "accepted":
+                return confirmed
+            if confirmed_status in {"rejected", "cancelled"}:
+                raise PodwaffleCommandError(_command_error(confirmed))
         return result
 
     async def async_websocket(
@@ -209,3 +228,12 @@ def _error_message(body: dict[str, Any]) -> str | None:
         if isinstance(message, str):
             return message
     return None
+
+
+def _command_error(body: dict[str, Any]) -> str:
+    result = body.get("result")
+    if isinstance(result, dict):
+        message = result.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return "The playback device rejected the command"
