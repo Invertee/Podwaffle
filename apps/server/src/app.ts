@@ -13,7 +13,11 @@ import type { AppConfig } from "./config.js";
 import type { PodwaffleDatabase } from "./db/connection.js";
 import { createDevice, listProfileDevices } from "./db/repositories/devices.js";
 import { getProfile, listEnabledProfiles } from "./db/repositories/profiles.js";
-import { DEVICE_COOKIE, requireAuth } from "./auth/middleware.js";
+import {
+  DEVICE_COOKIE,
+  requireAuth,
+  requireScope,
+} from "./auth/middleware.js";
 import { joinRateLimit } from "./auth/rate-limit.js";
 import { ApiError, errorHandler, notFound } from "./api/errors.js";
 import { mapDevice, type SyncService } from "./sync/service.js";
@@ -206,110 +210,140 @@ export function createApp(dependencies: AppDependencies): Express {
     response.json({ session: sessionFor(profile, device) });
   });
 
-  authenticated.get("/devices", (request, response) => {
-    response.json({
-      devices: listProfileDevices(database.db, request.auth!.profile.id).map(
-        (device) => mapDevice(device, request.auth!.device.id),
-      ),
-    });
-  });
+  authenticated.get(
+    "/devices",
+    requireScope("snapshot:read"),
+    (request, response) => {
+      response.json({
+        devices: listProfileDevices(database.db, request.auth!.profile.id).map(
+          (device) => mapDevice(device, request.auth!.device.id),
+        ),
+      });
+    },
+  );
 
-  authenticated.delete("/devices/:deviceId", (request, response, next) => {
-    try {
-      const command = revokeDeviceSchema.parse(request.body);
-      const { profile } = request.auth!;
-      const targetId = request.params.deviceId;
-      if (!targetId)
-        throw new ApiError(404, "NOT_FOUND", "Device was not found");
-      const applied = sync.command(
-        profile.id,
-        command.commandId,
-        "device.revoked",
-        (db) => {
-          const currentProfile = getProfile(db, profile.id);
-          if (
-            command.expectedRevision !== undefined &&
-            command.expectedRevision !== currentProfile?.revision
-          ) {
-            throw new ApiError(
-              409,
-              "REVISION_CONFLICT",
-              "Profile state has changed",
-              undefined,
-              currentProfile?.revision ?? profile.revision,
+  authenticated.delete(
+    "/devices/:deviceId",
+    requireScope("devices:write"),
+    (request, response, next) => {
+      try {
+        const command = revokeDeviceSchema.parse(request.body);
+        const { profile } = request.auth!;
+        const targetId = request.params.deviceId;
+        if (!targetId)
+          throw new ApiError(404, "NOT_FOUND", "Device was not found");
+        const applied = sync.command(
+          profile.id,
+          command.commandId,
+          "device.revoked",
+          (db) => {
+            const currentProfile = getProfile(db, profile.id);
+            if (
+              command.expectedRevision !== undefined &&
+              command.expectedRevision !== currentProfile?.revision
+            ) {
+              throw new ApiError(
+                409,
+                "REVISION_CONFLICT",
+                "Profile state has changed",
+                undefined,
+                currentProfile?.revision ?? profile.revision,
+              );
+            }
+            const target = db
+              .prepare(
+                "SELECT id FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
+              )
+              .get(targetId, profile.id) as { id: string } | undefined;
+            if (!target) {
+              throw new ApiError(404, "NOT_FOUND", "Device was not found");
+            }
+            db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(
+              new Date().toISOString(),
+              target.id,
             );
-          }
-          const target = db
-            .prepare(
-              "SELECT id FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
-            )
-            .get(targetId, profile.id) as { id: string } | undefined;
-          if (!target) {
-            throw new ApiError(404, "NOT_FOUND", "Device was not found");
-          }
-          db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(
-            new Date().toISOString(),
-            target.id,
-          );
-          return {
-            result: { deviceId: target.id, revoked: true },
-            payload: { deviceId: target.id },
-          };
-        },
-      );
-      webSockets.revokeDevice(targetId);
-      response.json({
-        ...applied.result,
-        revision:
-          applied.event?.revision ??
-          getProfile(database.db, profile.id)?.revision ??
-          profile.revision,
-        replayed: applied.replayed,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  authenticated.get("/snapshot", (request, response) => {
-    response.json(
-      sync.snapshot(request.auth!.profile.id, request.auth!.device.id),
-    );
-  });
-
-  authenticated.get("/sync", (request, response, next) => {
-    try {
-      const raw = request.query.afterRevision;
-      const afterRevision =
-        typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
-      if (!Number.isSafeInteger(afterRevision) || afterRevision < 0) {
-        throw new ApiError(
-          400,
-          "VALIDATION_FAILED",
-          "afterRevision must be a non-negative integer",
+            return {
+              result: { deviceId: target.id, revoked: true },
+              payload: { deviceId: target.id },
+            };
+          },
         );
-      }
-      const profileId = request.auth!.profile.id;
-      if (sync.requiresSnapshot(profileId, afterRevision)) {
-        response.status(409).json({
-          snapshotRequired: true,
-          currentRevision: getProfile(database.db, profileId)?.revision ?? 0,
+        webSockets.revokeDevice(targetId);
+        response.json({
+          ...applied.result,
+          revision:
+            applied.event?.revision ??
+            getProfile(database.db, profile.id)?.revision ??
+            profile.revision,
+          replayed: applied.replayed,
         });
-        return;
+      } catch (error) {
+        next(error);
       }
-      const events = sync.eventsAfter(profileId, afterRevision);
-      response.json({
-        events,
-        currentRevision:
-          events.at(-1)?.revision ??
-          getProfile(database.db, profileId)?.revision ??
-          afterRevision,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
+  authenticated.get(
+    "/snapshot",
+    requireScope("snapshot:read"),
+    (request, response) => {
+      response.json(
+        sync.snapshot(request.auth!.profile.id, request.auth!.device.id),
+      );
+    },
+  );
+
+  authenticated.get(
+    "/sync",
+    requireScope("sync:read"),
+    (request, response, next) => {
+      try {
+        const raw = request.query.afterRevision;
+        const afterRevision =
+          typeof raw === "string" && /^\d+$/.test(raw)
+            ? Number(raw)
+            : Number.NaN;
+        if (!Number.isSafeInteger(afterRevision) || afterRevision < 0) {
+          throw new ApiError(
+            400,
+            "VALIDATION_FAILED",
+            "afterRevision must be a non-negative integer",
+          );
+        }
+        const profileId = request.auth!.profile.id;
+        if (sync.requiresSnapshot(profileId, afterRevision)) {
+          response.status(409).json({
+            snapshotRequired: true,
+            currentRevision: getProfile(database.db, profileId)?.revision ?? 0,
+          });
+          return;
+        }
+        const events = sync.eventsAfter(profileId, afterRevision);
+        response.json({
+          events,
+          currentRevision:
+            events.at(-1)?.revision ??
+            getProfile(database.db, profileId)?.revision ??
+            afterRevision,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  authenticated.use("/profile", requireScope("profile:write"));
+  authenticated.use(
+    [
+      "/discover",
+      "/subscriptions",
+      "/podcasts",
+      "/episodes",
+      "/history",
+      "/queue",
+    ],
+    requireScope("catalog:write"),
+  );
   authenticated.use(createProfileRouter(database, sync));
   authenticated.use(createCatalogRouter(database, sync, config));
   authenticated.use(createPlaybackRouter(database, sync, webSockets));
