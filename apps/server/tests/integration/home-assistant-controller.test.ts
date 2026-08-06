@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import supertest from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -57,14 +58,14 @@ describe("Home Assistant controller credentials", () => {
     await request
       .delete(`/api/v1/devices/${controller.session.device.id}`)
       .set(authorization)
-      .send({ commandId: crypto.randomUUID() })
+      .send({ commandId: randomUUID() })
       .expect(403);
 
     await browser
       .post("/api/v1/playback/lease")
       .send({ positionMs: 0, playbackRate: 1 })
       .expect(200);
-    const commandId = crypto.randomUUID();
+    const commandId = randomUUID();
     const relayed = await request
       .post("/api/v1/playback/commands")
       .set(authorization)
@@ -79,7 +80,7 @@ describe("Home Assistant controller credentials", () => {
     await browser
       .post("/api/v1/playback/commands")
       .send({
-        commandId: crypto.randomUUID(),
+        commandId: randomUUID(),
         action: "play",
         targetDeviceId: controller.session.device.id,
       })
