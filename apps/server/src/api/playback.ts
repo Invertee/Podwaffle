@@ -12,6 +12,10 @@ import {
 } from "@podwaffle/contracts";
 import type { PodwaffleDatabase } from "../db/connection.js";
 import {
+  deviceIsPlaybackTarget,
+  type DeviceRow,
+} from "../db/repositories/devices.js";
+import {
   acquireLease,
   createCastCommand,
   getCastCommand,
@@ -28,6 +32,7 @@ import {
 } from "../playback/service.js";
 import { getEpisode, setEpisodeProgress } from "../podcasts/service.js";
 import type { SyncService } from "../sync/service.js";
+import { requireScope } from "../auth/middleware.js";
 import { ApiError } from "./errors.js";
 
 function leaseError(error: unknown): never {
@@ -53,230 +58,305 @@ export function createPlaybackRouter(
 ): express.Router {
   const router = express.Router();
 
-  router.get("/playback", (request, response) => {
-    response.json({
-      playback: playbackState(
-        database.db,
-        request.auth!.profile.id,
-        request.auth!.device.id,
-      ),
-    });
-  });
-
-  router.post("/playback/lease", (request, response, next) => {
-    try {
-      const input = playbackLeaseSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      const prior = playbackState(database.db, profile.id, device.id);
-      const applied = sync.mutate(
-        profile.id,
-        "playback.owner.updated",
-        (db) => {
-          acquireLease(db, profile.id, device.id, input);
-          const playback = playbackState(db, profile.id, device.id);
-          return {
-            result: { playback },
-            payload: {
-              playback,
-              previousOwnerDeviceId: prior.activeDeviceId,
-            },
-          };
-        },
-      );
-      response.json({ ...applied.result, revision: applied.event.revision });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.delete("/playback/lease", (request, response, next) => {
-    try {
-      const { profile, device } = request.auth!;
-      const applied = sync.mutate(
-        profile.id,
-        "playback.owner.updated",
-        (db) => {
-          releaseLease(db, profile.id, device.id);
-          const playback = playbackState(db, profile.id, device.id);
-          return { result: { playback }, payload: { playback } };
-        },
-      );
-      response.json({ ...applied.result, revision: applied.event.revision });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/playback/state", (request, response, next) => {
-    try {
-      const input = playbackStateSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      const applied = sync.mutate(
-        profile.id,
-        "playback.state.updated",
-        (db) => {
-          try {
-            updatePlayback(db, profile.id, device.id, input);
-          } catch (error) {
-            leaseError(error);
-          }
-          const priorEpisode = getEpisode(db, profile.id, input.episodeId);
-          const episode = setEpisodeProgress(
-            db,
-            profile.id,
-            input.episodeId,
-            input.positionMs,
-            input.durationMs,
-          );
-          if (priorEpisode && !priorEpisode.played && episode.played)
-            recordEpisodeCompletion(db, profile.id);
-          const playback = playbackState(db, profile.id, device.id);
-          return {
-            result: { playback, episode },
-            payload: { playback, episode },
-          };
-        },
-      );
-      response.json({ ...applied.result, revision: applied.event.revision });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/playback/cast", (request, response, next) => {
-    try {
-      const input = castStartSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      const applied = sync.command(
-        profile.id,
-        input.commandId,
-        "playback.cast.updated",
-        (db) => {
-          startCast(db, profile.id, device.id, input.confirmed);
-          const playback = playbackState(db, profile.id, device.id);
-          return { result: { playback }, payload: { playback } };
-        },
-      );
+  router.get(
+    "/playback",
+    requireScope("snapshot:read"),
+    (request, response) => {
       response.json({
-        ...applied.result,
-        revision: applied.event?.revision ?? profile.revision,
-        replayed: applied.replayed,
+        playback: playbackState(
+          database.db,
+          request.auth!.profile.id,
+          request.auth!.device.id,
+        ),
       });
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  router.delete("/playback/cast", (request, response, next) => {
-    try {
-      const input = castStopSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      const applied = sync.command(
-        profile.id,
-        input.commandId,
-        "playback.cast.updated",
-        (db) => {
-          try {
-            stopCast(db, profile.id, device.id, input);
-          } catch (error) {
-            if (
-              error instanceof Error &&
-              error.message === "CAST_OWNER_REQUIRED"
-            )
-              throw new ApiError(
-                409,
-                "CAST_OWNER_REQUIRED",
-                "This device does not own the Cast session",
-              );
-            throw error;
-          }
-          const playback = playbackState(db, profile.id, device.id);
-          return { result: { playback }, payload: { playback } };
-        },
-      );
-      response.json({
-        ...applied.result,
-        revision: applied.event?.revision ?? profile.revision,
-        replayed: applied.replayed,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/playback/commands", (request, response, next) => {
-    try {
-      const command = playbackCommandSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      let stored: ReturnType<typeof createCastCommand>;
+  router.post(
+    "/playback/lease",
+    requireScope("playback:write"),
+    (request, response, next) => {
       try {
-        stored = database.transaction(() => {
-          const targetDeviceId = command.targetDeviceId;
-          if (targetDeviceId) {
-            const target = database.db
-              .prepare(
-                "SELECT id FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
-              )
-              .get(targetDeviceId, profile.id) as { id: string } | undefined;
-            if (!target) {
-              throw new ApiError(
-                404,
-                "DEVICE_NOT_FOUND",
-                "The playback device was not found",
-              );
+        const input = playbackLeaseSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        const prior = playbackState(database.db, profile.id, device.id);
+        const applied = sync.mutate(
+          profile.id,
+          "playback.owner.updated",
+          (db) => {
+            acquireLease(db, profile.id, device.id, input);
+            const playback = playbackState(db, profile.id, device.id);
+            return {
+              result: { playback },
+              payload: {
+                playback,
+                previousOwnerDeviceId: prior.activeDeviceId,
+              },
+            };
+          },
+        );
+        response.json({ ...applied.result, revision: applied.event.revision });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.delete(
+    "/playback/lease",
+    requireScope("playback:write"),
+    (request, response, next) => {
+      try {
+        const { profile, device } = request.auth!;
+        const applied = sync.mutate(
+          profile.id,
+          "playback.owner.updated",
+          (db) => {
+            releaseLease(db, profile.id, device.id);
+            const playback = playbackState(db, profile.id, device.id);
+            return { result: { playback }, payload: { playback } };
+          },
+        );
+        response.json({ ...applied.result, revision: applied.event.revision });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/playback/state",
+    requireScope("playback:write"),
+    (request, response, next) => {
+      try {
+        const input = playbackStateSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        const applied = sync.mutate(
+          profile.id,
+          "playback.state.updated",
+          (db) => {
+            try {
+              updatePlayback(db, profile.id, device.id, input);
+            } catch (error) {
+              leaseError(error);
             }
-          }
-          const created = createCastCommand(
-            database.db,
-            profile.id,
-            device.id,
-            command,
-          );
-          if (
-            targetDeviceId &&
-            created.status === "pending" &&
-            !created.replayed &&
-            created.ownerDeviceId !== targetDeviceId
-          ) {
-            database.db
-              .prepare(
-                "UPDATE playback_commands SET owner_device_id = ? WHERE command_id = ? AND profile_id = ?",
-              )
-              .run(targetDeviceId, command.commandId, profile.id);
-            return { ...created, ownerDeviceId: targetDeviceId };
-          }
-          return created;
+            const priorEpisode = getEpisode(db, profile.id, input.episodeId);
+            const episode = setEpisodeProgress(
+              db,
+              profile.id,
+              input.episodeId,
+              input.positionMs,
+              input.durationMs,
+            );
+            if (priorEpisode && !priorEpisode.played && episode.played)
+              recordEpisodeCompletion(db, profile.id);
+            const playback = playbackState(db, profile.id, device.id);
+            return {
+              result: { playback, episode },
+              payload: { playback, episode },
+            };
+          },
+        );
+        response.json({ ...applied.result, revision: applied.event.revision });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/playback/cast",
+    requireScope("playback:write"),
+    (request, response, next) => {
+      try {
+        const input = castStartSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        const applied = sync.command(
+          profile.id,
+          input.commandId,
+          "playback.cast.updated",
+          (db) => {
+            startCast(db, profile.id, device.id, input.confirmed);
+            const playback = playbackState(db, profile.id, device.id);
+            return { result: { playback }, payload: { playback } };
+          },
+        );
+        response.json({
+          ...applied.result,
+          revision: applied.event?.revision ?? profile.revision,
+          replayed: applied.replayed,
         });
       } catch (error) {
-        if (error instanceof Error && error.message === "PLAYBACK_NOT_ACTIVE")
-          throw new ApiError(
-            409,
-            "PLAYBACK_NOT_ACTIVE",
-            "There is no connected playback owner for this profile",
-          );
-        throw error;
+        next(error);
       }
-      const delivered =
-        stored.status !== "pending" ||
-        (commandRelay?.sendPlaybackCommand(
+    },
+  );
+
+  router.delete(
+    "/playback/cast",
+    requireScope("playback:write"),
+    (request, response, next) => {
+      try {
+        const input = castStopSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        const applied = sync.command(
           profile.id,
-          stored.ownerDeviceId,
-          stored.command,
-        ) ?? false);
-      response.status(stored.status === "pending" ? 202 : 200).json({
-        commandId: command.commandId,
-        status: stored.status,
-        delivered,
-        replayed: stored.replayed,
-        result: stored.result,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
+          input.commandId,
+          "playback.cast.updated",
+          (db) => {
+            try {
+              stopCast(db, profile.id, device.id, input);
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.message === "CAST_OWNER_REQUIRED"
+              )
+                throw new ApiError(
+                  409,
+                  "CAST_OWNER_REQUIRED",
+                  "This device does not own the Cast session",
+                );
+              throw error;
+            }
+            const playback = playbackState(db, profile.id, device.id);
+            return { result: { playback }, payload: { playback } };
+          },
+        );
+        response.json({
+          ...applied.result,
+          revision: applied.event?.revision ?? profile.revision,
+          replayed: applied.replayed,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/playback/commands",
+    requireScope("playback:control"),
+    (request, response, next) => {
+      try {
+        const command = playbackCommandSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        let stored: ReturnType<typeof createCastCommand>;
+        try {
+          stored = database.transaction(() => {
+            const targetDeviceId = command.targetDeviceId;
+            if (targetDeviceId) {
+              const target = database.db
+                .prepare(
+                  "SELECT * FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
+                )
+                .get(targetDeviceId, profile.id) as DeviceRow | undefined;
+              if (!target) {
+                throw new ApiError(
+                  404,
+                  "DEVICE_NOT_FOUND",
+                  "The playback device was not found",
+                );
+              }
+              if (!deviceIsPlaybackTarget(target)) {
+                throw new ApiError(
+                  409,
+                  "DEVICE_NOT_PLAYBACK_TARGET",
+                  "The selected device is a controller and cannot render audio",
+                );
+              }
+            }
+            const created = createCastCommand(
+              database.db,
+              profile.id,
+              device.id,
+              command,
+            );
+            if (
+              targetDeviceId &&
+              created.status === "pending" &&
+              !created.replayed &&
+              created.ownerDeviceId !== targetDeviceId
+            ) {
+              database.db
+                .prepare(
+                  "UPDATE playback_commands SET owner_device_id = ? WHERE command_id = ? AND profile_id = ?",
+                )
+                .run(targetDeviceId, command.commandId, profile.id);
+              return { ...created, ownerDeviceId: targetDeviceId };
+            }
+            return created;
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message === "PLAYBACK_NOT_ACTIVE")
+            throw new ApiError(
+              409,
+              "PLAYBACK_NOT_ACTIVE",
+              "There is no connected playback owner for this profile",
+            );
+          throw error;
+        }
+        const delivered =
+          stored.status !== "pending" ||
+          (commandRelay?.sendPlaybackCommand(
+            profile.id,
+            stored.ownerDeviceId,
+            stored.command,
+          ) ?? false);
+        response.status(stored.status === "pending" ? 202 : 200).json({
+          commandId: command.commandId,
+          status: stored.status,
+          delivered,
+          replayed: stored.replayed,
+          result: stored.result,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    "/playback/commands/:commandId",
+    requireScope("playback:control"),
+    (request, response, next) => {
+      try {
+        const commandId = request.params.commandId;
+        if (!commandId)
+          throw new ApiError(
+            404,
+            "PLAYBACK_COMMAND_NOT_FOUND",
+            "The playback command was not found",
+          );
+        const stored = getCastCommand(
+          database.db,
+          request.auth!.profile.id,
+          commandId,
+        );
+        if (
+          !stored ||
+          (stored.command.requestedByDeviceId !== request.auth!.device.id &&
+            stored.ownerDeviceId !== request.auth!.device.id)
+        ) {
+          throw new ApiError(
+            404,
+            "PLAYBACK_COMMAND_NOT_FOUND",
+            "The playback command was not found",
+          );
+        }
+        response.json({
+          commandId,
+          status: stored.status,
+          result: stored.result,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   router.post(
     "/playback/commands/:commandId/result",
+    requireScope("playback:target"),
     (request, response, next) => {
       try {
         const input = playbackCommandResultSchema.parse({
@@ -298,52 +378,64 @@ export function createPlaybackRouter(
     },
   );
 
-  router.post("/playback/movements", (request, response, next) => {
-    try {
-      const input = movementEventSchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      let recorded = false;
+  router.post(
+    "/playback/movements",
+    requireScope("playback:write"),
+    (request, response, next) => {
       try {
-        database.transaction(() => {
-          recorded = recordMovement(database.db, profile.id, device.id, input);
+        const input = movementEventSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        let recorded = false;
+        try {
+          database.transaction(() => {
+            recorded = recordMovement(database.db, profile.id, device.id, input);
+          });
+        } catch (error) {
+          leaseError(error);
+        }
+        response.status(recorded ? 201 : 200).json({ recorded });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/playback/telemetry",
+    requireScope("playback:write"),
+    (request, response, next) => {
+      try {
+        const input = playbackTelemetrySchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        let recorded = false;
+        try {
+          database.transaction(() => {
+            recorded = ingestTelemetry(database.db, profile.id, device.id, input);
+          });
+        } catch (error) {
+          leaseError(error);
+        }
+        response.status(recorded ? 201 : 200).json({ recorded });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    "/stats",
+    requireScope("stats:read"),
+    (request, response, next) => {
+      try {
+        const period = statsPeriodSchema.parse(request.query.period ?? "30d");
+        response.json({
+          stats: listeningStats(database.db, request.auth!.profile.id, period),
         });
       } catch (error) {
-        leaseError(error);
+        next(error);
       }
-      response.status(recorded ? 201 : 200).json({ recorded });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/playback/telemetry", (request, response, next) => {
-    try {
-      const input = playbackTelemetrySchema.parse(request.body);
-      const { profile, device } = request.auth!;
-      let recorded = false;
-      try {
-        database.transaction(() => {
-          recorded = ingestTelemetry(database.db, profile.id, device.id, input);
-        });
-      } catch (error) {
-        leaseError(error);
-      }
-      response.status(recorded ? 201 : 200).json({ recorded });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get("/stats", (request, response, next) => {
-    try {
-      const period = statsPeriodSchema.parse(request.query.period ?? "30d");
-      response.json({
-        stats: listeningStats(database.db, request.auth!.profile.id, period),
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
   return router;
 }
