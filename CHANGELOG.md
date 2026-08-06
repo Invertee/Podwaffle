@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a HACS-compatible Home Assistant integration with one media player and
+  queue/listening sensors per selected Podwaffle profile, introduced restricted
+  controller tokens and command-status lookup, excluded controller devices from
+  Android/web playback targets, updated Android to 0.4.20 / versionCode 24 while
+  retaining native runtime 0.4-native-21, and bumped the add-on to 5.0.21.
 - Prevented Android media-end events with missing duration metadata from returning
   the completed episode as the next queue item, serialised queue mutations,
   reconciled already-removed rows without an error, kept the active row fixed,
@@ -114,9 +119,9 @@
 - Added Milestone 11 Google Cast Web Sender support with receiver metadata,
   transport/volume controls, local handoff, speaker reselection, owner-relayed
   cross-client commands, confirmed-result persistence and idle fallback.
-- Added Milestones 9–10: lease-owned browser playback, persistent transport and
-  Media Session controls, multi-tab coordination, deduplicated telemetry,
-  confirmed movement accounting, daily roll-ups and profile statistics.
+- Added Milestones 9–10: lease-owned browser playback, persistent controls,
+  playback leases, multi-tab coordination, deduplicated telemetry, confirmed
+  movement accounting, daily roll-ups and profile statistics.
 - Added Milestones 5–8: Apple discovery, RSS ingestion and conditional refresh,
   subscriptions and ordering, episode state/history, and a durable shared queue.
 - Added a committed, isolated development configuration used automatically by
