@@ -9,9 +9,8 @@ from urllib.parse import urlsplit, urlunsplit
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
     PodwaffleApi,
@@ -41,7 +40,6 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._join_code = ""
         self._verify_ssl = True
         self._available_profiles: list[dict[str, Any]] = []
-        self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Collect server details and validate the connection."""
@@ -84,7 +82,10 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             type=selector.TextSelectorType.PASSWORD,
                         )
                     ),
-                    vol.Optional(CONF_VERIFY_SSL, default=True): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_VERIFY_SSL,
+                        default=True,
+                    ): selector.BooleanSelector(),
                 }
             ),
             errors=errors,
@@ -135,7 +136,10 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="profiles",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_PROFILE_IDS, default=default): selector.SelectSelector(
+                    vol.Required(
+                        CONF_PROFILE_IDS,
+                        default=default,
+                    ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=options,
                             multiple=True,
@@ -149,12 +153,6 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]):
         """Start reauthentication after a controller token is revoked."""
-        entry_id = self.context.get("entry_id")
-        self._reauth_entry = (
-            self.hass.config_entries.async_get_entry(str(entry_id))
-            if entry_id
-            else None
-        )
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -163,9 +161,7 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ):
         """Rejoin all configured profiles with a fresh join code."""
         errors: dict[str, str] = {}
-        entry = self._reauth_entry
-        if entry is None:
-            return self.async_abort(reason="reauth_failed")
+        entry = self._get_reauth_entry()
         if user_input is not None:
             try:
                 self._base_url = str(entry.data[CONF_BASE_URL])
@@ -239,7 +235,9 @@ class PodwaffleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 or not isinstance(device, dict)
                 or not isinstance(device.get("id"), str)
             ):
-                raise PodwaffleApiError("Podwaffle returned an invalid join response")
+                raise PodwaffleApiError(
+                    "Podwaffle returned an invalid join response"
+                )
             profile_name = (
                 returned_profile.get("displayName")
                 if isinstance(returned_profile, dict)
@@ -263,4 +261,6 @@ def _normalize_url(value: str) -> str:
     split = urlsplit(value)
     if split.scheme not in {"http", "https"} or not split.netloc:
         raise ValueError("Invalid Podwaffle URL")
-    return urlunsplit((split.scheme, split.netloc, split.path.rstrip("/"), "", ""))
+    return urlunsplit(
+        (split.scheme, split.netloc, split.path.rstrip("/"), "", "")
+    )
