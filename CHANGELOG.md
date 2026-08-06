@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Prevented Android media-end events with missing duration metadata from returning
+  the completed episode as the next queue item, serialised queue mutations,
+  reconciled already-removed rows without an error, kept the active row fixed,
+  added remaining queue duration to the queue header, and updated Android to
+  0.4.19 / versionCode 23 / native runtime 0.4-native-21.
 - Required an actual media-end report before queue advancement, cleared Android's
   final native playlist into a true idle state, retained played episode downloads
   for 24 hours, added persisted daily cache maintenance and manual cache statistics
