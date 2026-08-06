@@ -1,0 +1,37 @@
+name: Validate Home Assistant integration
+
+on:
+  push:
+    paths:
+      - "custom_components/podwaffle/**"
+      - "hacs.json"
+      - ".github/workflows/validate-home-assistant.yml"
+  pull_request:
+    paths:
+      - "custom_components/podwaffle/**"
+      - "hacs.json"
+      - ".github/workflows/validate-home-assistant.yml"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate-hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
