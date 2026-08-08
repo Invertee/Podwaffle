@@ -2,24 +2,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { withDangerousMod, withMainActivity } = require("expo/config-plugins");
 
-function addImport(source, statement) {
-  if (source.includes(statement)) return source;
-
-  const imports = [...source.matchAll(/^import .+$/gm)];
-  if (imports.length > 0) {
-    const last = imports[imports.length - 1];
-    const insertAt = last.index + last[0].length;
-    return `${source.slice(0, insertAt)}\n${statement}${source.slice(insertAt)}`;
-  }
-
-  const packageMatch = source.match(/^package .+$/m);
-  if (!packageMatch || packageMatch.index === undefined) {
-    throw new Error("Could not locate the MainActivity package declaration.");
-  }
-  const insertAt = packageMatch.index + packageMatch[0].length;
-  return `${source.slice(0, insertAt)}\n\n${statement}${source.slice(insertAt)}`;
-}
-
 function mediaSourcePath(projectRoot, fileName) {
   return path.join(
     projectRoot,
@@ -36,28 +18,14 @@ function mediaSourcePath(projectRoot, fileName) {
   );
 }
 
-function withCastVolumeKeys(config) {
+function withSystemCastVolumeRouting(config) {
   return withMainActivity(config, (mod) => {
     if (mod.modResults.language !== "kt") {
       throw new Error("Podwaffle expects a Kotlin MainActivity.");
     }
 
     let source = mod.modResults.contents;
-    source = addImport(source, "import android.view.KeyEvent");
-    source = addImport(
-      source,
-      "import com.podwaffle.media.PodwaffleMediaService",
-    );
-
-    if (!source.includes("override fun dispatchKeyEvent(event: KeyEvent)")) {
-      const marker = '  override fun getMainComponentName(): String = "main"';
-      if (!source.includes(marker)) {
-        throw new Error(
-          "Could not locate getMainComponentName() in MainActivity.kt.",
-        );
-      }
-
-      const method = `  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    const legacyMethod = `  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     if (
       event.action == KeyEvent.ACTION_DOWN &&
       PodwaffleMediaService.handleVolumeKey(event.keyCode)
@@ -68,7 +36,23 @@ function withCastVolumeKeys(config) {
   }
 
 `;
-      source = source.replace(marker, `${method}${marker}`);
+
+    // CastPlayer now publishes its real RoutingSession through MediaSession.
+    // Remove the old foreground-only key interception so Android's system
+    // volume UI and hardware keys can target that remote playback session.
+    source = source.replace(legacyMethod, "");
+
+    const keyEventImport = "import android.view.KeyEvent\n";
+    const withoutKeyEventImport = source.replace(keyEventImport, "");
+    if (!withoutKeyEventImport.includes("KeyEvent")) {
+      source = withoutKeyEventImport;
+    }
+
+    const mediaServiceImport =
+      "import com.podwaffle.media.PodwaffleMediaService\n";
+    const withoutMediaServiceImport = source.replace(mediaServiceImport, "");
+    if (!withoutMediaServiceImport.includes("PodwaffleMediaService")) {
+      source = withoutMediaServiceImport;
     }
 
     mod.modResults.contents = source;
@@ -386,7 +370,7 @@ module.exports = function withPodwaffleMediaControls(config) {
   return withAndroidAutoQueueDownloads(
     withAutomaticQueueDownloads(
       withBackgroundPlaybackReliability(
-        withBluetoothSkipKeys(withCastVolumeKeys(config)),
+        withBluetoothSkipKeys(withSystemCastVolumeRouting(config)),
       ),
     ),
   );
