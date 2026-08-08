@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -44,6 +45,7 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
         | MediaPlayerEntityFeature.SEEK
         | MediaPlayerEntityFeature.NEXT_TRACK
         | MediaPlayerEntityFeature.PREVIOUS_TRACK
+        | MediaPlayerEntityFeature.PLAY_MEDIA
     )
 
     def __init__(self, coordinator: PodwaffleCoordinator) -> None:
@@ -163,6 +165,26 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         await self._command("previous")
+
+    async def async_play_media(
+        self,
+        media_type: MediaType | str,
+        media_id: str,
+        **kwargs: Any,
+    ) -> None:
+        """Start a Podwaffle episode on the active playback device."""
+        del kwargs
+        if media_type != MediaType.EPISODE:
+            raise HomeAssistantError(
+                "Podwaffle play_media currently supports episode media only"
+            )
+        try:
+            episode_id = str(UUID(media_id))
+        except (ValueError, AttributeError) as err:
+            raise HomeAssistantError(
+                "Podwaffle episode media IDs must be UUIDs"
+            ) from err
+        await self._command("play-episode", episodeId=episode_id)
 
     async def _command(self, action: str, **parameters: Any) -> None:
         try:
