@@ -44,6 +44,41 @@ Vite proxies `/api`, `/health`, `/version.json` and `/ws` to the server. The
 production server serves the built Vite output itself using same-origin relative
 URLs.
 
+## Android release APK
+
+When native Android code or Expo config plugins have changed, regenerate the
+Android project before building the APK:
+
+```sh
+pnpm --filter @podwaffle/android prebuild
+```
+
+On Windows, build the release APK with:
+
+```powershell
+cd apps/android/android
+.\gradlew.bat assembleRelease
+```
+
+On macOS or Linux:
+
+```sh
+cd apps/android/android
+./gradlew assembleRelease
+```
+
+The APK is written under:
+
+```text
+apps/android/android/app/build/outputs/apk/release/
+```
+
+For a development build installed directly to a connected Android device, run:
+
+```sh
+pnpm --filter @podwaffle/android android
+```
+
 ## Configuration and persistence
 
 The Home Assistant runtime reads `/data/options.json` at startup. `profiles` is a
