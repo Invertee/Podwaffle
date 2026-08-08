@@ -1,6 +1,0 @@
-diff a/apps/web/src/player/PlayerBar.tsx b/apps/web/src/player/PlayerBar.tsx	(rejected hunks)
-@@ -128,3 +144,3 @@ export function PlayerBar({
-               <Icon name="cast" />
-             </button>
--          )}
-+          )}
