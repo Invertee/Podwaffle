@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Linking, StyleSheet, View } from "react-native";
 import {
   SafeAreaProvider,
@@ -22,12 +22,22 @@ import {
   type NativeEpisodeCompletion,
   type NativePlaybackState,
 } from "../native-media/index";
+import {
+  PodwaffleConnectivityModule,
+  type NativeConnectionState,
+} from "../native-media/connectivity";
 import { playbackController } from "../playback/controller";
 import { useAuthStore } from "../stores/auth";
 import { useDownloadsStore } from "../stores/downloads";
 import { useNativeMediaStore } from "../stores/nativeMedia";
 import { APP_CHROME_HEIGHT, colors, TAB_BAR_HEIGHT } from "../styles/tokens";
+import {
+  playbackSyncPolicy,
+  type ConnectionTransport,
+} from "../sync/policy";
 import { syncRuntime } from "../sync/runtime";
+
+const BACKGROUND_POSITION_PROCESS_INTERVAL_MS = 5_000;
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 2 } },
@@ -36,6 +46,7 @@ const queryClient = new QueryClient({
 function NativeMediaBinder() {
   const { updateState, updatePosition, updateCastState, setBound, setBinding } =
     useNativeMediaStore();
+  const lastBackgroundPositionAt = useRef(0);
 
   const bindToService = useCallback(async () => {
     setBinding(true);
@@ -68,6 +79,16 @@ function NativeMediaBinder() {
       }),
       PodwaffleMediaModule.addListener(MEDIA_EVENTS.POSITION_CHANGED, (data) => {
         const position = data as { positionMs: number; bufferedPositionMs: number };
+        const now = Date.now();
+        const appActive = AppState.currentState === "active";
+        if (
+          !appActive &&
+          now - lastBackgroundPositionAt.current <
+            BACKGROUND_POSITION_PROCESS_INTERVAL_MS
+        ) {
+          return;
+        }
+        lastBackgroundPositionAt.current = now;
         updatePosition(position.positionMs, position.bufferedPositionMs);
         playbackController.handleNativePosition();
       }),
@@ -125,28 +146,71 @@ function RuntimeBinder() {
         sharedPlayback.leaseExpiresAt ?? "",
       ].join(":")
     : "";
+  const [networkTransport, setNetworkTransport] =
+    useState<ConnectionTransport>("unknown");
+  const priorLiveSyncEnabled = useRef<boolean | null>(null);
+  const liveSyncEnabled =
+    networkTransport === "wifi" || networkTransport === "ethernet";
+
+  const applyConnectionState = useCallback((state: NativeConnectionState) => {
+    playbackSyncPolicy.setTransport(state.transport);
+    setNetworkTransport(state.transport);
+  }, []);
+
+  const refreshConnectionState = useCallback(async () => {
+    try {
+      applyConnectionState(await PodwaffleConnectivityModule.getState());
+    } catch {
+      playbackSyncPolicy.setTransport("unknown");
+      setNetworkTransport("unknown");
+    }
+  }, [applyConnectionState]);
 
   useEffect(() => void restore(), [restore]);
 
   useEffect(() => {
-    if (status === "authenticated" && credentials) {
-      syncRuntime.start(credentials, revision);
-      void playbackController.ensureNotificationPermission().then((granted) => {
-        if (granted) return;
-        Alert.alert(
-          "Enable playback controls",
-          "Allow Podwaffle notifications to show the current podcast and playback controls on the lock screen.",
-          [
-            { text: "Not now", style: "cancel" },
-            { text: "Open settings", onPress: () => void Linking.openSettings() },
-          ],
-        );
-      });
+    void refreshConnectionState();
+    const subscription = PodwaffleConnectivityModule.addListener(applyConnectionState);
+    return () => subscription.remove();
+  }, [applyConnectionState, refreshConnectionState]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !credentials) return;
+    void playbackController.ensureNotificationPermission().then((granted) => {
+      if (granted) return;
+      Alert.alert(
+        "Enable playback controls",
+        "Allow Podwaffle notifications to show the current podcast and playback controls on the lock screen.",
+        [
+          { text: "Not now", style: "cancel" },
+          { text: "Open settings", onPress: () => void Linking.openSettings() },
+        ],
+      );
+    });
+  }, [status, credentials]);
+
+  useEffect(() => {
+    if (status === "authenticated" && credentials && liveSyncEnabled) {
+      const currentRevision = useAuthStore.getState().snapshot?.revision ?? 0;
+      syncRuntime.start(credentials, currentRevision);
     } else {
       syncRuntime.stop();
     }
     return () => syncRuntime.stop();
-  }, [status, credentials]);
+  }, [status, credentials, liveSyncEnabled]);
+
+  useEffect(() => {
+    const previous = priorLiveSyncEnabled.current;
+    priorLiveSyncEnabled.current = liveSyncEnabled;
+    if (status !== "authenticated" || !credentials || previous === null) return;
+
+    if (previous !== liveSyncEnabled) {
+      void playbackController.flush();
+    }
+    if (!previous && liveSyncEnabled) {
+      void refresh();
+    }
+  }, [status, credentials, liveSyncEnabled, refresh]);
 
   useEffect(() => {
     syncRuntime.updateRevision(revision);
@@ -188,16 +252,17 @@ function RuntimeBinder() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
+        void refreshConnectionState();
         void refresh();
         void playbackController.flushPendingPlayback();
-        syncRuntime.reconnect();
+        if (playbackSyncPolicy.liveSyncEnabled) syncRuntime.reconnect();
         void useDownloadsStore.getState().load();
       } else {
         void playbackController.flush();
       }
     });
     return () => subscription.remove();
-  }, [refresh]);
+  }, [refresh, refreshConnectionState]);
 
   return null;
 }
@@ -259,6 +324,11 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bgPrimary },
-  navigator: { flex: 1, backgroundColor: colors.bgPrimary },
+  safe: {
+    flex: 1,
+    backgroundColor: colors.bgPrimary,
+  },
+  navigator: {
+    flex: 1,
+  },
 });
