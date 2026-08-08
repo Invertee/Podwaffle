@@ -51,9 +51,44 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorEntityDescription(
+        key="content_consumed_30d",
+        name="Content consumed 30 days",
+        icon="mdi:progress-clock",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="skipped_forward_30d",
+        name="Skipped forward 30 days",
+        icon="mdi:fast-forward-30",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="rewound_30d",
+        name="Rewound 30 days",
+        icon="mdi:rewind-10",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
         key="episodes_completed_30d",
         name="Episodes completed 30 days",
         icon="mdi:check-circle-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="active_listening_days_30d",
+        name="Active listening days 30 days",
+        icon="mdi:calendar-check-outline",
+        native_unit_of_measurement="d",
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=False,
     ),
@@ -66,9 +101,24 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     SensorEntityDescription(
+        key="longest_streak",
+        name="Longest listening streak",
+        icon="mdi:calendar-star",
+        native_unit_of_measurement="d",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
         key="subscriptions",
         name="Subscriptions",
         icon="mdi:podcast",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="history_entries",
+        name="History entries",
+        icon="mdi:history",
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=False,
     ),
@@ -121,12 +171,30 @@ class PodwaffleSensor(PodwaffleEntity, SensorEntity):
             return _milliseconds_as_seconds(
                 self.coordinator.data.stats_30d.get("listenedMs")
             )
+        if key == "content_consumed_30d":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_30d.get("contentConsumedMs")
+            )
+        if key == "skipped_forward_30d":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_30d.get("skippedForwardMs")
+            )
+        if key == "rewound_30d":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_30d.get("rewoundMs")
+            )
         if key == "episodes_completed_30d":
             return _number(self.coordinator.data.stats_30d.get("episodesCompleted"))
+        if key == "active_listening_days_30d":
+            return _number(self.coordinator.data.stats_30d.get("activeListeningDays"))
         if key == "current_streak":
             return _number(self.coordinator.data.stats_30d.get("currentStreak"))
+        if key == "longest_streak":
+            return _number(self.coordinator.data.stats_30d.get("longestStreak"))
         if key == "subscriptions":
             return _number(self.coordinator.data.stats_30d.get("subscriptions"))
+        if key == "history_entries":
+            return _number(self.coordinator.data.stats_30d.get("historyEntries"))
         return None
 
     @property
@@ -171,5 +239,9 @@ def _queue_remaining(snapshot: dict[str, Any]) -> tuple[int, int]:
         if not isinstance(duration, (int, float)) or duration <= 0:
             unknown += 1
             continue
-        total += max(0, round(duration) - position_ms) if episode.get("id") == active_id else round(duration)
+        total += (
+            max(0, round(duration) - position_ms)
+            if episode.get("id") == active_id
+            else round(duration)
+        )
     return total, unknown
