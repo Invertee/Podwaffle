@@ -330,5 +330,6 @@ const styles = StyleSheet.create({
   },
   navigator: {
     flex: 1,
+    backgroundColor: colors.bgPrimary,
   },
 });
