@@ -6,7 +6,7 @@ from typing import Final, TypedDict
 from homeassistant.const import Platform
 
 DOMAIN: Final = "podwaffle"
-INTEGRATION_VERSION: Final = "0.2.0"
+INTEGRATION_VERSION: Final = "0.2.1"
 
 CONF_BASE_URL: Final = "base_url"
 CONF_JOIN_CODE: Final = "join_code"
