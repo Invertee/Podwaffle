@@ -939,18 +939,21 @@ class PodwaffleMediaService : MediaSessionService() {
         persistPlayback()
         val extras = item.mediaMetadata.extras
         val observed = item.mediaId == lastObservedMediaId
-        val durationMs = if (observed) {
+        val observedDurationMs = if (observed) {
             lastObservedDurationMs ?: media.durationMs
         } else {
             media.durationMs
         }
-        val positionMs = if (durationMs != null) {
-            maxOf(durationMs, if (observed) lastObservedPositionMs else 0L)
-        } else if (observed) {
-            lastObservedPositionMs
-        } else {
-            0L
-        }
+        // Guarantee a positive duration for a genuine end event. Some feeds omit
+        // duration metadata and Media3 can transition before exposing a final
+        // duration; reporting a matched position/duration lets the shared queue
+        // remove the completed item instead of returning it as the next episode.
+        val durationMs = observedDurationMs
+            ?: maxOf(if (observed) lastObservedPositionMs else 0L, 1L)
+        val positionMs = maxOf(
+            durationMs,
+            if (observed) lastObservedPositionMs else 0L,
+        )
         val source = if (activePlayer === castPlayer) {
             "cast"
         } else {
