@@ -54,34 +54,65 @@ playback owner, report listening telemetry, edit the podcast library or revoke
 other devices.
 
 The Home Assistant controller appears under the profile's connected devices and
-can be revoked from Podwaffle. A revoked token starts Home Assistant's reauthentication
-flow, which asks for the current join code and replaces all profile tokens in the
-config entry.
+can be revoked from Podwaffle. A revoked token starts Home Assistant's
+reauthentication flow, which asks for the current join code and replaces all
+profile tokens in the config entry.
 
 ## Entities
 
 Each selected profile creates:
 
 - `media_player` — current episode, podcast, artwork, progress, active playback
-  device, play, pause, seek, next and previous.
+  device, play, pause, seek, next, previous, and `play_media` for a known
+  Podwaffle episode ID.
 - Queue remaining duration.
 - Queue episode count.
 - Listening time today.
 - Listening time over 30 days.
+- Content consumed over 30 days, disabled by default.
+- Skipped-forward time over 30 days, disabled by default.
+- Rewound time over 30 days, disabled by default.
 - Episodes completed over 30 days, disabled by default.
+- Active listening days over 30 days, disabled by default.
 - Current listening streak, disabled by default.
+- Longest listening streak, disabled by default.
 - Subscription count, disabled by default.
+- History entry count, disabled by default.
 
 Queue remaining duration subtracts the current episode position and includes full
 durations for following episodes. The sensor includes an
 `unknown_duration_episodes` attribute when feed metadata is incomplete.
 
+## Play a specific episode
+
+`media_player.play_media` can start a known Podwaffle episode on whichever web,
+Android, or Cast client currently owns playback for the profile. Use the Podwaffle
+episode UUID as `media_content_id`:
+
+```yaml
+action: media_player.play_media
+target:
+  entity_id: media_player.podwaffle_sam
+data:
+  media_content_type: episode
+  media_content_id: "00000000-0000-0000-0000-000000000000"
+```
+
+The command uses the same restricted controller credential as the normal
+transport controls. Home Assistant still cannot acquire playback ownership or
+become an audio target. The profile must have an active connected playback owner
+for the command to succeed.
+
+Podcast/episode browsing is not exposed through Home Assistant yet. That feature
+needs a separate read-only catalog permission so browsing can be added without
+granting the controller library mutation rights.
+
 ## Runtime behaviour
 
 The integration loads an initial profile snapshot through REST, then listens to the
 profile-scoped Podwaffle WebSocket. Relevant sync events trigger a debounced
-snapshot refresh. A 60-second poll remains as a fallback, while listening statistics
-are refreshed at most every five minutes.
+snapshot refresh. A 60-second poll remains as a fallback, while listening
+statistics are refreshed at most every five minutes.
 
 The media player is a controller for the active Podwaffle Android, web or Cast
 client. It is not an audio renderer. A command will fail when the profile has no
