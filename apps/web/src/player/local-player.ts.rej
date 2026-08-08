@@ -1,6 +1,0 @@
-diff a/apps/web/src/player/local-player.ts b/apps/web/src/player/local-player.ts	(rejected hunks)
-@@ -999,3 +1005,4 @@ export class LocalPlayer {
-   private async handleRemoteCommand(command: PlaybackCommand): Promise<void> {
-     this.claimTab();
-+    usePlayer.setState({ remote: false });
-     try {
