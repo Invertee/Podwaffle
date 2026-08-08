@@ -180,28 +180,6 @@ To restore:
 5. Verify `/health`, profiles and devices. Existing device tokens remain valid.
 
 Never make a blind filesystem copy of the live WAL database.
-
-## Delivered scope
-
-- Milestone 1: multi-stage image, Home Assistant metadata, options, proxy-aware
-  server, static Vite hosting, health and version endpoints.
-- Milestone 2: complete reserved Phase 1 schema, migration runner, transaction
-  helper, repository functions and managed online backups.
-- Milestone 3: configured profiles, responsive join/device UI, web and Android
-  credential contracts, logout, revocation, rate limiting and safe logs.
-- Milestone 4: profile revisions, durable events, idempotent commands, snapshot and
-  catch-up endpoints, authenticated origin-checked WebSockets and reconnect/gap
-  recovery.
-- Milestone 5: Apple podcast discovery, subscriptions, RSS normalisation,
-  conditional scheduled refresh and a tile/list library.
-- Milestone 6: transactional complete-order updates, drag reordering and
-  profile-specific 24-hour new-episode indicators.
-- Milestone 7: podcast/episode browsing, manual played overrides, progress,
-  98%-completion, in-progress and history views.
-- Milestone 8: durable add-next/add-bottom, removal, complete reorder, clear,
-  completion advance behavior and a synchronised queue drawer.
-- Milestone 9: long-lived local audio, persistent controls, playback leases,
-  multi-tab ownership, keyboard shortcuts, Media Session integration and episode
   information.
 - Milestone 10: deduplicated listening telemetry, confirmed typed movements,
   profile-local daily roll-ups, period-filtered statistics and profile cards.
