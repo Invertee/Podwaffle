@@ -51,8 +51,25 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorEntityDescription(
+        key="listening_all",
+        name="Listening all time",
+        icon="mdi:clock-outline",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
         key="content_consumed_30d",
         name="Content consumed 30 days",
+        icon="mdi:progress-clock",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="content_consumed_all",
+        name="Content consumed all time",
         icon="mdi:progress-clock",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
@@ -69,9 +86,27 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     SensorEntityDescription(
+        key="skipped_forward_all",
+        name="Skipped forward all time",
+        icon="mdi:fast-forward",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
         key="rewound_30d",
         name="Rewound 30 days",
         icon="mdi:rewind-10",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="rewound_all",
+        name="Rewound all time",
+        icon="mdi:rewind",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -85,9 +120,24 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     SensorEntityDescription(
+        key="episodes_completed_all",
+        name="Episodes completed all time",
+        icon="mdi:check-circle",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
         key="active_listening_days_30d",
         name="Active listening days 30 days",
         icon="mdi:calendar-check-outline",
+        native_unit_of_measurement="d",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="active_listening_days_all",
+        name="Active listening days all time",
+        icon="mdi:calendar-check",
         native_unit_of_measurement="d",
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=False,
@@ -171,30 +221,50 @@ class PodwaffleSensor(PodwaffleEntity, SensorEntity):
             return _milliseconds_as_seconds(
                 self.coordinator.data.stats_30d.get("listenedMs")
             )
+        if key == "listening_all":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_all.get("listenedMs")
+            )
         if key == "content_consumed_30d":
             return _milliseconds_as_seconds(
                 self.coordinator.data.stats_30d.get("contentConsumedMs")
+            )
+        if key == "content_consumed_all":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_all.get("contentConsumedMs")
             )
         if key == "skipped_forward_30d":
             return _milliseconds_as_seconds(
                 self.coordinator.data.stats_30d.get("skippedForwardMs")
             )
+        if key == "skipped_forward_all":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_all.get("skippedForwardMs")
+            )
         if key == "rewound_30d":
             return _milliseconds_as_seconds(
                 self.coordinator.data.stats_30d.get("rewoundMs")
             )
+        if key == "rewound_all":
+            return _milliseconds_as_seconds(
+                self.coordinator.data.stats_all.get("rewoundMs")
+            )
         if key == "episodes_completed_30d":
             return _number(self.coordinator.data.stats_30d.get("episodesCompleted"))
+        if key == "episodes_completed_all":
+            return _number(self.coordinator.data.stats_all.get("episodesCompleted"))
         if key == "active_listening_days_30d":
             return _number(self.coordinator.data.stats_30d.get("activeListeningDays"))
+        if key == "active_listening_days_all":
+            return _number(self.coordinator.data.stats_all.get("activeListeningDays"))
         if key == "current_streak":
-            return _number(self.coordinator.data.stats_30d.get("currentStreak"))
+            return _number(self.coordinator.data.stats_all.get("currentStreak"))
         if key == "longest_streak":
-            return _number(self.coordinator.data.stats_30d.get("longestStreak"))
+            return _number(self.coordinator.data.stats_all.get("longestStreak"))
         if key == "subscriptions":
-            return _number(self.coordinator.data.stats_30d.get("subscriptions"))
+            return _number(self.coordinator.data.stats_all.get("subscriptions"))
         if key == "history_entries":
-            return _number(self.coordinator.data.stats_30d.get("historyEntries"))
+            return _number(self.coordinator.data.stats_all.get("historyEntries"))
         return None
 
     @property
