@@ -151,6 +151,9 @@ class PodwaffleDownloadStore(
     fun maintenance(
         maxAutomaticAgeDays: Int = 30,
         maxStorageBytes: Long = 2_000_000_000L,
+        // Protect current and queued downloads during maintenance.
+        protectedEpisodeIds: Set<String> =
+            PodwaffleCachePolicy.protectedEpisodeIds(context),
     ): Map<String, Any?> {
         val cutoff = System.currentTimeMillis() -
             maxAutomaticAgeDays.coerceAtLeast(1) * 86_400_000L
@@ -176,6 +179,7 @@ class PodwaffleDownloadStore(
                 val missingCompletedFile = mapped["state"] == "completed" && !file.exists()
                 val staleAutomatic =
                     entry.reason == "automatic" &&
+                        entry.episodeId !in protectedEpisodeIds &&
                         entry.createdAtMs < cutoff &&
                         mapped["state"] != "downloading"
                 val failed = mapped["state"] == "failed"
@@ -196,7 +200,10 @@ class PodwaffleDownloadStore(
         var storageBytes = completed.sumOf { it.second }
         if (storageBytes > storageLimit) {
             for ((entry, size) in completed
-                .filter { it.first.reason == "automatic" }
+                .filter {
+                    it.first.reason == "automatic" &&
+                        it.first.episodeId !in protectedEpisodeIds
+                }
                 .sortedBy { it.first.createdAtMs }) {
                 if (storageBytes <= storageLimit) break
                 try {

@@ -85,7 +85,7 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
             .build()
             .also { player ->
                 player.setHandleAudioBecomingNoisy(true)
-                player.setPauseAtEndOfMediaItems(true)
+                player.setPauseAtEndOfMediaItems(false)
             }
         fallbackPlayer = fallback
 
@@ -265,6 +265,8 @@ class PodwaffleAutoMediaService : MediaLibraryService() {
         // idempotent DownloadManager store as the phone queue.
         val store = requireDownloadStore()
         items.mapNotNull(EpisodeMedia::fromMediaItem).forEach { queued ->
+            // Cancel played-cache cleanup for Android Auto queue additions.
+            PodwaffleCachePolicy.markQueued(this, queued.episodeId)
             if (
                 queued.enclosureUrl.isNotBlank() &&
                 store.completedPath(queued.episodeId) == null

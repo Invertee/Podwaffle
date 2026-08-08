@@ -96,6 +96,9 @@ class PodwaffleMediaModule : Module() {
                 // is idempotent for queued, active and completed items, while a
                 // storage or network failure must never block the queue update.
                 snapshot.items.forEach { media ->
+                    // Cancel played-cache cleanup when queued again so a retained
+                    // file cannot be deleted while it is current or coming up.
+                    PodwaffleCachePolicy.markQueued(context, media.episodeId)
                     if (
                         media.enclosureUrl.isNotBlank() &&
                         store.completedPath(media.episodeId) == null
