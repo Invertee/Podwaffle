@@ -21,6 +21,9 @@ from .api import PodwaffleApiError
 from .coordinator import PodwaffleCoordinator
 from .entity import PodwaffleEntity
 
+DEFAULT_SKIP_BACKWARD_SECONDS = 15
+DEFAULT_SKIP_FORWARD_SECONDS = 30
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -66,6 +69,23 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
     def _episode(self) -> dict[str, Any]:
         episode = self._playback.get("episode")
         return episode if isinstance(episode, dict) else {}
+
+    @property
+    def _playback_settings(self) -> dict[str, Any]:
+        profile = self._snapshot.get("profile")
+        if not isinstance(profile, dict):
+            return {}
+        settings = profile.get("settings")
+        if not isinstance(settings, dict):
+            return {}
+        playback = settings.get("playback")
+        return playback if isinstance(playback, dict) else {}
+
+    def _skip_seconds(self, key: str, default: int) -> int:
+        value = self._playback_settings.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return default
+        return max(1, min(120, round(value)))
 
     @property
     def state(self) -> MediaPlayerState:
@@ -149,6 +169,12 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
             "playback_rate": self._playback.get("playbackRate", 1),
             "active_device": self.source,
             "queue_episodes": len(queue) if isinstance(queue, list) else 0,
+            "skip_backward_seconds": self._skip_seconds(
+                "skipBackwardSeconds", DEFAULT_SKIP_BACKWARD_SECONDS
+            ),
+            "skip_forward_seconds": self._skip_seconds(
+                "skipForwardSeconds", DEFAULT_SKIP_FORWARD_SECONDS
+            ),
         }
 
     async def async_media_play(self) -> None:
@@ -161,10 +187,18 @@ class PodwaffleMediaPlayer(PodwaffleEntity, MediaPlayerEntity):
         await self._command("seek", positionMs=max(0, round(position * 1000)))
 
     async def async_media_next_track(self) -> None:
-        await self._command("next")
+        """Use Home Assistant's next button as Podwaffle skip forward."""
+        seconds = self._skip_seconds(
+            "skipForwardSeconds", DEFAULT_SKIP_FORWARD_SECONDS
+        )
+        await self._command("skip-forward", offsetMs=seconds * 1000)
 
     async def async_media_previous_track(self) -> None:
-        await self._command("previous")
+        """Use Home Assistant's previous button as Podwaffle skip backward."""
+        seconds = self._skip_seconds(
+            "skipBackwardSeconds", DEFAULT_SKIP_BACKWARD_SECONDS
+        )
+        await self._command("skip-backward", offsetMs=seconds * 1000)
 
     async def async_play_media(
         self,
