@@ -321,7 +321,7 @@ export function createPlaybackRouter(
     (request, response, next) => {
       try {
         const commandId = request.params.commandId;
-        if (!commandId)
+        if (typeof commandId !== "string")
           throw new ApiError(
             404,
             "PLAYBACK_COMMAND_NOT_FOUND",
