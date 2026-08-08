@@ -396,7 +396,14 @@ class PodwaffleMediaService : MediaSessionService() {
         try {
             val context = CastContext.getSharedInstance(this)
             castContext = context
-            castPlayer = CastPlayer(context, DefaultMediaItemConverter()).also { player ->
+            castPlayer = CastPlayer(
+                this,
+                context,
+                DefaultMediaItemConverter(),
+                persistedConfiguration?.skipBackwardMs ?: DEFAULT_SKIP_BACK_MS,
+                persistedConfiguration?.skipForwardMs ?: DEFAULT_SKIP_FORWARD_MS,
+                5_000L,
+            ).also { player ->
                 player.addListener(castPlayerListener)
                 player.setSessionAvailabilityListener(castAvailabilityListener)
             }
