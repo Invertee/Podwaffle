@@ -33,6 +33,7 @@ class PodwaffleProfileData:
     snapshot: dict[str, Any]
     stats_today: dict[str, Any]
     stats_30d: dict[str, Any]
+    stats_all: dict[str, Any]
 
 
 class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
@@ -62,6 +63,7 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
         self._stats_updated_at: datetime | None = None
         self._stats_today: dict[str, Any] = {}
         self._stats_30d: dict[str, Any] = {}
+        self._stats_all: dict[str, Any] = {}
         self._websocket_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -76,9 +78,14 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
                 or now - self._stats_updated_at >= STATS_INTERVAL
             )
             if refresh_stats:
-                self._stats_today, self._stats_30d = await asyncio.gather(
+                (
+                    self._stats_today,
+                    self._stats_30d,
+                    self._stats_all,
+                ) = await asyncio.gather(
                     self.api.async_stats("today"),
                     self.api.async_stats("30d"),
+                    self.api.async_stats("all"),
                 )
                 self._stats_updated_at = now
             self.last_snapshot_at = now
@@ -86,6 +93,7 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
                 snapshot=snapshot,
                 stats_today=self._stats_today,
                 stats_30d=self._stats_30d,
+                stats_all=self._stats_all,
             )
         except PodwaffleAuthError as err:
             raise ConfigEntryAuthFailed from err
