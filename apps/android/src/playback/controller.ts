@@ -18,6 +18,7 @@ import { useAuthStore } from "../stores/auth";
 import { useNativeMediaStore } from "../stores/nativeMedia";
 import { downloadedPath } from "../stores/downloads";
 import { usePlayerUiStore } from "../stores/playerUi";
+import { playbackSyncPolicy } from "../sync/policy";
 import { episodeMedia } from "./media";
 import { isRemotePlayback } from "./presentation";
 import {
@@ -26,9 +27,6 @@ import {
   savePendingPlayback,
 } from "./offlineProgress";
 
-const STATE_REPORT_INTERVAL_MS = 10_000;
-const TELEMETRY_INTERVAL_MS = 15_000;
-const LEASE_RENEWAL_MARGIN_MS = 15_000;
 let notificationPermissionRequested = false;
 
 async function ensureNotificationPermission(): Promise<boolean> {
@@ -523,11 +521,11 @@ class AndroidPlaybackController {
     const now = Date.now();
     if (
       !useNativeMediaStore.getState().castState.connected &&
-      now - this.lastStateReportAt >= STATE_REPORT_INTERVAL_MS
+      now - this.lastStateReportAt >= playbackSyncPolicy.stateReportIntervalMs
     ) {
       void this.reportCurrentState().catch(() => undefined);
     }
-    if (now - this.lastTelemetryAt >= TELEMETRY_INTERVAL_MS) {
+    if (now - this.lastTelemetryAt >= playbackSyncPolicy.telemetryIntervalMs) {
       void this.flushTelemetry();
     }
   }
@@ -786,7 +784,12 @@ class AndroidPlaybackController {
   }
 
   private async ensureLease(state: NativePlaybackState): Promise<void> {
-    if (Date.now() < this.leaseExpiresAt - LEASE_RENEWAL_MARGIN_MS) return;
+    if (
+      Date.now() <
+      this.leaseExpiresAt - playbackSyncPolicy.leaseRenewalMarginMs
+    ) {
+      return;
+    }
     if (
       useAuthStore.getState().connection === "offline" &&
       this.hasLocalMedia(state)
@@ -831,7 +834,12 @@ class AndroidPlaybackController {
     },
   ): Promise<void> {
     if (useNativeMediaStore.getState().castState.connected) return;
-    if (!force && Date.now() - this.lastStateReportAt < STATE_REPORT_INTERVAL_MS) return;
+    if (
+      !force &&
+      Date.now() - this.lastStateReportAt < playbackSyncPolicy.stateReportIntervalMs
+    ) {
+      return;
+    }
     if (this.stateReportPromise) {
       this.reportAgain ||= force;
       return this.stateReportPromise;
@@ -906,7 +914,12 @@ class AndroidPlaybackController {
   private async reportCastState(force = false): Promise<void> {
     const cast = useNativeMediaStore.getState().castState;
     if (!cast.connected || !cast.session || !this.activeEpisode) return;
-    if (!force && Date.now() - this.lastCastReportAt < STATE_REPORT_INTERVAL_MS) return;
+    if (
+      !force &&
+      Date.now() - this.lastCastReportAt < playbackSyncPolicy.stateReportIntervalMs
+    ) {
+      return;
+    }
     const { serverUrl, token } = this.connection();
     await api.startCast(serverUrl, token, this.confirmedCastState(cast));
     this.castBackendActive = true;
