@@ -69,15 +69,20 @@ Each selected profile creates:
 - Queue episode count.
 - Listening time today.
 - Listening time over 30 days.
-- Content consumed over 30 days, disabled by default.
-- Skipped-forward time over 30 days, disabled by default.
-- Rewound time over 30 days, disabled by default.
-- Episodes completed over 30 days, disabled by default.
-- Active listening days over 30 days, disabled by default.
+- Listening time all time.
+- Content consumed over 30 days and all time, disabled by default.
+- Skipped-forward time over 30 days and all time, disabled by default.
+- Rewound time over 30 days and all time, disabled by default.
+- Episodes completed over 30 days and all time, disabled by default.
+- Active listening days over 30 days and all time, disabled by default.
 - Current listening streak, disabled by default.
 - Longest listening streak, disabled by default.
 - Subscription count, disabled by default.
 - History entry count, disabled by default.
+
+Current streak, longest streak, subscription count and history entry count are
+profile-wide values rather than period-specific totals, so they appear once rather
+than being duplicated for 30-day and all-time periods.
 
 Queue remaining duration subtracts the current episode position and includes full
 durations for following episodes. The sensor includes an
