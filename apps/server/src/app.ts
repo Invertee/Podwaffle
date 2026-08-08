@@ -230,7 +230,7 @@ export function createApp(dependencies: AppDependencies): Express {
         const command = revokeDeviceSchema.parse(request.body);
         const { profile } = request.auth!;
         const targetId = request.params.deviceId;
-        if (!targetId)
+        if (typeof targetId !== "string")
           throw new ApiError(404, "NOT_FOUND", "Device was not found");
         const applied = sync.command(
           profile.id,
