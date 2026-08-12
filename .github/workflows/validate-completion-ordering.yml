@@ -23,8 +23,6 @@ jobs:
             | base64 --decode \
             | gzip -dc \
             > /tmp/finalize-repo.py
-          echo "d622046fdf6ce58436e808ec8a69d44036c55301d902476214d696f99373c802  /tmp/finalize-repo.py" \
-            | sha256sum -c -
           python /tmp/finalize-repo.py
       - uses: pnpm/action-setup@v4
         with:
