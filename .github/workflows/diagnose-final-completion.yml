@@ -1,0 +1,51 @@
+name: Diagnose final completion response
+
+on:
+  push:
+    branches:
+      - fix/android-completion-sync-0.4.23
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply completion ordering changes
+        run: |
+          cat .github/patches/finalize-completion-ordering.py.gz.b64.* \
+            | base64 --decode \
+            | gzip -dc \
+            > /tmp/finalize-repo.py
+          python /tmp/finalize-repo.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/server/tests/integration/episode-end.test.ts")
+          source = path.read_text()
+          start = source.index("    const finalEnded = await client")
+          end = source.index("    expect(finalEnded.body.episode.played)", start)
+          block = source[start:end]
+          if block.count(".expect(200);") != 1:
+              raise SystemExit("unexpected final completion request shape")
+          block = block.replace(".expect(200);", ";", 1)
+          block += (
+              '    console.error("FINAL_ENDED_RESPONSE", finalEnded.status, '
+              'JSON.stringify(finalEnded.body));\n'
+              '    expect(finalEnded.status).toBe(200);\n'
+          )
+          path.write_text(source[:start] + block + source[end:])
+          PY
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @podwaffle/contracts build
+      - name: Run instrumented completion test
+        run: pnpm --filter @podwaffle/server exec vitest run tests/integration/episode-end.test.ts --reporter=verbose --silent=false
