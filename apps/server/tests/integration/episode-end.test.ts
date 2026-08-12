@@ -100,8 +100,9 @@ describe("episode end handling", () => {
         (item) => item.episode.id,
       ),
     ).toEqual([firstEpisodeId, secondEpisodeId]);
-    expect((await client.get("/api/v1/playback").expect(200)).body.playback)
-      .toMatchObject({ episode: { id: firstEpisodeId } });
+    expect(
+      (await client.get("/api/v1/playback").expect(200)).body.playback,
+    ).toMatchObject({ episode: { id: firstEpisodeId } });
 
     const firstEnded = await client
       .post(`/api/v1/episodes/${firstEpisodeId}/progress`)
@@ -117,8 +118,36 @@ describe("episode end handling", () => {
         (item) => item.episode.id,
       ),
     ).toEqual([secondEpisodeId]);
-    expect((await client.get("/api/v1/playback").expect(200)).body.playback)
-      .toMatchObject({ episode: { id: secondEpisodeId }, positionMs: 0 });
+    expect(
+      (await client.get("/api/v1/playback").expect(200)).body.playback,
+    ).toMatchObject({ episode: { id: secondEpisodeId }, positionMs: 0 });
+
+    const staleState = await client
+      .post("/api/v1/playback/state")
+      .send({
+        episodeId: firstEpisodeId,
+        positionMs: 55_000,
+        durationMs: 60_000,
+        state: "playing",
+        playbackRate: 1,
+      })
+      .expect(200);
+    expect(staleState.body.episode).toMatchObject({
+      id: firstEpisodeId,
+      positionMs: 60_000,
+      played: true,
+    });
+    expect(staleState.body.playback).toMatchObject({
+      episode: { id: secondEpisodeId },
+      positionMs: 0,
+    });
+    expect(
+      (
+        (await client.get("/api/v1/queue").expect(200)).body.queue as Array<{
+          episode: { id: string };
+        }>
+      ).map((item) => item.episode.id),
+    ).toEqual([secondEpisodeId]);
 
     const finalEnded = await client
       .post(`/api/v1/episodes/${secondEpisodeId}/progress`)
@@ -130,18 +159,45 @@ describe("episode end handling", () => {
       .expect(200);
     expect(finalEnded.body.episode.played).toBe(true);
     expect(finalEnded.body.queue).toEqual([]);
-    expect((await client.get("/api/v1/playback").expect(200)).body.playback)
-      .toMatchObject({
-        episode: null,
-        positionMs: 0,
-        durationMs: null,
-        state: "stopped",
-        mode: "local",
-        activeDeviceId: null,
-        leaseExpiresAt: null,
-        castOwnerDeviceId: null,
-        castSessionId: null,
-        ownedByCurrentDevice: false,
-      });
+    expect(
+      (await client.get("/api/v1/playback").expect(200)).body.playback,
+    ).toMatchObject({
+      episode: null,
+      positionMs: 0,
+      durationMs: null,
+      state: "stopped",
+      mode: "local",
+      activeDeviceId: null,
+      leaseExpiresAt: null,
+      castOwnerDeviceId: null,
+      castSessionId: null,
+      ownedByCurrentDevice: false,
+    });
+
+    const staleFinalState = await client
+      .post("/api/v1/playback/state")
+      .send({
+        episodeId: secondEpisodeId,
+        positionMs: 80_000,
+        durationMs: 90_000,
+        state: "playing",
+        playbackRate: 1,
+      })
+      .expect(200);
+    expect(staleFinalState.body.episode).toMatchObject({
+      id: secondEpisodeId,
+      positionMs: 90_000,
+      played: true,
+    });
+    expect(staleFinalState.body.playback).toMatchObject({
+      episode: null,
+      positionMs: 0,
+      state: "stopped",
+      activeDeviceId: null,
+      leaseExpiresAt: null,
+    });
+    expect((await client.get("/api/v1/queue").expect(200)).body.queue).toEqual(
+      [],
+    );
   });
 });

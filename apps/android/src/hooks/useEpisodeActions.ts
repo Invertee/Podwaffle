@@ -9,11 +9,14 @@ import {
   withProfileRevision,
 } from "../api/profileMutations";
 import { playbackController } from "../playback/controller";
+import { useAuthStore } from "../stores/auth";
 
 function showError(error: unknown): void {
   Alert.alert(
     "Podwaffle",
-    error instanceof Error ? error.message : "The action could not be completed.",
+    error instanceof Error
+      ? error.message
+      : "The action could not be completed.",
   );
 }
 
@@ -58,10 +61,13 @@ export function useEpisodeActions(onChanged?: () => void | Promise<void>) {
     addQueue: (episode: Episode, position: "next" | "bottom") =>
       run(episode.id, async () => {
         const { serverUrl, token } = authenticatedConnection();
-        await withProfileRevision((revision) =>
+        const result = await withProfileRevision((revision) =>
           api.addQueue(serverUrl, token, episode.id, position, revision),
         );
-        await refreshProfile();
+        await useAuthStore
+          .getState()
+          .applyQueueMutation(result.queue, result.revision);
+        await playbackController.syncNativeQueue();
         await onChanged?.();
       }),
   };

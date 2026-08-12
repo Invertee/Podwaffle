@@ -26,6 +26,10 @@ import {
   removePendingPlayback,
   savePendingPlayback,
 } from "./offlineProgress";
+import {
+  pendingCompletionEpisodeIds,
+  queueWithoutPendingCompletions,
+} from "./queueReconciliation";
 
 let notificationPermissionRequested = false;
 
@@ -40,7 +44,8 @@ async function ensureNotificationPermission(): Promise<boolean> {
   const result = await PermissionsAndroid.request(permission).catch(
     () => PermissionsAndroid.RESULTS.DENIED,
   );
-  notificationPermissionRequested = result === PermissionsAndroid.RESULTS.GRANTED;
+  notificationPermissionRequested =
+    result === PermissionsAndroid.RESULTS.GRANTED;
   return notificationPermissionRequested;
 }
 
@@ -177,7 +182,8 @@ class AndroidPlaybackController {
     if (download.state !== "completed" || !download.localPath) {
       throw new Error("The episode download is not ready.");
     }
-    const profileId = useAuthStore.getState().session?.profile.id ??
+    const profileId =
+      useAuthStore.getState().session?.profile.id ??
       useAuthStore.getState().snapshot?.profile.id;
     const pending = profileId
       ? (await pendingPlaybackUpdates(profileId)).find(
@@ -215,7 +221,10 @@ class AndroidPlaybackController {
 
   public async play(): Promise<void> {
     if (this.remotePlayback()) {
-      await this.relayRemoteCommand({ commandId: createCommandId(), action: "play" });
+      await this.relayRemoteCommand({
+        commandId: createCommandId(),
+        action: "play",
+      });
       return;
     }
     const cast = useNativeMediaStore.getState().castState;
@@ -252,7 +261,10 @@ class AndroidPlaybackController {
 
   public async pause(): Promise<void> {
     if (this.remotePlayback()) {
-      await this.relayRemoteCommand({ commandId: createCommandId(), action: "pause" });
+      await this.relayRemoteCommand({
+        commandId: createCommandId(),
+        action: "pause",
+      });
       return;
     }
     const cast = useNativeMediaStore.getState().castState;
@@ -395,12 +407,17 @@ class AndroidPlaybackController {
 
   public async next(): Promise<void> {
     if (this.remotePlayback()) {
-      await this.relayRemoteCommand({ commandId: createCommandId(), action: "next" });
+      await this.relayRemoteCommand({
+        commandId: createCommandId(),
+        action: "next",
+      });
       return;
     }
     const queue = useAuthStore.getState().snapshot?.queue ?? [];
     const state = useNativeMediaStore.getState().state;
-    const index = queue.findIndex((item) => item.episode.id === state?.episodeId);
+    const index = queue.findIndex(
+      (item) => item.episode.id === state?.episodeId,
+    );
     const next = queue[index >= 0 ? index + 1 : 0]?.episode;
     if (next) await this.playEpisode(next);
     else if (!useNativeMediaStore.getState().castState.connected)
@@ -409,7 +426,10 @@ class AndroidPlaybackController {
 
   public async previous(): Promise<void> {
     if (this.remotePlayback()) {
-      await this.relayRemoteCommand({ commandId: createCommandId(), action: "previous" });
+      await this.relayRemoteCommand({
+        commandId: createCommandId(),
+        action: "previous",
+      });
       return;
     }
     const state = useNativeMediaStore.getState().state;
@@ -418,7 +438,9 @@ class AndroidPlaybackController {
       return;
     }
     const queue = useAuthStore.getState().snapshot?.queue ?? [];
-    const index = queue.findIndex((item) => item.episode.id === state?.episodeId);
+    const index = queue.findIndex(
+      (item) => item.episode.id === state?.episodeId,
+    );
     const previous = index > 0 ? queue[index - 1]?.episode : undefined;
     if (previous) await this.playEpisode(previous);
     else if (!useNativeMediaStore.getState().castState.connected)
@@ -444,7 +466,8 @@ class AndroidPlaybackController {
       throw new Error("Move playback to this device before starting Cast.");
     }
     const state = useNativeMediaStore.getState().state;
-    if (!state?.episodeId) throw new Error("Load an episode before starting Cast.");
+    if (!state?.episodeId)
+      throw new Error("Load an episode before starting Cast.");
     const episode = await this.resolveEpisode(state.episodeId);
     if (!episode) throw new Error("The active episode could not be loaded.");
     usePlayerUiStore.getState().setCastStatus("connecting");
@@ -475,7 +498,11 @@ class AndroidPlaybackController {
     usePlayerUiStore.getState().setCastStatus("stopping");
     try {
       await PodwaffleMediaModule.stopCast({ stopReceiver: true });
-      await this.stopBackendCast(session.positionMs, session.durationMs, "paused");
+      await this.stopBackendCast(
+        session.positionMs,
+        session.durationMs,
+        "paused",
+      );
       this.castBackendActive = false;
       if (resumeLocal) {
         await PodwaffleMediaModule.seekTo(session.positionMs);
@@ -538,10 +565,15 @@ class AndroidPlaybackController {
 
     if (castState.connected && castState.session) {
       usePlayerUiStore.getState().setCastStatus("connected");
-      if (castState.session.episodeId && this.activeEpisode?.id !== castState.session.episodeId) {
-        void this.resolveEpisode(castState.session.episodeId).then((episode) => {
-          if (episode) this.activeEpisode = episode;
-        });
+      if (
+        castState.session.episodeId &&
+        this.activeEpisode?.id !== castState.session.episodeId
+      ) {
+        void this.resolveEpisode(castState.session.episodeId).then(
+          (episode) => {
+            if (episode) this.activeEpisode = episode;
+          },
+        );
       }
       void this.reportCastState(!this.castBackendActive);
       const session = castState.session;
@@ -553,7 +585,8 @@ class AndroidPlaybackController {
         void this.finishEpisode({
           episodeId: session.episodeId ?? this.activeEpisode?.id ?? "",
           positionMs: session.positionMs,
-          durationMs: session.durationMs ?? this.activeEpisode?.durationMs ?? null,
+          durationMs:
+            session.durationMs ?? this.activeEpisode?.durationMs ?? null,
         });
       }
       return;
@@ -564,7 +597,10 @@ class AndroidPlaybackController {
       return;
     }
 
-    if (!castState.connecting && usePlayerUiStore.getState().castStatus === "connecting") {
+    if (
+      !castState.connecting &&
+      usePlayerUiStore.getState().castStatus === "connecting"
+    ) {
       usePlayerUiStore.getState().setCastStatus("idle");
     }
   }
@@ -593,22 +629,29 @@ class AndroidPlaybackController {
     this.handlingRemoteCommand = true;
     try {
       if (command.action === "play-episode") {
-        if (!command.episodeId) throw new Error("The requested episode is missing.");
+        if (!command.episodeId)
+          throw new Error("The requested episode is missing.");
         const episode = await this.resolveEpisode(command.episodeId);
-        if (!episode) throw new Error("The requested episode could not be loaded.");
+        if (!episode)
+          throw new Error("The requested episode could not be loaded.");
         await this.playEpisode(episode, true);
       } else if (command.action === "play") {
         await this.play();
       } else if (command.action === "pause") {
         await this.pause();
-      } else if (command.action === "seek" && command.positionMs !== undefined) {
+      } else if (
+        command.action === "seek" &&
+        command.positionMs !== undefined
+      ) {
         await this.seekTo(command.positionMs);
       } else if (command.action === "skip-forward") {
         const state = useNativeMediaStore.getState().state;
-        if (state) await this.seekTo(state.positionMs + (command.offsetMs ?? 30_000));
+        if (state)
+          await this.seekTo(state.positionMs + (command.offsetMs ?? 30_000));
       } else if (command.action === "skip-backward") {
         const state = useNativeMediaStore.getState().state;
-        if (state) await this.seekTo(state.positionMs - (command.offsetMs ?? 15_000));
+        if (state)
+          await this.seekTo(state.positionMs - (command.offsetMs ?? 15_000));
       } else if (command.action === "next") {
         await this.next();
       } else if (command.action === "previous") {
@@ -625,7 +668,8 @@ class AndroidPlaybackController {
     } catch (error) {
       return {
         status: "rejected",
-        message: error instanceof Error ? error.message : "Playback command failed.",
+        message:
+          error instanceof Error ? error.message : "Playback command failed.",
       };
     } finally {
       this.handlingRemoteCommand = false;
@@ -634,7 +678,8 @@ class AndroidPlaybackController {
 
   public async takeOverPlayback(): Promise<void> {
     const playback = useAuthStore.getState().snapshot?.playback;
-    if (!playback?.episode) throw new Error("There is no shared playback to move.");
+    if (!playback?.episode)
+      throw new Error("There is no shared playback to move.");
     const episode: Episode = {
       ...playback.episode,
       positionMs: playback.positionMs,
@@ -652,7 +697,9 @@ class AndroidPlaybackController {
     if (!native?.episodeId) return;
     const cast = useNativeMediaStore.getState().castState;
     if (cast.connected) {
-      void PodwaffleMediaModule.stopCast({ stopReceiver: true }).catch(() => undefined);
+      void PodwaffleMediaModule.stopCast({ stopReceiver: true }).catch(
+        () => undefined,
+      );
     } else if (native.playWhenReady) {
       void PodwaffleMediaModule.pause().catch(() => undefined);
     }
@@ -670,15 +717,36 @@ class AndroidPlaybackController {
   }
 
   public async syncNativeQueue(currentEpisodeId?: string): Promise<void> {
-    const snapshot = useAuthStore.getState().snapshot;
-    const queue = snapshot?.queue ?? [];
+    const auth = useAuthStore.getState();
+    const snapshot = auth.snapshot;
+    const profileId = auth.session?.profile.id ?? snapshot?.profile.id;
+    const pending = profileId ? await pendingPlaybackUpdates(profileId) : [];
+    const completedIds = pendingCompletionEpisodeIds(
+      pending,
+      this.completedEpisodeId,
+    );
+    const queue = queueWithoutPendingCompletions(
+      snapshot?.queue ?? [],
+      pending,
+      this.completedEpisodeId,
+    );
+    await useAuthStore
+      .getState()
+      .removeQueueEpisodesLocally([...completedIds])
+      .catch(() => undefined);
     const activeId =
-      currentEpisodeId ?? useNativeMediaStore.getState().state?.episodeId ?? null;
+      currentEpisodeId ??
+      useNativeMediaStore.getState().state?.episodeId ??
+      null;
     const items = queue
       .filter((item) => Boolean(item.episode.enclosureUrl))
       .map((item) => episodeMedia(item.episode, item.id));
 
-    if (activeId && !items.some((item) => item.episodeId === activeId)) {
+    if (
+      activeId &&
+      !completedIds.has(activeId) &&
+      !items.some((item) => item.episodeId === activeId)
+    ) {
       const active =
         this.activeEpisode?.id === activeId
           ? this.activeEpisode
@@ -714,20 +782,25 @@ class AndroidPlaybackController {
       return null;
     }
     const playback = store.snapshot?.playback ?? null;
-    return isRemotePlayback(playback, store.session?.device.id) ? playback : null;
+    return isRemotePlayback(playback, store.session?.device.id)
+      ? playback
+      : null;
   }
 
   private async relayRemoteCommand(command: PlaybackCommand): Promise<void> {
     const { serverUrl, token } = this.connection();
     const result = await api.playbackCommand(serverUrl, token, command);
     if (!result.delivered && result.status === "pending") {
-      throw new Error("The playing device is offline or not connected to live sync.");
+      throw new Error(
+        "The playing device is offline or not connected to live sync.",
+      );
     }
   }
 
   private connection(): { serverUrl: string; token: string } {
     const credentials = useAuthStore.getState().credentials;
-    if (!credentials) throw new Error("This device is not connected to Podwaffle.");
+    if (!credentials)
+      throw new Error("This device is not connected to Podwaffle.");
     return credentials;
   }
 
@@ -735,7 +808,8 @@ class AndroidPlaybackController {
     return (
       useAuthStore
         .getState()
-        .snapshot?.queue.find((item) => item.episode.id === episodeId)?.id ?? null
+        .snapshot?.queue.find((item) => item.episode.id === episodeId)?.id ??
+      null
     );
   }
 
@@ -745,7 +819,8 @@ class AndroidPlaybackController {
     const cached =
       playbackEpisode?.id === episodeId
         ? playbackEpisode
-        : snapshot?.queue.find((item) => item.episode.id === episodeId)?.episode;
+        : snapshot?.queue.find((item) => item.episode.id === episodeId)
+            ?.episode;
     if (cached) return cached;
     try {
       const { serverUrl, token } = this.connection();
@@ -758,7 +833,7 @@ class AndroidPlaybackController {
   private hasLocalMedia(state: NativePlaybackState): boolean {
     return Boolean(
       state.episodeId &&
-        (state.source === "download" || downloadedPath(state.episodeId)),
+      (state.source === "download" || downloadedPath(state.episodeId)),
     );
   }
 
@@ -772,7 +847,10 @@ class AndroidPlaybackController {
 
   private sampleListening(): void {
     const now = Date.now();
-    const elapsed = Math.max(0, Math.min(5_000, now - this.lastListeningSampleAt));
+    const elapsed = Math.max(
+      0,
+      Math.min(5_000, now - this.lastListeningSampleAt),
+    );
     const state = useNativeMediaStore.getState().state ?? this.lastNativeState;
     if (
       state?.playWhenReady &&
@@ -820,7 +898,9 @@ class AndroidPlaybackController {
 
   private setLeaseExpiry(value: string | null): void {
     const parsed = value ? Date.parse(value) : Number.NaN;
-    this.leaseExpiresAt = Number.isFinite(parsed) ? parsed : Date.now() + 40_000;
+    this.leaseExpiresAt = Number.isFinite(parsed)
+      ? parsed
+      : Date.now() + 40_000;
   }
 
   private async reportCurrentState(
@@ -836,7 +916,8 @@ class AndroidPlaybackController {
     if (useNativeMediaStore.getState().castState.connected) return;
     if (
       !force &&
-      Date.now() - this.lastStateReportAt < playbackSyncPolicy.stateReportIntervalMs
+      Date.now() - this.lastStateReportAt <
+        playbackSyncPolicy.stateReportIntervalMs
     ) {
       return;
     }
@@ -856,11 +937,13 @@ class AndroidPlaybackController {
             playbackRate: native.playbackRate,
           }
         : null);
-    if (!body) return;
+    if (!body || body.episodeId === this.completedEpisodeId) return;
 
     const perform = async () => {
+      if (await this.completionPending(body.episodeId)) return;
       const { serverUrl, token } = this.connection();
       if (native) await this.ensureLease(native);
+      if (await this.completionPending(body.episodeId)) return;
       if (this.offlinePlayback) {
         await this.saveOfflinePlayback(body, false);
         this.lastStateReportAt = Date.now();
@@ -877,17 +960,17 @@ class AndroidPlaybackController {
           error.body?.error.code === "PLAYBACK_LEASE_REQUIRED" &&
           native
         ) {
+          if (await this.completionPending(body.episodeId)) return;
           this.leaseExpiresAt = 0;
           await this.ensureLease(native);
+          if (await this.completionPending(body.episodeId)) return;
           const result = await api.updatePlayback(serverUrl, token, body);
           this.setLeaseExpiry(result.playback.leaseExpiresAt);
           this.lastStateReportAt = Date.now();
           return;
         }
-        if (
-          native?.source === "download" ||
-          downloadedPath(body.episodeId)
-        ) {
+        if (native?.source === "download" || downloadedPath(body.episodeId)) {
+          if (await this.completionPending(body.episodeId)) return;
           this.offlinePlayback = true;
           this.leaseExpiresAt = 0;
           await this.saveOfflinePlayback(body, false);
@@ -916,7 +999,8 @@ class AndroidPlaybackController {
     if (!cast.connected || !cast.session || !this.activeEpisode) return;
     if (
       !force &&
-      Date.now() - this.lastCastReportAt < playbackSyncPolicy.stateReportIntervalMs
+      Date.now() - this.lastCastReportAt <
+        playbackSyncPolicy.stateReportIntervalMs
     ) {
       return;
     }
@@ -958,7 +1042,9 @@ class AndroidPlaybackController {
     });
   }
 
-  private async restoreLocalAfterCast(previous: NativeCastState): Promise<void> {
+  private async restoreLocalAfterCast(
+    previous: NativeCastState,
+  ): Promise<void> {
     const session = previous.session;
     if (!session) return;
     const resume = session.playerState === "playing";
@@ -972,7 +1058,9 @@ class AndroidPlaybackController {
       // A server-side idle timeout may already have cleared the Cast owner.
     }
     this.castBackendActive = false;
-    await PodwaffleMediaModule.seekTo(session.positionMs).catch(() => undefined);
+    await PodwaffleMediaModule.seekTo(session.positionMs).catch(
+      () => undefined,
+    );
     if (resume) await PodwaffleMediaModule.play().catch(() => undefined);
     else await PodwaffleMediaModule.pause().catch(() => undefined);
     usePlayerUiStore.getState().setCastStatus("idle");
@@ -981,7 +1069,10 @@ class AndroidPlaybackController {
   private async flushTelemetry(): Promise<void> {
     this.sampleListening();
     const state = useNativeMediaStore.getState().state;
-    const listenedMs = Math.min(300_000, Math.round(this.listenedSinceTelemetry));
+    const listenedMs = Math.min(
+      300_000,
+      Math.round(this.listenedSinceTelemetry),
+    );
     if (!state?.episodeId || listenedMs <= 0) {
       this.lastTelemetryAt = Date.now();
       return;
@@ -990,7 +1081,10 @@ class AndroidPlaybackController {
       this.lastTelemetryAt = Date.now();
       return;
     }
-    this.listenedSinceTelemetry = Math.max(0, this.listenedSinceTelemetry - listenedMs);
+    this.listenedSinceTelemetry = Math.max(
+      0,
+      this.listenedSinceTelemetry - listenedMs,
+    );
     this.lastTelemetryAt = Date.now();
     try {
       if (state.source !== "cast") await this.ensureLease(state);
@@ -1021,78 +1115,109 @@ class AndroidPlaybackController {
       return;
     }
     this.completedEpisodeId = completion.episodeId;
+
+    const nativeAtCompletion = useNativeMediaStore.getState().state;
+    const durationMs = completion.durationMs;
+    const completionState = {
+      episodeId: completion.episodeId,
+      positionMs: Math.max(completion.positionMs, durationMs ?? 0),
+      durationMs,
+      state: "stopped" as const,
+      playbackRate: nativeAtCompletion?.playbackRate ?? 1,
+    };
+
+    // Record completion before any network operation. A process death or failed
+    // response can then be retried without reintroducing the finished queue item.
+    await this.saveOfflinePlayback(completionState, true).catch(
+      () => undefined,
+    );
+    await useAuthStore
+      .getState()
+      .removeQueueEpisodesLocally([completion.episodeId])
+      .catch(() => undefined);
+    await this.syncNativeQueue(
+      nativeAtCompletion?.episodeId ?? undefined,
+    ).catch(() => undefined);
+
+    let completed: Awaited<ReturnType<typeof api.completeEpisode>>;
     try {
-      await this.flushTelemetry();
+      // Completion takes priority over telemetry and any older state request.
+      // The server rejects a delayed report after completion has advanced playback.
+      void this.flushTelemetry().catch(() => undefined);
       const { serverUrl, token } = this.connection();
-      const durationMs = completion.durationMs;
-      const completed = await api.completeEpisode(
+      completed = await api.completeEpisode(
         serverUrl,
         token,
         completion.episodeId,
-        Math.max(completion.positionMs, durationMs ?? 0),
+        completionState.positionMs,
         durationMs,
       );
-      if (useNativeMediaStore.getState().castState.connected) {
-        await this.stopBackendCast(
-          completion.positionMs,
-          durationMs,
-          "stopped",
-        ).catch(() => undefined);
-        this.castBackendActive = false;
-      } else {
-        await api.releasePlayback(serverUrl, token).catch(() => undefined);
-        this.leaseExpiresAt = 0;
-      }
-      await useAuthStore.getState().refresh();
-
-      const native = useNativeMediaStore.getState().state;
-      if (native?.episodeId && native.episodeId !== completion.episodeId) {
-        const nativeEpisode =
-          completed.queue.find((item) => item.episode.id === native.episodeId)
-            ?.episode ??
-          (await this.resolveEpisode(native.episodeId));
-        if (nativeEpisode) this.activeEpisode = nativeEpisode;
-        void this.reportCurrentState(true).catch(() => undefined);
-        return;
-      }
-
-      const nextEpisode = completed.queue[0]?.episode;
-      if (nextEpisode) await this.playEpisode(nextEpisode);
-      else {
-        this.activeEpisode = null;
-        if (useNativeMediaStore.getState().castState.connected) {
-          await PodwaffleMediaModule.stopCast({ stopReceiver: true });
-        } else {
-          await PodwaffleMediaModule.stop();
-        }
-      }
     } catch {
+      this.offlinePlayback = true;
+      this.leaseExpiresAt = 0;
       const native = useNativeMediaStore.getState().state;
       const advanced = Boolean(
         native?.episodeId && native.episodeId !== completion.episodeId,
       );
-      if (downloadedPath(completion.episodeId) || advanced) {
-        this.offlinePlayback = true;
-        await this.saveOfflinePlayback(
-          {
-            episodeId: completion.episodeId,
-            positionMs: Math.max(completion.positionMs, completion.durationMs ?? 0),
-            durationMs: completion.durationMs,
-            state: "stopped",
-            playbackRate: native?.playbackRate ?? 1,
-          },
-          true,
+      if (advanced && native?.episodeId) {
+        const nextEpisode = await this.resolveEpisode(native.episodeId);
+        if (nextEpisode) this.activeEpisode = nextEpisode;
+        void this.reportCurrentState(true).catch(() => undefined);
+      } else if (useNativeMediaStore.getState().castState.connected) {
+        await PodwaffleMediaModule.stopCast({ stopReceiver: true }).catch(
+          () => undefined,
         );
-        if (advanced && native?.episodeId) {
-          const nextEpisode = await this.resolveEpisode(native.episodeId);
-          if (nextEpisode) this.activeEpisode = nextEpisode;
-          void this.reportCurrentState(true).catch(() => undefined);
-        } else {
-          await PodwaffleMediaModule.stop().catch(() => undefined);
-        }
-        return;
+      } else {
+        await PodwaffleMediaModule.stop().catch(() => undefined);
       }
-      this.completedEpisodeId = null;
+      return;
+    }
+
+    const auth = useAuthStore.getState();
+    const profileId = auth.session?.profile.id ?? auth.snapshot?.profile.id;
+    if (profileId) {
+      await removePendingPlayback(profileId, completion.episodeId).catch(
+        () => undefined,
+      );
+    }
+    this.offlinePlayback = false;
+
+    if (useNativeMediaStore.getState().castState.connected) {
+      await this.stopBackendCast(
+        completion.positionMs,
+        durationMs,
+        "stopped",
+      ).catch(() => undefined);
+      this.castBackendActive = false;
+    }
+
+    void useAuthStore
+      .getState()
+      .refresh()
+      .catch(() => undefined);
+
+    const native = useNativeMediaStore.getState().state;
+    if (native?.episodeId && native.episodeId !== completion.episodeId) {
+      const nativeEpisode =
+        completed.queue.find((item) => item.episode.id === native.episodeId)
+          ?.episode ?? (await this.resolveEpisode(native.episodeId));
+      if (nativeEpisode) this.activeEpisode = nativeEpisode;
+      void this.reportCurrentState(true).catch(() => undefined);
+      return;
+    }
+
+    const nextEpisode = completed.queue[0]?.episode;
+    if (nextEpisode) {
+      await this.playEpisode(nextEpisode);
+      return;
+    }
+
+    this.activeEpisode = null;
+    this.leaseExpiresAt = 0;
+    if (useNativeMediaStore.getState().castState.connected) {
+      await PodwaffleMediaModule.stopCast({ stopReceiver: true });
+    } else {
+      await PodwaffleMediaModule.stop();
     }
   }
 
@@ -1112,6 +1237,10 @@ class AndroidPlaybackController {
             update.positionMs,
             update.durationMs,
           );
+          await useAuthStore
+            .getState()
+            .removeQueueEpisodesLocally([update.episodeId])
+            .catch(() => undefined);
         } else {
           const lease = await api.acquirePlayback(
             credentials.serverUrl,
@@ -1140,8 +1269,22 @@ class AndroidPlaybackController {
     }
     if (pending.length > 0) {
       this.offlinePlayback = false;
-      await useAuthStore.getState().refresh().catch(() => undefined);
+      await useAuthStore
+        .getState()
+        .refresh()
+        .catch(() => undefined);
     }
+  }
+
+  private async completionPending(episodeId: string): Promise<boolean> {
+    if (this.completedEpisodeId === episodeId) return true;
+    const auth = useAuthStore.getState();
+    const profileId = auth.session?.profile.id ?? auth.snapshot?.profile.id;
+    if (!profileId) return false;
+    const pending = await pendingPlaybackUpdates(profileId);
+    return pendingCompletionEpisodeIds(pending, this.completedEpisodeId).has(
+      episodeId,
+    );
   }
 
   private async saveOfflinePlayback(

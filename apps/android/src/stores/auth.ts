@@ -2,12 +2,24 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { create } from "zustand";
-import type { PublicProfile, Session, Snapshot } from "@podwaffle/contracts";
+import type {
+  PublicProfile,
+  QueueItem,
+  Session,
+  Snapshot,
+} from "@podwaffle/contracts";
 
 import { ApiClientError, api, normalizeServerUrl } from "../api/client";
 import { clearQueryCache } from "../api/queryCache";
 import { PodwaffleMediaModule } from "../native-media";
-import { clearPendingPlayback } from "../playback/offlineProgress";
+import {
+  clearPendingPlayback,
+  pendingPlaybackUpdates,
+} from "../playback/offlineProgress";
+import {
+  snapshotWithoutCompletedEpisodes,
+  snapshotWithoutPendingCompletions,
+} from "../playback/queueReconciliation";
 import { useDownloadsStore } from "./downloads";
 
 const CREDENTIALS_KEY = "podwaffle.credentials.v1";
@@ -53,7 +65,12 @@ interface AuthStore {
     deviceName: string;
   }) => Promise<void>;
   refresh: () => Promise<void>;
-  setSkipDurations: (backwardSeconds: number, forwardSeconds: number) => Promise<void>;
+  applyQueueMutation: (queue: QueueItem[], revision: number) => Promise<void>;
+  removeQueueEpisodesLocally: (episodeIds: string[]) => Promise<void>;
+  setSkipDurations: (
+    backwardSeconds: number,
+    forwardSeconds: number,
+  ) => Promise<void>;
   setLiveSyncConnected: (connected: boolean) => void;
   logout: () => Promise<void>;
 }
@@ -74,7 +91,9 @@ function settingsKey(profileId: string): string {
   return `${PLAYBACK_SETTINGS_KEY_PREFIX}:${profileId}`;
 }
 
-async function readPlaybackSettings(profileId: string): Promise<PlaybackSettings> {
+async function readPlaybackSettings(
+  profileId: string,
+): Promise<PlaybackSettings> {
   try {
     const raw = await AsyncStorage.getItem(settingsKey(profileId));
     if (!raw) throw new Error("No saved settings");
@@ -110,6 +129,14 @@ async function clearPersistedState(): Promise<void> {
     AsyncStorage.removeItem(SNAPSHOT_KEY),
     PodwaffleMediaModule.clearConfiguration().catch(() => undefined),
   ]);
+}
+
+async function reconcilePendingCompletionSnapshot(
+  snapshot: Snapshot | null,
+): Promise<Snapshot | null> {
+  if (!snapshot) return null;
+  const pending = await pendingPlaybackUpdates(snapshot.profile.id);
+  return snapshotWithoutPendingCompletions(snapshot, pending, null);
 }
 
 async function configureNative(
@@ -153,13 +180,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         AsyncStorage.getItem(SNAPSHOT_KEY),
       ]);
       if (!credentialsJson) {
-        set({ status: "signed-out", connection: "offline", liveSyncConnected: false });
+        set({
+          status: "signed-out",
+          connection: "offline",
+          liveSyncConnected: false,
+        });
         return;
       }
       const credentials = JSON.parse(credentialsJson) as Credentials;
-      const snapshot = snapshotJson
+      const storedSnapshot = snapshotJson
         ? (JSON.parse(snapshotJson) as Snapshot)
         : null;
+      const snapshot = await reconcilePendingCompletionSnapshot(storedSnapshot);
       const profileId = snapshot?.profile.id ?? null;
       const settings = profileId
         ? await readPlaybackSettings(profileId)
@@ -216,7 +248,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       CREDENTIALS_KEY,
       JSON.stringify(credentials),
     );
-    const snapshot = await api.snapshot(serverUrl, result.token);
+    const snapshot = await reconcilePendingCompletionSnapshot(
+      await api.snapshot(serverUrl, result.token),
+    );
     await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
     await configureNative(credentials, result.session, settings);
     set({
@@ -274,6 +308,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           credentials.token,
         );
       }
+      nextSnapshot = await reconcilePendingCompletionSnapshot(nextSnapshot);
       if (nextSnapshot) {
         await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(nextSnapshot));
       }
@@ -312,6 +347,42 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         return;
       }
       set({ connection: "offline", error: errorMessage(error) });
+    }
+  },
+
+  applyQueueMutation: async (queue, revision) => {
+    const initial = get().snapshot;
+    if (!initial || revision < initial.revision) return;
+    const pending = await pendingPlaybackUpdates(initial.profile.id);
+    const current = get().snapshot;
+    if (
+      !current ||
+      current.profile.id !== initial.profile.id ||
+      revision < current.revision
+    ) {
+      return;
+    }
+    const nextSnapshot = snapshotWithoutPendingCompletions(
+      { ...current, revision, queue },
+      pending,
+      null,
+    );
+    set({ snapshot: nextSnapshot, lastSyncAt: new Date().toISOString() });
+    const latest = get().snapshot;
+    if (latest?.profile.id === nextSnapshot.profile.id) {
+      await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(latest));
+    }
+  },
+
+  removeQueueEpisodesLocally: async (episodeIds) => {
+    const snapshot = get().snapshot;
+    if (!snapshot || episodeIds.length === 0) return;
+    const nextSnapshot = snapshotWithoutCompletedEpisodes(snapshot, episodeIds);
+    if (nextSnapshot === snapshot) return;
+    set({ snapshot: nextSnapshot });
+    const current = get().snapshot;
+    if (current?.profile.id === nextSnapshot.profile.id) {
+      await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(current));
     }
   },
 

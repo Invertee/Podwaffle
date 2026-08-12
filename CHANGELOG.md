@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Made Android media completion crash-safe and offline-safe before network sync,
+  prevented delayed playback reports from recreating completed queue items,
+  reconciled pending completions out of the cached/native queue, applied queue
+  additions without a second profile request, updated Android to 0.4.23 /
+  versionCode 27 while retaining native runtime 0.4-native-23, and bumped the
+  Home Assistant add-on to 5.0.23.
 - Added a HACS-compatible Home Assistant integration with one media player and
   queue/listening sensors per selected Podwaffle profile, introduced restricted
   controller tokens and command-status lookup, excluded controller devices from

@@ -135,21 +135,40 @@ export function createPlaybackRouter(
           profile.id,
           "playback.state.updated",
           (db) => {
-            try {
-              updatePlayback(db, profile.id, device.id, input);
-            } catch (error) {
-              leaseError(error);
-            }
             const priorEpisode = getEpisode(db, profile.id, input.episodeId);
-            const episode = setEpisodeProgress(
-              db,
-              profile.id,
-              input.episodeId,
-              input.positionMs,
-              input.durationMs,
+            const currentPlayback = playbackState(db, profile.id, device.id);
+            const staleCompletedReport = Boolean(
+              priorEpisode?.played &&
+              currentPlayback.episode?.id !== input.episodeId,
             );
-            if (priorEpisode && !priorEpisode.played && episode.played)
+
+            // Completion is monotonic unless playback was explicitly moved back
+            // to the episode first. A delayed position report must not recreate a
+            // completed queue item after exact-end processing advanced playback.
+            if (!staleCompletedReport) {
+              try {
+                updatePlayback(db, profile.id, device.id, input);
+              } catch (error) {
+                leaseError(error);
+              }
+            }
+            const episode = staleCompletedReport
+              ? priorEpisode!
+              : setEpisodeProgress(
+                  db,
+                  profile.id,
+                  input.episodeId,
+                  input.positionMs,
+                  input.durationMs,
+                );
+            if (
+              !staleCompletedReport &&
+              priorEpisode &&
+              !priorEpisode.played &&
+              episode.played
+            ) {
               recordEpisodeCompletion(db, profile.id);
+            }
             const playback = playbackState(db, profile.id, device.id);
             return {
               result: { playback, episode },
@@ -301,7 +320,8 @@ export function createPlaybackRouter(
             profile.id,
             stored.ownerDeviceId,
             stored.command,
-          ) ?? false);
+          ) ??
+            false);
         response.status(stored.status === "pending" ? 202 : 200).json({
           commandId: command.commandId,
           status: stored.status,
@@ -388,7 +408,12 @@ export function createPlaybackRouter(
         let recorded = false;
         try {
           database.transaction(() => {
-            recorded = recordMovement(database.db, profile.id, device.id, input);
+            recorded = recordMovement(
+              database.db,
+              profile.id,
+              device.id,
+              input,
+            );
           });
         } catch (error) {
           leaseError(error);
@@ -410,7 +435,12 @@ export function createPlaybackRouter(
         let recorded = false;
         try {
           database.transaction(() => {
-            recorded = ingestTelemetry(database.db, profile.id, device.id, input);
+            recorded = ingestTelemetry(
+              database.db,
+              profile.id,
+              device.id,
+              input,
+            );
           });
         } catch (error) {
           leaseError(error);
