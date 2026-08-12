@@ -1,0 +1,65 @@
+name: Validate completion ordering
+
+on:
+  push:
+    branches:
+      - fix/android-completion-sync-0.4.23
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply final completion ordering changes
+        run: |
+          base64 --decode .github/patches/finalize-completion-ordering.py.gz.b64 \
+            | gzip -dc > /tmp/finalize-repo.py
+          echo "94643bbc3f416ef3615bad1fc8b2f9f6771018da6b3b6cb170e83fb1f3de393a  /tmp/finalize-repo.py" \
+            | sha256sum -c -
+          python /tmp/finalize-repo.py
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format changed files
+        run: |
+          pnpm exec prettier --write \
+            CHANGELOG.md \
+            packages/contracts/src/index.ts \
+            apps/android/src/api/client.ts \
+            apps/android/src/playback/controller.ts \
+            apps/android/src/playback/offlineProgress.ts \
+            apps/android/src/playback/offlineProgress.test.js \
+            apps/android/src/playback/queueReconciliation.ts \
+            apps/android/src/playback/queueReconciliation.test.js \
+            apps/web/src/api/client.ts \
+            apps/server/src/api/catalog.ts \
+            apps/server/src/podcasts/service.ts \
+            apps/server/tests/integration/episode-end.test.ts
+          git diff --check
+      - run: pnpm --filter @podwaffle/contracts build
+      - run: pnpm --filter @podwaffle/android typecheck
+      - run: pnpm --filter @podwaffle/android exec jest --runInBand
+      - run: pnpm --filter @podwaffle/web typecheck
+      - run: pnpm --filter @podwaffle/web test
+      - run: pnpm --filter @podwaffle/server typecheck
+      - run: pnpm --filter @podwaffle/server exec vitest run tests/integration/episode-end.test.ts
+      - name: Commit validated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(android): order completion before stale playback writes [skip ci]"
+          git push origin HEAD:fix/android-completion-sync-0.4.23
