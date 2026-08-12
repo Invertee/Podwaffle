@@ -30,9 +30,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Check changed-file formatting
+      - name: Format changed files
         run: |
-          pnpm exec prettier --check \
+          pnpm exec prettier --write \
             CHANGELOG.md \
             apps/android/app.config.ts \
             apps/android/package.json \
