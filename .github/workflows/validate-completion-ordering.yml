@@ -21,7 +21,7 @@ jobs:
         run: |
           base64 --decode .github/patches/finalize-completion-ordering.py.gz.b64 \
             | gzip -dc > /tmp/finalize-repo.py
-          echo "94643bbc3f416ef3615bad1fc8b2f9f6771018da6b3b6cb170e83fb1f3de393a  /tmp/finalize-repo.py" \
+          echo "7ba4eb0fc217b725a6fe2dac7627e43de17d1f2b33e0295ebf1ce243186bafd2  /tmp/finalize-repo.py" \
             | sha256sum -c -
           python /tmp/finalize-repo.py
       - uses: pnpm/action-setup@v4
