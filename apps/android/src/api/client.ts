@@ -237,11 +237,9 @@ export const api = {
     ).then((result) => result.episodes),
 
   history: (serverUrl: string, token: string) =>
-    request<{ episodes: Episode[] }>(
-      serverUrl,
-      "/api/v1/history",
-      token,
-    ).then((result) => result.episodes),
+    request<{ episodes: Episode[] }>(serverUrl, "/api/v1/history", token).then(
+      (result) => result.episodes,
+    ),
 
   episode: (serverUrl: string, token: string, episodeId: string) =>
     request<{ episode: Episode }>(
@@ -285,6 +283,7 @@ export const api = {
         commandId: createCommandId(),
         positionMs,
         durationMs,
+        completed: true,
       }),
     }),
 
@@ -348,11 +347,9 @@ export const api = {
     ),
 
   devices: (serverUrl: string, token: string) =>
-    request<{ devices: Device[] }>(
-      serverUrl,
-      "/api/v1/devices",
-      token,
-    ).then((result) => result.devices),
+    request<{ devices: Device[] }>(serverUrl, "/api/v1/devices", token).then(
+      (result) => result.devices,
+    ),
 
   revoke: (
     serverUrl: string,
@@ -418,7 +415,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-
 
   startCast: (
     serverUrl: string,

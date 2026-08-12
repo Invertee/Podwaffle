@@ -169,6 +169,7 @@ export const api = {
         commandId: crypto.randomUUID(),
         positionMs,
         durationMs,
+        completed: true,
       }),
     }),
   queue: () =>

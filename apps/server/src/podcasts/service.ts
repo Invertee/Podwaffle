@@ -462,16 +462,18 @@ export function setEpisodeProgress(
   episodeId: string,
   positionMs: number,
   durationMs: number | null | undefined,
+  forceComplete = false,
 ): Episode {
   const now = new Date().toISOString();
   const existing = getEpisode(db, profileId, episodeId);
   if (!existing) throw new Error("Episode not found");
   const effectiveDuration = durationMs ?? existing.durationMs;
   const complete =
-    effectiveDuration !== null &&
-    effectiveDuration > 0 &&
-    positionMs / effectiveDuration >= 0.98 &&
-    existing.manualPlayState !== "unplayed";
+    forceComplete ||
+    (effectiveDuration !== null &&
+      effectiveDuration > 0 &&
+      positionMs / effectiveDuration >= 0.98 &&
+      existing.manualPlayState !== "unplayed");
   db.prepare(
     `INSERT INTO episode_state(
       profile_id, episode_id, position_ms, duration_ms, played, played_at,
@@ -537,12 +539,34 @@ export function addQueueItem(
   episodeId: string,
   position: "next" | "bottom",
 ): QueueItem[] {
+  const episodeState = db
+    .prepare(
+      `SELECT played, played_at
+       FROM episode_state WHERE profile_id = ? AND episode_id = ?`,
+    )
+    .get(profileId, episodeId) as
+    { played: number; played_at: string | null } | undefined;
+  const playedAtMs =
+    episodeState?.played === 1 && episodeState.played_at
+      ? Date.parse(episodeState.played_at)
+      : Number.NaN;
   const existing = db
     .prepare(
-      "SELECT id FROM queue_items WHERE profile_id = ? AND episode_id = ?",
+      `SELECT id, added_at FROM queue_items
+       WHERE profile_id = ? AND episode_id = ?`,
     )
-    .get(profileId, episodeId) as { id: string } | undefined;
-  if (existing) return listQueue(db, profileId);
+    .get(profileId, episodeId) as { id: string; added_at: string } | undefined;
+  if (existing) {
+    const addedAtMs = Date.parse(existing.added_at);
+    const staleCompletion =
+      Number.isFinite(playedAtMs) &&
+      Number.isFinite(addedAtMs) &&
+      addedAtMs <= playedAtMs;
+    if (!staleCompletion) return listQueue(db, profileId);
+    db.prepare("DELETE FROM queue_items WHERE id = ?").run(existing.id);
+    normalizeQueue(db, profileId);
+  }
+
   const playing = db
     .prepare(
       `SELECT q.sort_index FROM playback_state p
@@ -565,9 +589,18 @@ export function addQueueItem(
       "UPDATE queue_items SET sort_index = sort_index + 1 WHERE profile_id = ? AND sort_index >= ?",
     ).run(profileId, target);
   }
+  const addedAtMs = Number.isFinite(playedAtMs)
+    ? Math.max(Date.now(), playedAtMs + 1)
+    : Date.now();
   db.prepare(
     "INSERT INTO queue_items(id, profile_id, episode_id, sort_index, added_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(randomUUID(), profileId, episodeId, target, new Date().toISOString());
+  ).run(
+    randomUUID(),
+    profileId,
+    episodeId,
+    target,
+    new Date(addedAtMs).toISOString(),
+  );
   return listQueue(db, profileId);
 }
 

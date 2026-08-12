@@ -17,6 +17,21 @@ function key(profileId: string): string {
   return `${PREFIX}:${profileId}`;
 }
 
+function samePendingUpdate(
+  current: PendingPlaybackUpdate,
+  expected: PendingPlaybackUpdate,
+): boolean {
+  return (
+    current.episodeId === expected.episodeId &&
+    current.positionMs === expected.positionMs &&
+    current.durationMs === expected.durationMs &&
+    current.state === expected.state &&
+    current.playbackRate === expected.playbackRate &&
+    current.completed === expected.completed &&
+    current.updatedAt === expected.updatedAt
+  );
+}
+
 async function readPendingPlayback(
   profileId: string,
 ): Promise<PendingPlaybackUpdate[]> {
@@ -67,8 +82,8 @@ export async function pendingPlaybackUpdates(
 export async function savePendingPlayback(
   profileId: string,
   update: Omit<PendingPlaybackUpdate, "updatedAt">,
-): Promise<void> {
-  await serializePendingMutation(profileId, async () => {
+): Promise<PendingPlaybackUpdate> {
+  return serializePendingMutation(profileId, async () => {
     const pending = await readPendingPlayback(profileId);
     const prior = pending.find((item) => item.episodeId === update.episodeId);
     const completed = update.completed || prior?.completed === true;
@@ -87,21 +102,47 @@ export async function savePendingPlayback(
         next,
       ]),
     );
+    return next;
   });
 }
 
-export async function removePendingPlayback(
+export async function acknowledgePendingPlayback(
+  profileId: string,
+  expected: PendingPlaybackUpdate,
+): Promise<boolean> {
+  return serializePendingMutation(profileId, async () => {
+    const pending = await readPendingPlayback(profileId);
+    const current = pending.find(
+      (item) => item.episodeId === expected.episodeId,
+    );
+    if (!current || !samePendingUpdate(current, expected)) return false;
+    const next = pending.filter(
+      (item) => item.episodeId !== expected.episodeId,
+    );
+    if (next.length === 0) {
+      await AsyncStorage.removeItem(key(profileId));
+    } else {
+      await AsyncStorage.setItem(key(profileId), JSON.stringify(next));
+    }
+    return true;
+  });
+}
+
+export async function clearPendingCompletion(
   profileId: string,
   episodeId: string,
-): Promise<void> {
-  await serializePendingMutation(profileId, async () => {
+): Promise<boolean> {
+  return serializePendingMutation(profileId, async () => {
     const pending = await readPendingPlayback(profileId);
+    const current = pending.find((item) => item.episodeId === episodeId);
+    if (!current?.completed) return false;
     const next = pending.filter((item) => item.episodeId !== episodeId);
     if (next.length === 0) {
       await AsyncStorage.removeItem(key(profileId));
     } else {
       await AsyncStorage.setItem(key(profileId), JSON.stringify(next));
     }
+    return true;
   });
 }
 

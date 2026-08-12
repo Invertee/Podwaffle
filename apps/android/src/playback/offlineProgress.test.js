@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
+  acknowledgePendingPlayback,
+  clearPendingCompletion,
   clearPendingPlayback,
   pendingPlaybackUpdates,
   savePendingPlayback,
@@ -58,5 +60,53 @@ describe("pending playback persistence", () => {
         completed: true,
       }),
     ]);
+  });
+
+  it("does not acknowledge an older write after completion replaces it", async () => {
+    const progress = await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 30_000,
+      durationMs: 60_000,
+      state: "playing",
+      playbackRate: 1,
+      completed: false,
+    });
+    const completion = await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 60_000,
+      durationMs: 60_000,
+      state: "stopped",
+      playbackRate: 1,
+      completed: true,
+    });
+
+    expect(await acknowledgePendingPlayback(profileId, progress)).toBe(false);
+    expect(await pendingPlaybackUpdates(profileId)).toEqual([completion]);
+    expect(await acknowledgePendingPlayback(profileId, completion)).toBe(true);
+    expect(await pendingPlaybackUpdates(profileId)).toEqual([]);
+  });
+
+  it("only clears a completion when replay is explicit", async () => {
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 20_000,
+      durationMs: 60_000,
+      state: "paused",
+      playbackRate: 1,
+      completed: false,
+    });
+    expect(await clearPendingCompletion(profileId, episodeId)).toBe(false);
+    expect(await pendingPlaybackUpdates(profileId)).toHaveLength(1);
+
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 60_000,
+      durationMs: 60_000,
+      state: "stopped",
+      playbackRate: 1,
+      completed: true,
+    });
+    expect(await clearPendingCompletion(profileId, episodeId)).toBe(true);
+    expect(await pendingPlaybackUpdates(profileId)).toEqual([]);
   });
 });

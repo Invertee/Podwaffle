@@ -47,6 +47,7 @@ export const episodeStateSchema = commandSchema.extend({
 export const episodeProgressSchema = commandSchema.extend({
   positionMs: z.number().int().nonnegative(),
   durationMs: z.number().int().positive().nullable().optional(),
+  completed: z.boolean().optional().default(false),
 });
 
 export const queueItemSchema = commandSchema.extend({

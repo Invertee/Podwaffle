@@ -23,7 +23,9 @@ export async function takeOverBrowserPlayback(input?: {
   const positionMs = Math.max(
     0,
     input?.positionMs ??
-      (shared.episode?.id === episodeId ? shared.positionMs : episode.positionMs),
+      (shared.episode?.id === episodeId
+        ? shared.positionMs
+        : episode.positionMs),
   );
   const playbackState =
     input?.playbackState ?? (shared.state === "playing" ? "playing" : "paused");
@@ -63,11 +65,18 @@ export async function takeOverBrowserPlayback(input?: {
 
 registerPlaybackHandoffHandler(async (command: PlaybackCommand) => {
   try {
-    await takeOverBrowserPlayback({
-      episodeId: command.episodeId,
-      positionMs: command.positionMs,
-      playbackState: command.playbackState,
-    });
+    const takeover: {
+      episodeId?: string;
+      positionMs?: number;
+      playbackState?: "playing" | "paused";
+    } = {};
+    if (command.episodeId !== undefined) takeover.episodeId = command.episodeId;
+    if (command.positionMs !== undefined)
+      takeover.positionMs = command.positionMs;
+    if (command.playbackState !== undefined) {
+      takeover.playbackState = command.playbackState;
+    }
+    await takeOverBrowserPlayback(takeover);
     sendPlaybackCommandResult({
       commandId: command.commandId,
       status: "accepted",

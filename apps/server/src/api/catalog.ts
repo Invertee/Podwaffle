@@ -378,6 +378,7 @@ export function createCatalogRouter(
             episodeId,
             command.positionMs,
             command.durationMs,
+            command.completed,
           );
           if (!priorEpisode.played && episode.played)
             recordEpisodeCompletion(db, profileId);

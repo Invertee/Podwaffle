@@ -656,11 +656,7 @@ export class LocalPlayer {
     if (playback.ownedByCurrentDevice && local.remote) {
       usePlayer.setState({ remote: false });
     }
-    if (
-      !playback.ownedByCurrentDevice &&
-      playback.episode &&
-      playback.state !== "stopped"
-    ) {
+    if (!playback.ownedByCurrentDevice && playback.mode !== "cast") {
       usePlayer.setState({
         episode: playback.episode,
         playing: playback.state === "playing",
@@ -672,7 +668,7 @@ export class LocalPlayer {
         remote: true,
         castDeviceName: null,
         castSessionId: playback.castSessionId,
-        castStatus: playback.mode === "cast" ? "connected" : "idle",
+        castStatus: "idle",
         error: null,
       });
       this.audio.pause();
@@ -721,8 +717,6 @@ export class LocalPlayer {
         castStatus: "idle",
       });
     } else if (
-      playback.episode &&
-      playback.state !== "stopped" &&
       playback.ownedByCurrentDevice &&
       local.mode === "local" &&
       local.episode?.id !== playback.episode.id &&
@@ -1081,7 +1075,8 @@ export class LocalPlayer {
         });
       }
       if (command.action === "play-episode") {
-        if (!command.episodeId) throw new Error("The requested episode is missing.");
+        if (!command.episodeId)
+          throw new Error("The requested episode is missing.");
         await this.load(await api.episode(command.episodeId));
       } else if (usePlayer.getState().mode === "cast") {
         await this.castControl(command.action, command);
@@ -1089,7 +1084,10 @@ export class LocalPlayer {
         await this.play();
       } else if (command.action === "pause") {
         this.pause();
-      } else if (command.action === "seek" && command.positionMs !== undefined) {
+      } else if (
+        command.action === "seek" &&
+        command.positionMs !== undefined
+      ) {
         await this.seek(command.positionMs);
       } else if (command.action === "skip-forward") {
         await this.skip((command.offsetMs ?? 30_000) / 1_000, "skip-forward");

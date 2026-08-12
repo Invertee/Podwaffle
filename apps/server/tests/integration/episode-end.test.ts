@@ -60,7 +60,7 @@ describe("episode end handling", () => {
       "https://example.test/actual-end-2.mp3",
       "Second episode",
       now,
-      90_000,
+      null,
       now,
       now,
     );
@@ -110,6 +110,7 @@ describe("episode end handling", () => {
         commandId: randomUUID(),
         positionMs: 60_000,
         durationMs: 60_000,
+        completed: true,
       })
       .expect(200);
     expect(firstEnded.body.episode.played).toBe(true);
@@ -153,8 +154,9 @@ describe("episode end handling", () => {
       .post(`/api/v1/episodes/${secondEpisodeId}/progress`)
       .send({
         commandId: randomUUID(),
-        positionMs: 90_000,
-        durationMs: 90_000,
+        positionMs: 80_000,
+        durationMs: null,
+        completed: true,
       })
       .expect(200);
     expect(finalEnded.body.episode.played).toBe(true);
@@ -178,15 +180,15 @@ describe("episode end handling", () => {
       .post("/api/v1/playback/state")
       .send({
         episodeId: secondEpisodeId,
-        positionMs: 80_000,
-        durationMs: 90_000,
+        positionMs: 75_000,
+        durationMs: null,
         state: "playing",
         playbackRate: 1,
       })
       .expect(200);
     expect(staleFinalState.body.episode).toMatchObject({
       id: secondEpisodeId,
-      positionMs: 90_000,
+      positionMs: 80_000,
       played: true,
     });
     expect(staleFinalState.body.playback).toMatchObject({
@@ -198,6 +200,34 @@ describe("episode end handling", () => {
     });
     expect((await client.get("/api/v1/queue").expect(200)).body.queue).toEqual(
       [],
+    );
+
+    const profile = created.runtime.database.db
+      .prepare("SELECT id FROM profiles WHERE display_name = ?")
+      .get("Sam") as { id: string };
+    const completedEpisode = (
+      await client.get(`/api/v1/episodes/${firstEpisodeId}`).expect(200)
+    ).body.episode as { playedAt: string };
+    created.runtime.database.db
+      .prepare(
+        `INSERT INTO queue_items(
+          id, profile_id, episode_id, sort_index, added_at
+        ) VALUES (?, ?, ?, 0, ?)`,
+      )
+      .run(randomUUID(), profile.id, firstEpisodeId, now);
+
+    const replayQueue = await client
+      .post("/api/v1/queue/items")
+      .send({
+        commandId: randomUUID(),
+        episodeId: firstEpisodeId,
+        position: "bottom",
+      })
+      .expect(201);
+    expect(replayQueue.body.queue).toHaveLength(1);
+    expect(replayQueue.body.queue[0].episode.id).toBe(firstEpisodeId);
+    expect(Date.parse(replayQueue.body.queue[0].addedAt)).toBeGreaterThan(
+      Date.parse(completedEpisode.playedAt),
     );
   });
 });
