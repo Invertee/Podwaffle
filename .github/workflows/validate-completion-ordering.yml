@@ -29,11 +29,17 @@ jobs:
 
           path = Path("apps/web/src/player/local-player.ts")
           source = path.read_text()
-          old = '    if (!playback.ownedByCurrentDevice) {'
-          new = '    if (!playback.ownedByCurrentDevice && playback.mode !== "cast") {'
-          if source.count(old) != 1:
+          remote_old = '    if (!playback.ownedByCurrentDevice) {'
+          remote_new = '    if (!playback.ownedByCurrentDevice && playback.mode !== "cast") {'
+          status_old = '        castStatus: playback.mode === "cast" ? "connected" : "idle",'
+          status_new = '        castStatus: "idle",'
+          if source.count(remote_old) != 1:
               raise SystemExit("unexpected remote playback branch shape")
-          path.write_text(source.replace(old, new, 1))
+          if source.count(status_old) != 1:
+              raise SystemExit("unexpected remote cast status shape")
+          source = source.replace(remote_old, remote_new, 1)
+          source = source.replace(status_old, status_new, 1)
+          path.write_text(source)
           PY
       - uses: pnpm/action-setup@v4
         with:
