@@ -24,6 +24,17 @@ jobs:
             | gzip -dc \
             > /tmp/finalize-repo.py
           python /tmp/finalize-repo.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/web/src/player/local-player.ts")
+          source = path.read_text()
+          old = '    if (!playback.ownedByCurrentDevice) {'
+          new = '    if (!playback.ownedByCurrentDevice && playback.mode !== "cast") {'
+          if source.count(old) != 1:
+              raise SystemExit("unexpected remote playback branch shape")
+          path.write_text(source.replace(old, new, 1))
+          PY
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
