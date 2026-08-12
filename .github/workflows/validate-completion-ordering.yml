@@ -19,9 +19,11 @@ jobs:
           fetch-depth: 0
       - name: Apply final completion ordering changes
         run: |
-          base64 --decode .github/patches/finalize-completion-ordering.py.gz.b64 \
-            | gzip -dc > /tmp/finalize-repo.py
-          echo "7ba4eb0fc217b725a6fe2dac7627e43de17d1f2b33e0295ebf1ce243186bafd2  /tmp/finalize-repo.py" \
+          cat .github/patches/finalize-completion-ordering.py.gz.b64.* \
+            | base64 --decode \
+            | gzip -dc \
+            > /tmp/finalize-repo.py
+          echo "d622046fdf6ce58436e808ec8a69d44036c55301d902476214d696f99373c802  /tmp/finalize-repo.py" \
             | sha256sum -c -
           python /tmp/finalize-repo.py
       - uses: pnpm/action-setup@v4
@@ -45,6 +47,8 @@ jobs:
             apps/android/src/playback/queueReconciliation.ts \
             apps/android/src/playback/queueReconciliation.test.js \
             apps/web/src/api/client.ts \
+            apps/web/src/player/device-handoff.ts \
+            apps/web/src/player/local-player.ts \
             apps/server/src/api/catalog.ts \
             apps/server/src/podcasts/service.ts \
             apps/server/tests/integration/episode-end.test.ts
