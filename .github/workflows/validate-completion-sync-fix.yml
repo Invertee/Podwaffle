@@ -18,7 +18,10 @@ jobs:
           fetch-depth: 0
       - name: Apply completion sync patch
         run: |
-          gzip -dc .github/patches/android-completion-sync-0.4.23.patch.gz > /tmp/android-completion-sync.patch
+          cat .github/patches/android-completion-sync-0.4.23.patch.gz.b64.* \
+            | base64 --decode \
+            | gzip -dc \
+            > /tmp/android-completion-sync.patch
           git apply --check /tmp/android-completion-sync.patch
           git apply /tmp/android-completion-sync.patch
       - uses: pnpm/action-setup@v4
