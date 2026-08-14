@@ -94,9 +94,10 @@ export async function savePendingPlayback(
       (update.allowRegression === true || prior?.allowRegression === true);
     const next: PendingPlaybackUpdate = {
       ...update,
-      positionMs: allowRegression
-        ? update.positionMs
-        : Math.max(update.positionMs, prior?.positionMs ?? 0),
+      positionMs:
+        update.allowRegression === true
+          ? update.positionMs
+          : Math.max(update.positionMs, prior?.positionMs ?? 0),
       durationMs: update.durationMs ?? prior?.durationMs ?? null,
       state: completed ? "stopped" : update.state,
       completed,
