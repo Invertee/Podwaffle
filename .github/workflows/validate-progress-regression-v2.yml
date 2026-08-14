@@ -1,0 +1,49 @@
+name: Validate progress regression fix v2
+
+on:
+  push:
+    branches:
+      - fix/progress-regression-5.0.24
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+      - name: Apply progress regression fix
+        run: |
+          python .github/validation/patch_server_progress.py
+          python .github/validation/patch_android_progress.py
+          python .github/validation/patch_progress_versions.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate server
+        run: |
+          pnpm --filter @podwaffle/server typecheck
+          pnpm --filter @podwaffle/server test:integration
+      - name: Validate Android
+        run: |
+          pnpm --filter @podwaffle/android typecheck
+          pnpm --filter @podwaffle/android test -- --runInBand
+      - name: Commit validated fix
+        run: |
+          rm .github/workflows/validate-progress-regression-v2.yml
+          rm -rf .github/validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(playback): prevent progress regression [skip ci]"
+          git push origin HEAD:fix/progress-regression-5.0.24
