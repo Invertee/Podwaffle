@@ -109,6 +109,7 @@ describe("pending playback persistence", () => {
     expect(await clearPendingCompletion(profileId, episodeId)).toBe(true);
     expect(await pendingPlaybackUpdates(profileId)).toEqual([]);
   });
+
   it("preserves an explicit offline rewind instead of merging it forward", async () => {
     await savePendingPlayback(profileId, {
       episodeId,
@@ -137,4 +138,55 @@ describe("pending playback persistence", () => {
     ]);
   });
 
+  it("only lets a newly explicit rewind move pending progress backward", async () => {
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 50_000,
+      durationMs: 60_000,
+      state: "paused",
+      playbackRate: 1,
+      completed: false,
+    });
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 20_000,
+      durationMs: 60_000,
+      state: "paused",
+      playbackRate: 1,
+      completed: false,
+      allowRegression: true,
+    });
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 0,
+      durationMs: 60_000,
+      state: "paused",
+      playbackRate: 1,
+      completed: false,
+    });
+
+    expect(await pendingPlaybackUpdates(profileId)).toEqual([
+      expect.objectContaining({
+        episodeId,
+        positionMs: 20_000,
+        allowRegression: true,
+      }),
+    ]);
+
+    await savePendingPlayback(profileId, {
+      episodeId,
+      positionMs: 25_000,
+      durationMs: 60_000,
+      state: "playing",
+      playbackRate: 1,
+      completed: false,
+    });
+    expect(await pendingPlaybackUpdates(profileId)).toEqual([
+      expect.objectContaining({
+        episodeId,
+        positionMs: 25_000,
+        allowRegression: true,
+      }),
+    ]);
+  });
 });
