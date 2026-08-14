@@ -33,6 +33,10 @@ import {
   queueWithoutPendingCompletions,
   staleCompletedQueueEpisodeIds,
 } from "./queueReconciliation";
+import {
+  pendingProgressIsStale,
+  resumePositionMs,
+} from "./progressReconciliation";
 
 let notificationPermissionRequested = false;
 
@@ -143,6 +147,13 @@ class AndroidPlaybackController {
     ) {
       this.activeEpisode = playbackEpisode;
       this.completedEpisodeId = null;
+      const resumePosition = resumePositionMs(
+        playbackEpisode.positionMs,
+        current.positionMs,
+      );
+      if (resumePosition !== current.positionMs) {
+        await PodwaffleMediaModule.seekTo(resumePosition);
+      }
       await this.play();
       const clearedPendingCompletion =
         await this.clearPendingCompletionForReplay(playbackEpisode.id).catch(
@@ -410,6 +421,7 @@ class AndroidPlaybackController {
               playbackRate: state.playbackRate,
             },
             false,
+            requestedPositionMs < state.positionMs,
           );
         }
       }
@@ -1391,6 +1403,15 @@ class AndroidPlaybackController {
             );
           } else {
             if (await this.completionPending(update.episodeId)) continue;
+            const serverEpisode = await api.episode(
+              credentials.serverUrl,
+              credentials.token,
+              update.episodeId,
+            );
+            if (pendingProgressIsStale(update, serverEpisode)) {
+              await acknowledgePendingPlayback(profileId, update);
+              continue;
+            }
             const lease = await api.acquirePlayback(
               credentials.serverUrl,
               credentials.token,
@@ -1403,6 +1424,19 @@ class AndroidPlaybackController {
             );
             this.setLeaseExpiry(lease.leaseExpiresAt);
             if (await this.completionPending(update.episodeId)) continue;
+            if (
+              update.allowRegression === true &&
+              serverEpisode.positionMs > update.positionMs
+            ) {
+              await api.movement(credentials.serverUrl, credentials.token, {
+                commandId: createCommandId(),
+                episodeId: update.episodeId,
+                type: "seek",
+                fromPositionMs: serverEpisode.positionMs,
+                requestedPositionMs: update.positionMs,
+                confirmedPositionMs: update.positionMs,
+              });
+            }
             await api.updatePlayback(credentials.serverUrl, credentials.token, {
               episodeId: update.episodeId,
               positionMs: update.positionMs,
@@ -1470,11 +1504,16 @@ class AndroidPlaybackController {
       playbackRate: number;
     },
     completed: boolean,
+    allowRegression = false,
   ): Promise<PendingPlaybackUpdate | null> {
     const auth = useAuthStore.getState();
     const profileId = auth.session?.profile.id ?? auth.snapshot?.profile.id;
     if (!profileId) return null;
-    return savePendingPlayback(profileId, { ...body, completed });
+    return savePendingPlayback(profileId, {
+      ...body,
+      completed,
+      allowRegression,
+    });
   }
 }
 

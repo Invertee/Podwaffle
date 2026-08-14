@@ -45,6 +45,87 @@ function leaseError(error: unknown): never {
   throw error;
 }
 
+const DEFAULT_SKIP_BACKWARD_MS = 15_000;
+const PROGRESS_REPORT_JITTER_MS = 5_000;
+
+function guardedPlaybackPosition(
+  db: PodwaffleDatabase["db"],
+  profileId: string,
+  episodeId: string | undefined,
+  requestedPositionMs: number,
+): number {
+  if (!episodeId) return requestedPositionMs;
+  const episodeState = db
+    .prepare(
+      `SELECT position_ms, played, updated_at
+       FROM episode_state
+       WHERE profile_id = ? AND episode_id = ?`,
+    )
+    .get(profileId, episodeId) as
+    | { position_ms: number; played: number; updated_at: string }
+    | undefined;
+  if (
+    !episodeState ||
+    episodeState.played === 1 ||
+    requestedPositionMs >= episodeState.position_ms
+  ) {
+    return requestedPositionMs;
+  }
+
+  let skipBackwardMs = DEFAULT_SKIP_BACKWARD_MS;
+  const profile = db
+    .prepare("SELECT settings_json FROM profiles WHERE id = ?")
+    .get(profileId) as { settings_json: string } | undefined;
+  if (profile) {
+    try {
+      const settings = JSON.parse(profile.settings_json) as {
+        playback?: { skipBackwardSeconds?: unknown };
+      };
+      const seconds = Number(settings.playback?.skipBackwardSeconds);
+      if (Number.isFinite(seconds)) {
+        skipBackwardMs = Math.max(
+          1_000,
+          Math.min(120_000, Math.round(seconds * 1_000)),
+        );
+      }
+    } catch {
+      // Invalid legacy settings fall back to the default skip interval.
+    }
+  }
+
+  if (
+    episodeState.position_ms - requestedPositionMs <=
+    skipBackwardMs + PROGRESS_REPORT_JITTER_MS
+  ) {
+    return requestedPositionMs;
+  }
+
+  const explicitBackwardMovement = db
+    .prepare(
+      `SELECT 1
+       FROM movement_events
+       WHERE profile_id = ?
+         AND episode_id = ?
+         AND type IN ('seek', 'skip-backward')
+         AND confirmed_position_ms < from_position_ms
+         AND occurred_at >= ?
+         AND confirmed_position_ms <= ?
+         AND from_position_ms >= ?
+       ORDER BY occurred_at DESC
+       LIMIT 1`,
+    )
+    .get(
+      profileId,
+      episodeId,
+      episodeState.updated_at,
+      requestedPositionMs,
+      requestedPositionMs,
+    );
+  return explicitBackwardMovement
+    ? requestedPositionMs
+    : episodeState.position_ms;
+}
+
 export function createPlaybackRouter(
   database: PodwaffleDatabase,
   sync: SyncService,
@@ -84,7 +165,16 @@ export function createPlaybackRouter(
           profile.id,
           "playback.owner.updated",
           (db) => {
-            acquireLease(db, profile.id, device.id, input);
+            const guardedInput = {
+              ...input,
+              positionMs: guardedPlaybackPosition(
+                db,
+                profile.id,
+                input.episodeId,
+                input.positionMs,
+              ),
+            };
+            acquireLease(db, profile.id, device.id, guardedInput);
             const playback = playbackState(db, profile.id, device.id);
             return {
               result: { playback },
@@ -142,12 +232,24 @@ export function createPlaybackRouter(
               currentPlayback.episode?.id !== input.episodeId,
             );
 
+            const guardedInput = {
+              ...input,
+              positionMs: guardedPlaybackPosition(
+                db,
+                profile.id,
+                input.episodeId,
+                input.positionMs,
+              ),
+            };
+
             // Completion is monotonic unless playback was explicitly moved back
             // to the episode first. A delayed position report must not recreate a
             // completed queue item after exact-end processing advanced playback.
+            // Large unexplained backwards reports are also clamped to the saved
+            // episode position; explicit seek/skip events still permit rewinds.
             if (!staleCompletedReport) {
               try {
-                updatePlayback(db, profile.id, device.id, input);
+                updatePlayback(db, profile.id, device.id, guardedInput);
               } catch (error) {
                 leaseError(error);
               }
@@ -158,8 +260,8 @@ export function createPlaybackRouter(
                   db,
                   profile.id,
                   input.episodeId,
-                  input.positionMs,
-                  input.durationMs,
+                  guardedInput.positionMs,
+                  guardedInput.durationMs,
                 );
             if (
               !staleCompletedReport &&

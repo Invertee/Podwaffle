@@ -10,6 +10,7 @@ export interface PendingPlaybackUpdate {
   state: "playing" | "paused" | "stopped";
   playbackRate: number;
   completed: boolean;
+  allowRegression?: boolean;
   updatedAt: string;
 }
 
@@ -28,6 +29,7 @@ function samePendingUpdate(
     current.state === expected.state &&
     current.playbackRate === expected.playbackRate &&
     current.completed === expected.completed &&
+    current.allowRegression === expected.allowRegression &&
     current.updatedAt === expected.updatedAt
   );
 }
@@ -87,12 +89,18 @@ export async function savePendingPlayback(
     const pending = await readPendingPlayback(profileId);
     const prior = pending.find((item) => item.episodeId === update.episodeId);
     const completed = update.completed || prior?.completed === true;
+    const allowRegression =
+      !completed &&
+      (update.allowRegression === true || prior?.allowRegression === true);
     const next: PendingPlaybackUpdate = {
       ...update,
-      positionMs: Math.max(update.positionMs, prior?.positionMs ?? 0),
+      positionMs: allowRegression
+        ? update.positionMs
+        : Math.max(update.positionMs, prior?.positionMs ?? 0),
       durationMs: update.durationMs ?? prior?.durationMs ?? null,
       state: completed ? "stopped" : update.state,
       completed,
+      ...(allowRegression ? { allowRegression: true } : {}),
       updatedAt: new Date().toISOString(),
     };
     await AsyncStorage.setItem(

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Prevented stale Android/native or pending playback reports from moving saved progress backwards, preserved explicit offline rewinds, reconciled restored native playback to newer saved progress, updated Android to 0.4.24 / versionCode 28 while retaining native runtime 0.4-native-23, and bumped the Home Assistant add-on to 5.0.24.
 - Made Android media completion crash-safe and offline-safe before network
   sync, ordered older state, Cast, telemetry and retry writes ahead of final
   completion, made retry acknowledgements conditional so progress cannot erase a
