@@ -14,7 +14,7 @@ export function App() {
   if (session.isLoading) {
     return (
       <main className="loading">
-        <div className="brand-mark">PW</div>
+        <img className="brand-mark" src="/icon-512.png" alt="Podwaffle" />
         <p>Warming up Podwaffle…</p>
       </main>
     );

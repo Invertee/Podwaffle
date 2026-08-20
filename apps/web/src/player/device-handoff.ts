@@ -35,6 +35,7 @@ export async function takeOverBrowserPlayback(input?: {
     positionMs,
     durationMs: shared.durationMs ?? episode.durationMs,
     playbackRate: shared.playbackRate || usePlayer.getState().rate,
+    takeover: true,
   });
 
   usePlayer.setState({

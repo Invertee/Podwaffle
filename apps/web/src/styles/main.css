@@ -74,18 +74,12 @@ button {
 .brand-mark {
   width: 3.3rem;
   aspect-ratio: 1;
-  display: grid;
-  place-items: center;
-  color: #17130c;
-  background: var(--accent);
+  display: block;
+  object-fit: cover;
   border-radius: 1rem;
-  font:
-    800 0.9rem ui-rounded,
-    "Arial Rounded MT Bold",
-    system-ui,
-    sans-serif;
-  transform: rotate(-4deg);
-  box-shadow: 6px 6px 0 #7d5c20;
+  box-shadow:
+    0 0 0 1px #ffffff18,
+    0 12px 28px #0006;
 }
 
 .eyebrow {

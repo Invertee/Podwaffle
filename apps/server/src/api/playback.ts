@@ -42,6 +42,12 @@ function leaseError(error: unknown): never {
       "PLAYBACK_LEASE_REQUIRED",
       "This device does not hold the active playback lease",
     );
+  if (error instanceof Error && error.message === "PLAYBACK_TAKEOVER_REQUIRED")
+    throw new ApiError(
+      409,
+      "PLAYBACK_TAKEOVER_REQUIRED",
+      "Another device currently owns playback; an explicit takeover is required",
+    );
   throw error;
 }
 
@@ -62,8 +68,7 @@ function guardedPlaybackPosition(
        WHERE profile_id = ? AND episode_id = ?`,
     )
     .get(profileId, episodeId) as
-    | { position_ms: number; played: number; updated_at: string }
-    | undefined;
+    { position_ms: number; played: number; updated_at: string } | undefined;
   if (
     !episodeState ||
     episodeState.played === 1 ||
@@ -165,16 +170,35 @@ export function createPlaybackRouter(
           profile.id,
           "playback.owner.updated",
           (db) => {
+            const sameEpisodeOnAnotherDevice = Boolean(
+              prior.episode?.id &&
+              prior.episode.id === input.episodeId &&
+              prior.activeDeviceId &&
+              prior.activeDeviceId !== device.id,
+            );
             const guardedInput = {
               ...input,
-              positionMs: guardedPlaybackPosition(
-                db,
-                profile.id,
-                input.episodeId,
-                input.positionMs,
-              ),
+              // A device handoff resumes the last state confirmed by the old
+              // owner. This prevents a stale episode object on the new client
+              // from rewinding an otherwise successful switch.
+              positionMs: sameEpisodeOnAnotherDevice
+                ? prior.positionMs
+                : guardedPlaybackPosition(
+                    db,
+                    profile.id,
+                    input.episodeId,
+                    input.positionMs,
+                  ),
+              durationMs:
+                sameEpisodeOnAnotherDevice && prior.durationMs !== null
+                  ? prior.durationMs
+                  : input.durationMs,
             };
-            acquireLease(db, profile.id, device.id, guardedInput);
+            try {
+              acquireLease(db, profile.id, device.id, guardedInput);
+            } catch (error) {
+              leaseError(error);
+            }
             const playback = playbackState(db, profile.id, device.id);
             return {
               result: { playback },
@@ -297,7 +321,17 @@ export function createPlaybackRouter(
           input.commandId,
           "playback.cast.updated",
           (db) => {
-            startCast(db, profile.id, device.id, input.confirmed);
+            try {
+              startCast(
+                db,
+                profile.id,
+                device.id,
+                input.confirmed,
+                input.takeover,
+              );
+            } catch (error) {
+              leaseError(error);
+            }
             const playback = playbackState(db, profile.id, device.id);
             return { result: { playback }, payload: { playback } };
           },

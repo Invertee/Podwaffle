@@ -225,6 +225,7 @@ export const api = {
     positionMs: number;
     durationMs?: number | null;
     playbackRate: number;
+    takeover?: boolean;
   }) =>
     request<{ playback: PlaybackState }>("/playback/lease", {
       method: "POST",
@@ -245,12 +246,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  startCast: (confirmed: CastConfirmedState) =>
+  startCast: (confirmed: CastConfirmedState, takeover = false) =>
     request<{ playback: PlaybackState; revision: number }>("/playback/cast", {
       method: "POST",
       body: JSON.stringify({
         commandId: crypto.randomUUID(),
         confirmed,
+        takeover,
       }),
     }),
   stopCast: (body: {

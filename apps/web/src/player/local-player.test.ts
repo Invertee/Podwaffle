@@ -121,6 +121,7 @@ beforeEach(() => {
     muted: false,
     error: null,
     mode: "local",
+    remote: false,
     castDeviceName: null,
     castSessionId: null,
     castStatus: "idle",
@@ -244,6 +245,7 @@ describe("local and Cast handoff", () => {
         positionMs: 10_000,
         castSessionId: "mock-session",
       }),
+      true,
     );
     expect(playerModule.usePlayer.getState()).toMatchObject({
       mode: "cast",
@@ -424,8 +426,8 @@ describe("local and Cast handoff", () => {
     expect(audio.paused).toBe(true);
   });
 
-  it("clears an unreachable persisted Cast session without starting playback", async () => {
-    const cast = new UnreachableCastAdapter();
+  it("observes a Cast session owned by another device without joining it", async () => {
+    const cast = new FakeCastAdapter();
     const isolated = new playerModule.LocalPlayer(cast);
     const shared: PlaybackState = {
       episode: first,
@@ -442,30 +444,28 @@ describe("local and Cast handoff", () => {
     };
 
     isolated.applySharedPlayback(shared);
-    await vi.waitFor(() =>
-      expect(playerModule.usePlayer.getState().castStatus).toBe("error"),
-    );
+    await Promise.resolve();
 
-    isolated.applySharedPlayback(shared);
-    await isolated.stopCasting();
-
-    expect(cast.resumeCalls).toBe(1);
-    expect(api.stopCast).toHaveBeenCalledWith({
-      positionMs: 25_000,
-      durationMs: 60_000,
-      state: "paused",
-      playbackRate: 1,
-    });
     expect(playerModule.usePlayer.getState()).toMatchObject({
       episode: first,
-      mode: "local",
-      playing: false,
-      castSessionId: null,
-      castStatus: "idle",
+      mode: "cast",
+      remote: true,
+      playing: true,
+      positionMs: 25_000,
+      castSessionId: "lost-session",
+      castStatus: "connected",
       error: null,
     });
-    expect(audio.currentTime).toBe(25);
+    expect(cast.state().connected).toBe(false);
+    expect(api.startCast).not.toHaveBeenCalled();
+    expect(api.stopCast).not.toHaveBeenCalled();
     expect(audio.paused).toBe(true);
+
+    await isolated.play();
+    expect(api.playbackCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "play" }),
+    );
+    expect(cast.state().connected).toBe(false);
   });
 });
 
@@ -577,15 +577,6 @@ class FakeCastAdapter implements CastAdapter {
   public setState(update: Partial<CastAdapterState>): void {
     this.current = { ...this.current, ...update };
     for (const listener of this.listeners) listener(this.state());
-  }
-}
-
-class UnreachableCastAdapter extends FakeCastAdapter {
-  public resumeCalls = 0;
-
-  public override resumeSession(): Promise<CastAdapterState> {
-    this.resumeCalls += 1;
-    return Promise.reject(new Error("Cast session is gone"));
   }
 }
 

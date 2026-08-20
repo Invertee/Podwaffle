@@ -2,7 +2,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 group = 'com.podwaffle.media'
-version = '0.4.19'
+version = '0.4.20'
 
 def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir, "expo-module-gradle-plugin.gradle")
 if (expoModulesCorePlugin.exists()) {
@@ -16,8 +16,8 @@ android {
   defaultConfig {
     minSdkVersion 26
     targetSdkVersion 35
-    versionCode 23
-    versionName "0.4.19"
+    versionCode 24
+    versionName "0.4.20"
     testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -39,7 +39,9 @@ dependencies {
   implementation project(':expo-modules-core')
   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 
-  def media3_version = "1.5.0"
+  // 1.8 is the first Media3 release where CastPlayer exposes receiver device
+  // volume to MediaSession/System UI instead of reporting a permanent zero.
+  def media3_version = "1.8.0"
   implementation "androidx.media3:media3-exoplayer:${media3_version}"
   implementation "androidx.media3:media3-session:${media3_version}"
   implementation "androidx.media3:media3-ui:${media3_version}"

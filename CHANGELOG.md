@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Replaced the Android, web/PWA, favicon, add-on and Home Assistant integration
+  branding with the new Podwaffle microphone artwork.
+- Prevented background web and Android clients from stealing active playback,
+  made explicit device handoffs resume the last owner-confirmed position, blocked
+  stale completion reports, fixed Android queue refreshes carrying an old
+  episode's end position into the next item, restored Android Cast device-volume
+  reporting and controls with Media3 1.8, updated Android to 0.4.25 / versionCode
+  29 / native runtime 0.4-native-24, and bumped the Home Assistant add-on to
+  5.0.25.
 - Prevented stale Android/native or pending playback reports from moving saved progress backwards, preserved explicit offline rewinds, reconciled restored native playback to newer saved progress, updated Android to 0.4.24 / versionCode 28 while retaining native runtime 0.4-native-23, and bumped the Home Assistant add-on to 5.0.24.
 - Made Android media completion crash-safe and offline-safe before network
   sync, ordered older state, Cast, telemetry and retry writes ahead of final

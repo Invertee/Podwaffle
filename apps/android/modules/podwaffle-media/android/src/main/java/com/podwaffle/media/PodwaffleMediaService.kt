@@ -9,6 +9,7 @@ import android.view.KeyEvent
 import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.DefaultMediaItemConverter
 import androidx.media3.cast.SessionAvailabilityListener
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
@@ -29,6 +30,22 @@ import com.google.android.gms.cast.framework.CastSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONArray
+import kotlin.math.roundToInt
+
+internal data class QueueSelection(val index: Int, val positionMs: Long)
+
+internal fun reconcileQueueSelection(
+    candidateIds: List<String>,
+    currentId: String?,
+    currentPositionMs: Long,
+    requestedIndex: Int,
+): QueueSelection {
+    val matchingIndex = candidateIds.indexOf(currentId).takeIf { it >= 0 }
+    return QueueSelection(
+        index = matchingIndex ?: requestedIndex.coerceIn(0, candidateIds.lastIndex),
+        positionMs = if (matchingIndex != null) currentPositionMs.coerceAtLeast(0L) else 0L,
+    )
+}
 
 /**
  * Long-lived Android playback authority for local, downloaded and Cast media.
@@ -451,13 +468,19 @@ class PodwaffleMediaService : MediaSessionService() {
 
         val currentId = player.currentMediaItem?.mediaId
         val currentPosition = player.currentPosition.coerceAtLeast(0L)
-        val currentIndex = candidates.indexOfFirst { it.mediaId == currentId }
-            .takeIf { it >= 0 }
-            ?: requestedIndex.coerceIn(0, candidates.lastIndex)
+        val selection = reconcileQueueSelection(
+            candidates.map { it.mediaId },
+            currentId,
+            currentPosition,
+            requestedIndex,
+        )
+        // A queue refresh may remove the old item and select a different head.
+        // Carrying the old (often near-end) position into that new identity can
+        // immediately complete and skip the new podcast.
         val shouldPlay = player.playWhenReady
         val speed = player.playbackParameters.speed
-        player.setMediaItems(candidates, currentIndex, currentPosition)
-        lastMediaItem = candidates.getOrNull(currentIndex)
+        player.setMediaItems(candidates, selection.index, selection.positionMs)
+        lastMediaItem = candidates.getOrNull(selection.index)
         player.playbackParameters = PlaybackParameters(speed)
         player.prepare()
         player.playWhenReady = shouldPlay
@@ -615,7 +638,21 @@ class PodwaffleMediaService : MediaSessionService() {
 
     fun setCastVolume(volume: Float): Map<String, Any?> {
         val normalized = volume.coerceIn(0f, 1f)
-        castPlayer?.volume = normalized
+        castPlayer?.let { player ->
+            val device = player.deviceInfo
+            val range = (device.maxVolume - device.minVolume).coerceAtLeast(0)
+            if (
+                range > 0 &&
+                player.isCommandAvailable(Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS)
+            ) {
+                val deviceVolume = device.minVolume + (normalized * range).roundToInt()
+                player.setDeviceVolume(deviceVolume, C.VOLUME_FLAG_SHOW_UI)
+            } else {
+                // Retain support for receivers/Media3 implementations which only
+                // expose the Cast SDK's normalized stream volume.
+                player.volume = normalized
+            }
+        }
         currentCastSession()?.let { session ->
             runCatching { session.volume = normalized.toDouble() }
         }

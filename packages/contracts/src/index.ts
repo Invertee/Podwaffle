@@ -64,6 +64,9 @@ export const playbackLeaseSchema = z.object({
   positionMs: z.number().int().nonnegative().default(0),
   durationMs: z.number().int().positive().nullable().optional(),
   playbackRate: z.number().min(0.5).max(4).default(1),
+  // Renewals must never silently steal playback from another live client.
+  // Interactive play/device-switch actions opt into an explicit takeover.
+  takeover: z.boolean().optional().default(false),
 });
 
 export const playbackStateSchema = z.object({
@@ -108,6 +111,7 @@ export const castConfirmedStateSchema = z.object({
 
 export const castStartSchema = commandSchema.extend({
   confirmed: castConfirmedStateSchema,
+  takeover: z.boolean().optional().default(false),
 });
 
 export const castStopSchema = commandSchema.extend({

@@ -138,7 +138,7 @@ export class LocalPlayer {
       this.castState = state;
       usePlayer.setState({
         castAvailable: state.available,
-        ...(usePlayer.getState().mode === "cast"
+        ...(usePlayer.getState().mode === "cast" && !usePlayer.getState().remote
           ? {
               playing: state.playing,
               buffering: state.buffering,
@@ -154,6 +154,7 @@ export class LocalPlayer {
       if (
         state.completionSequence > previous.completionSequence &&
         usePlayer.getState().mode === "cast" &&
+        !usePlayer.getState().remote &&
         !this.changingCastMedia &&
         !this.endingCast
       )
@@ -162,6 +163,7 @@ export class LocalPlayer {
         previous.connected &&
         !state.connected &&
         usePlayer.getState().mode === "cast" &&
+        !usePlayer.getState().remote &&
         !this.endingCast
       )
         void this.restoreLocalFromCast(previous);
@@ -202,6 +204,7 @@ export class LocalPlayer {
     this.progressTimer ??= window.setInterval(() => {
       this.countListened();
       if (usePlayer.getState().mode === "cast") {
+        if (usePlayer.getState().remote) return;
         if (this.castState.connected) {
           const finished =
             this.castState.playerState === "IDLE" &&
@@ -296,6 +299,14 @@ export class LocalPlayer {
       const shared = await api.playback().catch(() => null);
       if (shared?.mode === "cast") {
         this.applySharedPlayback(shared);
+        if (!shared.ownedByCurrentDevice) {
+          await api.playbackCommand({
+            commandId: crypto.randomUUID(),
+            action: "play-episode",
+            episodeId: episode.id,
+          });
+          return;
+        }
         await this.resumeCast(shared);
       }
     }
@@ -310,20 +321,25 @@ export class LocalPlayer {
       await this.loadCastEpisode(episode, autoplay);
       return;
     }
-    await api.acquirePlayback({
+    const acquired = await api.acquirePlayback({
       episodeId: episode.id,
       positionMs: episode.positionMs,
       durationMs: episode.durationMs,
       playbackRate: this.audio.playbackRate,
+      takeover: true,
     });
+    const startPositionMs =
+      acquired.episode?.id === episode.id
+        ? acquired.positionMs
+        : episode.positionMs;
     this.audio.src = episode.enclosureUrl;
-    this.audio.currentTime = episode.positionMs / 1000;
+    this.audio.currentTime = startPositionMs / 1000;
     this.playbackInstanceId = crypto.randomUUID();
     this.sequence = 0;
     this.listenedSinceFlush = 0;
     usePlayer.setState({
       episode,
-      positionMs: episode.positionMs,
+      positionMs: startPositionMs,
       durationMs: episode.durationMs ?? 0,
       error: null,
       mode: "local",
@@ -351,14 +367,21 @@ export class LocalPlayer {
     const episode = usePlayer.getState().episode;
     if (!episode) return;
     try {
-      await api.acquirePlayback({
+      const acquired = await api.acquirePlayback({
         episodeId: episode.id,
         positionMs: Math.round(this.audio.currentTime * 1000),
         durationMs: Number.isFinite(this.audio.duration)
           ? Math.round(this.audio.duration * 1000)
           : episode.durationMs,
         playbackRate: this.audio.playbackRate,
+        takeover: true,
       });
+      if (
+        acquired.episode?.id === episode.id &&
+        Math.abs(acquired.positionMs - this.audio.currentTime * 1000) > 1_000
+      ) {
+        this.audio.currentTime = acquired.positionMs / 1000;
+      }
       await this.audio.play();
       await this.reportState("playing");
     } catch {
@@ -674,6 +697,24 @@ export class LocalPlayer {
       this.audio.pause();
       return;
     }
+    if (playback.mode === "cast" && !playback.ownedByCurrentDevice) {
+      usePlayer.setState({
+        episode: playback.episode,
+        playing: playback.state === "playing",
+        buffering: false,
+        positionMs: playback.positionMs,
+        durationMs: playback.durationMs ?? playback.episode.durationMs ?? 0,
+        rate: playback.playbackRate,
+        mode: "cast",
+        remote: true,
+        castDeviceName: null,
+        castSessionId: playback.castSessionId,
+        castStatus: "connected",
+        error: null,
+      });
+      this.audio.pause();
+      return;
+    }
     if (playback.mode === "cast") {
       const reconnectFailed =
         this.failedCastSessionId === playback.castSessionId;
@@ -768,7 +809,10 @@ export class LocalPlayer {
         autoplay: wasPlaying,
         playbackRate: state.rate,
       });
-      await api.startCast(confirmedCastState(remote, episode, state.rate));
+      await api.startCast(
+        confirmedCastState(remote, episode, state.rate),
+        true,
+      );
       usePlayer.setState({
         mode: "cast",
         remote: false,
@@ -822,6 +866,7 @@ export class LocalPlayer {
       usePlayer.setState({
         episode: playback.episode,
         mode: "cast",
+        remote: false,
         playing: remote.playing,
         buffering: remote.buffering,
         positionMs: remote.positionMs,

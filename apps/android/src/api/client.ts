@@ -379,6 +379,7 @@ export const api = {
       positionMs: number;
       durationMs?: number | null;
       playbackRate: number;
+      takeover?: boolean;
     },
   ) =>
     request<{ playback: PlaybackState; revision: number }>(
@@ -420,6 +421,7 @@ export const api = {
     serverUrl: string,
     token: string,
     confirmed: CastConfirmedState,
+    takeover = false,
   ) =>
     request<{ playback: PlaybackState; revision: number }>(
       serverUrl,
@@ -427,7 +429,11 @@ export const api = {
       token,
       {
         method: "POST",
-        body: JSON.stringify({ commandId: createCommandId(), confirmed }),
+        body: JSON.stringify({
+          commandId: createCommandId(),
+          confirmed,
+          takeover,
+        }),
       },
     ),
 

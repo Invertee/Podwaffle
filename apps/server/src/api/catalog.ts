@@ -372,6 +372,34 @@ export function createCatalogRouter(
           const priorEpisode = getEpisode(db, profileId, episodeId);
           if (!priorEpisode)
             throw new ApiError(404, "NOT_FOUND", "Episode was not found");
+          if (command.completed) {
+            const playback = db
+              .prepare(
+                `SELECT episode_id, active_device_id, lease_expires_at
+                 FROM playback_state WHERE profile_id = ?`,
+              )
+              .get(profileId) as
+              | {
+                  episode_id: string | null;
+                  active_device_id: string | null;
+                  lease_expires_at: string | null;
+                }
+              | undefined;
+            const anotherOwnerIsActive = Boolean(
+              playback?.episode_id === episodeId &&
+              playback.active_device_id &&
+              playback.active_device_id !== request.auth!.device.id &&
+              playback.lease_expires_at &&
+              Date.parse(playback.lease_expires_at) > Date.now(),
+            );
+            if (anotherOwnerIsActive) {
+              throw new ApiError(
+                409,
+                "PLAYBACK_TAKEOVER_REQUIRED",
+                "A stale client cannot complete media owned by another device",
+              );
+            }
+          }
           const episode = setEpisodeProgress(
             db,
             profileId,

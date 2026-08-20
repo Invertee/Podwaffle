@@ -66,9 +66,12 @@ export function JoinScreen() {
   return (
     <main className="join-shell">
       <section className="join-card" aria-labelledby="join-title">
-        <div className="brand-mark" aria-hidden="true">
-          PW
-        </div>
+        <img
+          className="brand-mark"
+          src="/icon-512.png"
+          alt=""
+          aria-hidden="true"
+        />
         <p className="eyebrow">Your podcasts, in sync</p>
         <h1 id="join-title">Welcome to Podwaffle</h1>
         <p className="muted">Choose a profile and enrol this browser.</p>

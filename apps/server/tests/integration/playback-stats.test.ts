@@ -146,6 +146,7 @@ describe("playback ownership and listening statistics", () => {
         positionMs: 342_000,
         durationMs: 600_000,
         playbackRate: 1,
+        takeover: true,
       })
       .expect(200);
     await first

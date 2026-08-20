@@ -58,12 +58,30 @@ export function acquireLease(
     positionMs: number;
     durationMs?: number | null | undefined;
     playbackRate: number;
+    takeover?: boolean | undefined;
   },
 ): void {
   const now = new Date();
   const existing = db
-    .prepare("SELECT episode_id FROM playback_state WHERE profile_id = ?")
-    .get(profileId) as { episode_id: string | null } | undefined;
+    .prepare(
+      `SELECT episode_id, active_device_id, lease_expires_at
+       FROM playback_state WHERE profile_id = ?`,
+    )
+    .get(profileId) as
+    | {
+        episode_id: string | null;
+        active_device_id: string | null;
+        lease_expires_at: string | null;
+      }
+    | undefined;
+  const otherOwnerIsActive = Boolean(
+    existing?.active_device_id &&
+    existing.active_device_id !== deviceId &&
+    existing.lease_expires_at &&
+    Date.parse(existing.lease_expires_at) > now.getTime(),
+  );
+  if (otherOwnerIsActive && input.takeover !== true)
+    throw new Error("PLAYBACK_TAKEOVER_REQUIRED");
   const episodeId = input.episodeId ?? existing?.episode_id ?? null;
   db.prepare(
     `INSERT INTO playback_state(
@@ -99,8 +117,25 @@ export function startCast(
   profileId: string,
   deviceId: string,
   confirmed: CastConfirmedState,
+  takeover = false,
 ): void {
   const now = new Date();
+  const existing = db
+    .prepare(
+      `SELECT active_device_id, lease_expires_at
+       FROM playback_state WHERE profile_id = ?`,
+    )
+    .get(profileId) as
+    | { active_device_id: string | null; lease_expires_at: string | null }
+    | undefined;
+  const otherOwnerIsActive = Boolean(
+    existing?.active_device_id &&
+    existing.active_device_id !== deviceId &&
+    existing.lease_expires_at &&
+    Date.parse(existing.lease_expires_at) > now.getTime(),
+  );
+  if (otherOwnerIsActive && !takeover)
+    throw new Error("PLAYBACK_TAKEOVER_REQUIRED");
   db.prepare(
     `INSERT INTO playback_state(
        profile_id, episode_id, position_ms, duration_ms, state, mode,
