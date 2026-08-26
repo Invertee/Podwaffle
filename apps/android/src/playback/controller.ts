@@ -416,7 +416,22 @@ class AndroidPlaybackController {
     );
     const cast = useNativeMediaStore.getState().castState;
     if (cast.connected) {
-      await PodwaffleMediaModule.castSeek(requestedPositionMs);
+      const confirmed =
+        await PodwaffleMediaModule.castSeek(requestedPositionMs);
+      this.handleCastState(confirmed);
+      void (async () => {
+        const { serverUrl, token } = this.connection();
+        await api.movement(serverUrl, token, {
+          commandId: createCommandId(),
+          episodeId: state.episodeId!,
+          type,
+          fromPositionMs: state.positionMs,
+          requestedPositionMs,
+          confirmedPositionMs:
+            confirmed.session?.positionMs ?? requestedPositionMs,
+        });
+        await this.reportCastState(true);
+      })().catch(() => undefined);
       return;
     }
 
@@ -660,7 +675,12 @@ class AndroidPlaybackController {
       ) {
         void this.resolveEpisode(castState.session.episodeId).then(
           (episode) => {
-            if (episode) this.activeEpisode = episode;
+            if (!episode) return;
+            this.activeEpisode = episode;
+            // A restored Cast session can arrive before JS has reconstructed
+            // its episode object. Retry the confirmation once metadata exists
+            // so the receiver's position is not lost across process death.
+            void this.reportCastState(true).catch(() => undefined);
           },
         );
       }

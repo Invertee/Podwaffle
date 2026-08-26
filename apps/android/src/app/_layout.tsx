@@ -31,11 +31,9 @@ import { useAuthStore } from "../stores/auth";
 import { useDownloadsStore } from "../stores/downloads";
 import { useNativeMediaStore } from "../stores/nativeMedia";
 import { APP_CHROME_HEIGHT, colors, TAB_BAR_HEIGHT } from "../styles/tokens";
-import {
-  playbackSyncPolicy,
-  type ConnectionTransport,
-} from "../sync/policy";
+import { playbackSyncPolicy, type ConnectionTransport } from "../sync/policy";
 import { syncRuntime } from "../sync/runtime";
+import { registerPushWake } from "../sync/push";
 
 const BACKGROUND_POSITION_PROCESS_INTERVAL_MS = 5_000;
 
@@ -77,31 +75,43 @@ function NativeMediaBinder() {
         updateState(state);
         playbackController.handleNativeState(state);
       }),
-      PodwaffleMediaModule.addListener(MEDIA_EVENTS.POSITION_CHANGED, (data) => {
-        const position = data as { positionMs: number; bufferedPositionMs: number };
-        const now = Date.now();
-        const appActive = AppState.currentState === "active";
-        if (
-          !appActive &&
-          now - lastBackgroundPositionAt.current <
-            BACKGROUND_POSITION_PROCESS_INTERVAL_MS
-        ) {
-          return;
-        }
-        lastBackgroundPositionAt.current = now;
-        updatePosition(position.positionMs, position.bufferedPositionMs);
-        playbackController.handleNativePosition();
-      }),
-      PodwaffleMediaModule.addListener(MEDIA_EVENTS.ITEM_ENDED, (data) =>
-        playbackController.handleNativeCompletion(data as NativeEpisodeCompletion),
+      PodwaffleMediaModule.addListener(
+        MEDIA_EVENTS.POSITION_CHANGED,
+        (data) => {
+          const position = data as {
+            positionMs: number;
+            bufferedPositionMs: number;
+          };
+          const now = Date.now();
+          const appActive = AppState.currentState === "active";
+          if (
+            !appActive &&
+            now - lastBackgroundPositionAt.current <
+              BACKGROUND_POSITION_PROCESS_INTERVAL_MS
+          ) {
+            return;
+          }
+          lastBackgroundPositionAt.current = now;
+          updatePosition(position.positionMs, position.bufferedPositionMs);
+          playbackController.handleNativePosition();
+        },
       ),
-      PodwaffleMediaModule.addListener(MEDIA_EVENTS.CAST_STATE_CHANGED, (data) => {
-        const cast = data as NativeCastState;
-        updateCastState(cast);
-        playbackController.handleCastState(cast);
-      }),
-      PodwaffleMediaModule.addListener(MEDIA_EVENTS.DOWNLOAD_STATE_CHANGED, (data) =>
-        useDownloadsStore.getState().apply(data as NativeDownload),
+      PodwaffleMediaModule.addListener(MEDIA_EVENTS.ITEM_ENDED, (data) =>
+        playbackController.handleNativeCompletion(
+          data as NativeEpisodeCompletion,
+        ),
+      ),
+      PodwaffleMediaModule.addListener(
+        MEDIA_EVENTS.CAST_STATE_CHANGED,
+        (data) => {
+          const cast = data as NativeCastState;
+          updateCastState(cast);
+          playbackController.handleCastState(cast);
+        },
+      ),
+      PodwaffleMediaModule.addListener(
+        MEDIA_EVENTS.DOWNLOAD_STATE_CHANGED,
+        (data) => useDownloadsStore.getState().apply(data as NativeDownload),
       ),
       PodwaffleMediaModule.addListener(
         MEDIA_EVENTS.DOWNLOAD_MAINTENANCE_COMPLETED,
@@ -132,10 +142,12 @@ function RuntimeBinder() {
   );
   const subscriptionSignature =
     snapshotSubscriptions?.map((item) => item.id).join(":") ?? "";
-  const queueSignature = useAuthStore((state) =>
-    state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
+  const queueSignature = useAuthStore(
+    (state) => state.snapshot?.queue.map((item) => item.id).join(":") ?? "",
   );
-  const sharedPlayback = useAuthStore((state) => state.snapshot?.playback ?? null);
+  const sharedPlayback = useAuthStore(
+    (state) => state.snapshot?.playback ?? null,
+  );
   const sharedPlaybackSignature = sharedPlayback
     ? [
         sharedPlayback.episode?.id ?? "",
@@ -170,7 +182,8 @@ function RuntimeBinder() {
 
   useEffect(() => {
     void refreshConnectionState();
-    const subscription = PodwaffleConnectivityModule.addListener(applyConnectionState);
+    const subscription =
+      PodwaffleConnectivityModule.addListener(applyConnectionState);
     return () => subscription.remove();
   }, [applyConnectionState, refreshConnectionState]);
 
@@ -187,6 +200,22 @@ function RuntimeBinder() {
         ],
       );
     });
+  }, [status, credentials]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !credentials) return;
+    let disposed = false;
+    let unregister: (() => void) | undefined;
+    void registerPushWake()
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unregister = cleanup;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unregister?.();
+    };
   }, [status, credentials]);
 
   useEffect(() => {
@@ -270,7 +299,9 @@ function RuntimeBinder() {
 function AppNavigator() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const authenticated = useAuthStore((state) => state.status === "authenticated");
+  const authenticated = useAuthStore(
+    (state) => state.status === "authenticated",
+  );
   const playerExpanded = pathname === "/now-playing";
 
   return (
@@ -280,7 +311,8 @@ function AppNavigator() {
           styles.navigator,
           authenticated && {
             paddingBottom:
-              (playerExpanded ? TAB_BAR_HEIGHT : APP_CHROME_HEIGHT) + insets.bottom,
+              (playerExpanded ? TAB_BAR_HEIGHT : APP_CHROME_HEIGHT) +
+              insets.bottom,
           },
         ]}
       >

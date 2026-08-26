@@ -317,6 +317,21 @@ export function getCastCommand(
   return row ? mapPlaybackCommand(row, true) : undefined;
 }
 
+export function pendingPlaybackCommands(
+  db: DatabaseSync,
+  profileId: string,
+  ownerDeviceId: string,
+): StoredPlaybackCommand["command"][] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM playback_commands
+       WHERE profile_id = ? AND owner_device_id = ? AND status = 'pending'
+       ORDER BY created_at`,
+    )
+    .all(profileId, ownerDeviceId) as unknown as PlaybackCommandRow[];
+  return rows.map((row) => mapPlaybackCommand(row, true).command);
+}
+
 export function resolveCastCommand(
   db: DatabaseSync,
   profileId: string,

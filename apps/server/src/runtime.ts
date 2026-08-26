@@ -8,12 +8,14 @@ import { synchronizeConfiguredProfiles } from "./db/repositories/profiles.js";
 import { SyncService } from "./sync/service.js";
 import { PodwaffleWebSocketServer } from "./websocket/server.js";
 import { FeedScheduler } from "./podcasts/scheduler.js";
+import { PushService } from "./push/service.js";
 
 export interface Runtime {
   database: PodwaffleDatabase;
   sync: SyncService;
   webSockets: PodwaffleWebSocketServer;
   feedScheduler: FeedScheduler;
+  push: PushService;
   server: Server;
   close: () => Promise<void>;
 }
@@ -37,12 +39,15 @@ export async function createRuntime(
   });
   const sync = new SyncService(database);
   sync.prune(config.sync_event_retention_days);
-  const webSockets = new PodwaffleWebSocketServer(database, sync);
+  const push = await PushService.create(config, database);
+  push.start(sync);
+  const webSockets = new PodwaffleWebSocketServer(database, sync, push);
   const feedScheduler = new FeedScheduler(database, sync, config);
   const app = createApp({
     config,
     database,
     sync,
+    push,
     webSockets,
     ...(options.webDistPath === undefined
       ? {}
@@ -56,10 +61,12 @@ export async function createRuntime(
     sync,
     webSockets,
     feedScheduler,
+    push,
     server,
     close: async () => {
       feedScheduler.stop();
       webSockets.shutdown();
+      await push.close();
       if (server.listening) {
         await new Promise<void>((resolveClose, reject) =>
           server.close((error) => (error ? reject(error) : resolveClose())),

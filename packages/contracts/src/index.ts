@@ -28,6 +28,13 @@ export const profileSettingsUpdateSchema = commandSchema.extend({
 
 export const revokeDeviceSchema = commandSchema;
 
+export const pushRegistrationSchema = z.object({
+  provider: z.literal("fcm").default("fcm"),
+  registrationToken: z.string().trim().min(1).max(4096),
+  appVersion: z.string().max(50).optional(),
+  runtimeVersion: z.string().max(50).optional(),
+});
+
 export const subscribeSchema = commandSchema.extend({
   feedUrl: z.url(),
   appleCollectionId: z.string().max(100).optional(),
@@ -223,6 +230,7 @@ export type PlaybackCommand = z.infer<typeof playbackCommandSchema>;
 export type PlaybackCommandAction = z.infer<typeof playbackCommandActionSchema>;
 export type CastConfirmedState = z.infer<typeof castConfirmedStateSchema>;
 export type PlaybackSettings = z.infer<typeof playbackSettingsSchema>;
+export type PushRegistrationInput = z.infer<typeof pushRegistrationSchema>;
 
 export interface ApiErrorBody {
   error: {

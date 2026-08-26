@@ -17,6 +17,9 @@ const rawOptionsSchema = z.object({
   firebase_service_account_path: z
     .string()
     .default("/data/firebase-service-account.json"),
+  firebase_android_config_path: z
+    .string()
+    .default("/data/google-services.json"),
   android_release_manifest_path: z
     .string()
     .default("/data/android-release.json"),

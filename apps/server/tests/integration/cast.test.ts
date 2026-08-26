@@ -162,6 +162,72 @@ describe("cross-client Google Cast control", () => {
     ).toEqual({ position_ms: 20_000 });
   });
 
+  it("persists regular Cast progress before the session ends", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    await join(owner, "Sam", "Android Cast owner");
+    const episodeId = insertEpisode(created.runtime);
+
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          episodeId,
+          positionMs: 15_000,
+          durationMs: 600_000,
+          state: "playing",
+          playbackRate: 1,
+          castSessionId: "durable-progress",
+        },
+      })
+      .expect(200);
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          episodeId,
+          positionMs: 185_000,
+          durationMs: 600_000,
+          state: "playing",
+          playbackRate: 1,
+          castSessionId: "durable-progress",
+        },
+      })
+      .expect(200);
+
+    // A transient zero from a reconnecting Cast sender must not erase progress.
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          episodeId,
+          positionMs: 0,
+          durationMs: 600_000,
+          state: "playing",
+          playbackRate: 1,
+          castSessionId: "durable-progress",
+        },
+      })
+      .expect(200);
+
+    const snapshot = await owner.get("/api/v1/snapshot").expect(200);
+    expect(snapshot.body.playback).toMatchObject({
+      mode: "cast",
+      positionMs: 185_000,
+    });
+    expect(
+      created.runtime.database.db
+        .prepare(
+          "SELECT position_ms FROM episode_state WHERE profile_id = ? AND episode_id = ?",
+        )
+        .get(snapshot.body.profile.id, episodeId),
+    ).toEqual({ position_ms: 185_000 });
+  });
+
   it("lets another profile device clear a Cast session after its owner lease expires", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);

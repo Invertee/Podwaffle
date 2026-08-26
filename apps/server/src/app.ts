@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import express, { type Express, type Response } from "express";
 import {
   joinRequestSchema,
+  pushRegistrationSchema,
   revokeDeviceSchema,
   type Session,
   type SystemInfo,
@@ -13,11 +14,7 @@ import type { AppConfig } from "./config.js";
 import type { PodwaffleDatabase } from "./db/connection.js";
 import { createDevice, listProfileDevices } from "./db/repositories/devices.js";
 import { getProfile, listEnabledProfiles } from "./db/repositories/profiles.js";
-import {
-  DEVICE_COOKIE,
-  requireAuth,
-  requireScope,
-} from "./auth/middleware.js";
+import { DEVICE_COOKIE, requireAuth, requireScope } from "./auth/middleware.js";
 import { joinRateLimit } from "./auth/rate-limit.js";
 import { ApiError, errorHandler, notFound } from "./api/errors.js";
 import { mapDevice, type SyncService } from "./sync/service.js";
@@ -27,6 +24,7 @@ import { openApiDocument } from "./api/openapi.js";
 import { createCatalogRouter } from "./api/catalog.js";
 import { createPlaybackRouter } from "./api/playback.js";
 import { createProfileRouter } from "./api/profile.js";
+import type { PushService } from "./push/service.js";
 
 export const BUILD_VERSION = process.env.PODWAFFLE_VERSION ?? "0.1.0";
 export const API_VERSION = "v1" as const;
@@ -39,6 +37,7 @@ export interface AppDependencies {
     PodwaffleWebSocketServer,
     "revokeDevice" | "connectionCount" | "sendPlaybackCommand"
   >;
+  push: PushService;
   webDistPath?: string;
 }
 
@@ -68,7 +67,7 @@ function sessionFor(
 }
 
 export function createApp(dependencies: AppDependencies): Express {
-  const { config, database, sync, webSockets } = dependencies;
+  const { config, database, sync, webSockets, push } = dependencies;
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
@@ -219,6 +218,79 @@ export function createApp(dependencies: AppDependencies): Express {
           (device) => mapDevice(device, request.auth!.device.id),
         ),
       });
+    },
+  );
+
+  authenticated.get(
+    "/push/config",
+    requireScope("snapshot:read"),
+    (_request, response) => response.json(push.config()),
+  );
+
+  authenticated.post(
+    "/push/registrations",
+    requireScope("playback:target"),
+    (request, response, next) => {
+      try {
+        const input = pushRegistrationSchema.parse(request.body);
+        const { profile, device } = request.auth!;
+        if (device.platform !== "android") {
+          throw new ApiError(
+            409,
+            "ANDROID_DEVICE_REQUIRED",
+            "Push registrations are available only to Android devices",
+          );
+        }
+        if (!push.config().enabled) {
+          throw new ApiError(
+            503,
+            "PUSH_NOT_CONFIGURED",
+            "Firebase push is not configured on this server",
+          );
+        }
+        const applied = sync.mutate(profile.id, "device.push.updated", () => {
+          const registration = push.register(device.id, input);
+          return {
+            result: { registration },
+            payload: { deviceId: device.id, registered: true },
+          };
+        });
+        response.status(201).json({
+          ...applied.result,
+          revision: applied.event.revision,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  authenticated.delete(
+    "/push/registrations/:registrationId",
+    requireScope("playback:target"),
+    (request, response, next) => {
+      try {
+        const registrationId = request.params.registrationId;
+        if (typeof registrationId !== "string") {
+          throw new ApiError(404, "NOT_FOUND", "Registration was not found");
+        }
+        const { profile, device } = request.auth!;
+        const applied = sync.mutate(profile.id, "device.push.updated", () => {
+          if (!push.remove(device.id, registrationId)) {
+            throw new ApiError(404, "NOT_FOUND", "Registration was not found");
+          }
+          return {
+            result: { registrationId, removed: true },
+            payload: { deviceId: device.id, registered: false },
+          };
+        });
+        response.json({
+          ...applied.result,
+          revision: applied.event.revision,
+        });
+      } catch (error) {
+        next(error);
+      }
     },
   );
 

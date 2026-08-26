@@ -42,6 +42,12 @@ export class PodwaffleWebSocketServer {
   public constructor(
     private readonly database: PodwaffleDatabase,
     private readonly sync: SyncService,
+    private readonly push?: {
+      wakePlaybackDevice: (
+        deviceId: string,
+        commandId: string,
+      ) => Promise<boolean>;
+    },
   ) {}
 
   public attach(server: HttpServer): void {
@@ -220,6 +226,11 @@ export class PodwaffleWebSocketServer {
         delivered = true;
       }
     }
+    // A WebSocket send only proves that bytes entered an open socket. The app
+    // process may still be suspended, so also send an idempotent FCM nudge.
+    void this.push
+      ?.wakePlaybackDevice(ownerDeviceId, command.commandId)
+      .catch(() => undefined);
     return delivered;
   }
 

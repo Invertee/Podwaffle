@@ -13,6 +13,11 @@ export const useSyncStore = create<SyncState>((set) => ({
   revision: 0,
   snapshot: null,
   connected: false,
-  setSnapshot: (snapshot) => set({ snapshot, revision: snapshot.revision }),
+  setSnapshot: (snapshot) =>
+    set((state) =>
+      snapshot.revision >= state.revision
+        ? { snapshot, revision: snapshot.revision }
+        : state,
+    ),
   setConnected: (connected) => set({ connected }),
 }));

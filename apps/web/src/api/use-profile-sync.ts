@@ -19,6 +19,7 @@ export function useProfileSync(authenticated: boolean): void {
     let stopped = false;
     let attempts = 0;
     let reconnectTimer: number | undefined;
+    let lastRecoveryAt = 0;
 
     const refreshSnapshot = async () => {
       const snapshot = await api.snapshot();
@@ -54,18 +55,25 @@ export function useProfileSync(authenticated: boolean): void {
     };
 
     const connect = () => {
-      if (stopped) return;
+      if (
+        stopped ||
+        (socket !== undefined && socket.readyState < WebSocket.CLOSING)
+      )
+        return;
       const revision = useSyncStore.getState().revision;
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(
+      const nextSocket = new WebSocket(
         `${protocol}//${location.host}/ws?afterRevision=${revision}`,
       );
-      socket.addEventListener("open", () => {
+      socket = nextSocket;
+      nextSocket.addEventListener("open", () => {
+        if (socket !== nextSocket) return;
         attempts = 0;
         useSyncStore.getState().setConnected(true);
-        bindPlaybackSocket(socket);
+        bindPlaybackSocket(nextSocket);
       });
-      socket.addEventListener("message", (message) => {
+      nextSocket.addEventListener("message", (message) => {
+        if (socket !== nextSocket) return;
         void (async () => {
           const parsed = serverMessageSchema.safeParse(
             JSON.parse(String(message.data)) as unknown,
@@ -92,7 +100,9 @@ export function useProfileSync(authenticated: boolean): void {
           await refreshSnapshot();
         })();
       });
-      socket.addEventListener("close", () => {
+      nextSocket.addEventListener("close", () => {
+        if (socket !== nextSocket) return;
+        socket = undefined;
         bindPlaybackSocket(undefined);
         useSyncStore.getState().setConnected(false);
         if (!stopped) {
@@ -103,9 +113,43 @@ export function useProfileSync(authenticated: boolean): void {
       });
     };
 
-    void refreshSnapshot().then(connect);
+    const reconnect = () => {
+      if (stopped) return;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      const previous = socket;
+      socket = undefined;
+      bindPlaybackSocket(undefined);
+      useSyncStore.getState().setConnected(false);
+      previous?.close();
+      connect();
+    };
+
+    const recoverForegroundState = () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastRecoveryAt < 1_000) return;
+      lastRecoveryAt = now;
+      reconnect();
+      void refreshSnapshot().catch(() => undefined);
+    };
+
+    document.addEventListener("visibilitychange", recoverForegroundState);
+    window.addEventListener("focus", recoverForegroundState);
+    window.addEventListener("pageshow", recoverForegroundState);
+    window.addEventListener("online", recoverForegroundState);
+
+    void refreshSnapshot()
+      .catch(() => undefined)
+      .finally(connect);
     return () => {
       stopped = true;
+      document.removeEventListener("visibilitychange", recoverForegroundState);
+      window.removeEventListener("focus", recoverForegroundState);
+      window.removeEventListener("pageshow", recoverForegroundState);
+      window.removeEventListener("online", recoverForegroundState);
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       socket?.close();
       bindPlaybackSocket(undefined);

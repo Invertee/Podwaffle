@@ -1079,6 +1079,7 @@ export class LocalPlayer {
     details: Pick<PlaybackCommand, "positionMs" | "offsetMs"> = {},
   ): Promise<void> {
     if (this.castState.connected && this.isTabOwner()) {
+      const fromPositionMs = this.castState.positionMs;
       if (action === "play") await this.cast.play();
       if (action === "pause") await this.cast.pause();
       if (action === "seek" && details.positionMs !== undefined)
@@ -1091,6 +1092,33 @@ export class LocalPlayer {
             this.castState.positionMs + direction * (details.offsetMs ?? 0),
           ),
         );
+      }
+      if (
+        action === "seek" ||
+        action === "skip-forward" ||
+        action === "skip-backward"
+      ) {
+        const confirmedPositionMs = this.cast.state().positionMs;
+        const requestedPositionMs =
+          action === "seek"
+            ? (details.positionMs ?? confirmedPositionMs)
+            : Math.max(
+                0,
+                fromPositionMs +
+                  (action === "skip-forward" ? 1 : -1) *
+                    (details.offsetMs ?? 0),
+              );
+        const episodeId = usePlayer.getState().episode?.id;
+        if (episodeId) {
+          await api.movement({
+            commandId: crypto.randomUUID(),
+            episodeId,
+            type: action,
+            fromPositionMs,
+            requestedPositionMs,
+            confirmedPositionMs,
+          });
+        }
       }
       await this.reportCastState();
       return;

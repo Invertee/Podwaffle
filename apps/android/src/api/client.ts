@@ -499,6 +499,39 @@ export const api = {
       },
     ),
 
+  pendingPlaybackCommands: (serverUrl: string, token: string) =>
+    request<{
+      commands: Array<PlaybackCommand & { requestedByDeviceId: string }>;
+    }>(serverUrl, "/api/v1/playback/commands/pending", token).then(
+      (result) => result.commands,
+    ),
+
+  pushConfig: (serverUrl: string, token: string) =>
+    request<{
+      enabled: boolean;
+      projectId: string | null;
+      androidAppId: string | null;
+    }>(serverUrl, "/api/v1/push/config", token),
+
+  registerPush: (
+    serverUrl: string,
+    token: string,
+    body: {
+      registrationToken: string;
+      appVersion?: string;
+      runtimeVersion?: string;
+    },
+  ) =>
+    request<{ registration: { id: string }; revision: number }>(
+      serverUrl,
+      "/api/v1/push/registrations",
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({ provider: "fcm", ...body }),
+      },
+    ),
+
   movement: (
     serverUrl: string,
     token: string,

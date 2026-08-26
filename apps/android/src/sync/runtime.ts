@@ -13,10 +13,7 @@ import { useNativeMediaStore } from "../stores/nativeMedia";
 const HEARTBEAT_MS = 25_000;
 const MAX_RECONNECT_MS = 30_000;
 
-function websocketUrl(
-  credentials: Credentials,
-  afterRevision: number,
-): string {
+function websocketUrl(credentials: Credentials, afterRevision: number): string {
   const url = new URL(credentials.serverUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws";
@@ -35,6 +32,7 @@ class AndroidSyncRuntime {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private afterRevision = 0;
+  private readonly commandExecutions = new Map<string, Promise<void>>();
 
   public start(credentials: Credentials, afterRevision: number): void {
     const changed =
@@ -112,7 +110,7 @@ class AndroidSyncRuntime {
       return;
     }
     if (message.type === "playback.command") {
-      await this.handlePlaybackCommand(message.command);
+      await this.processPlaybackCommand(message.command);
       return;
     }
     if (message.type === "playback.command.cancelled") {
@@ -141,7 +139,33 @@ class AndroidSyncRuntime {
     this.scheduleRefresh(120);
   }
 
-  private async handlePlaybackCommand(
+  public async processPendingCommands(): Promise<void> {
+    const credentials = this.credentials ?? useAuthStore.getState().credentials;
+    if (!credentials) return;
+    const commands = await api.pendingPlaybackCommands(
+      credentials.serverUrl,
+      credentials.token,
+    );
+    await Promise.all(
+      commands.map((command) => this.processPlaybackCommand(command)),
+    );
+  }
+
+  private processPlaybackCommand(
+    command: PlaybackCommand & { requestedByDeviceId: string },
+  ): Promise<void> {
+    const existing = this.commandExecutions.get(command.commandId);
+    if (existing) return existing;
+    const execution = this.executePlaybackCommand(command).finally(() => {
+      if (this.commandExecutions.get(command.commandId) === execution) {
+        this.commandExecutions.delete(command.commandId);
+      }
+    });
+    this.commandExecutions.set(command.commandId, execution);
+    return execution;
+  }
+
+  private async executePlaybackCommand(
     command: PlaybackCommand & { requestedByDeviceId: string },
   ): Promise<void> {
     const currentDeviceId = useAuthStore.getState().session?.device.id;
@@ -151,7 +175,7 @@ class AndroidSyncRuntime {
     const result = targetedTakeover
       ? await this.takeOverPlayback(command)
       : await playbackController.handleRemotePlaybackCommand(command);
-    const credentials = this.credentials;
+    const credentials = this.credentials ?? useAuthStore.getState().credentials;
     if (!credentials) return;
     try {
       await api.playbackCommandResult(
@@ -170,9 +194,7 @@ class AndroidSyncRuntime {
     }
   }
 
-  private async takeOverPlayback(
-    command: PlaybackCommand,
-  ): Promise<{
+  private async takeOverPlayback(command: PlaybackCommand): Promise<{
     status: "accepted" | "rejected";
     message?: string;
   }> {
@@ -187,7 +209,9 @@ class AndroidSyncRuntime {
       return {
         status: "rejected",
         message:
-          error instanceof Error ? error.message : "Playback could not be moved.",
+          error instanceof Error
+            ? error.message
+            : "Playback could not be moved.",
       };
     }
   }

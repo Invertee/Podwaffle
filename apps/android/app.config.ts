@@ -1,12 +1,18 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 const sharedPodwaffleIcon = "../../podwaffle/icon.png";
+const googleServicesFile = resolve(
+  import.meta.dirname,
+  process.env.PODWAFFLE_GOOGLE_SERVICES_FILE ?? "google-services.json",
+);
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.4.25",
+  version: "0.4.26",
   orientation: "portrait",
   icon: sharedPodwaffleIcon,
   scheme: "podwaffle",
@@ -20,15 +26,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "29",
+    buildNumber: "30",
   },
   android: {
-    versionCode: 29,
+    versionCode: 30,
     adaptiveIcon: {
       foregroundImage: sharedPodwaffleIcon,
       backgroundColor: "#0D1B2A",
     },
     package: "com.podwaffle.app",
+    ...(existsSync(googleServicesFile) ? { googleServicesFile } : {}),
     permissions: [
       "android.permission.INTERNET",
       "android.permission.FOREGROUND_SERVICE",
@@ -49,6 +56,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-router",
     "expo-asset",
     "expo-secure-store",
+    [
+      "expo-notifications",
+      {
+        defaultChannel: "podwaffle-sync",
+        color: "#E07A3F",
+      },
+    ],
     "./plugins/with-podwaffle-cast-volume.js",
     "./plugins/with-podwaffle-queue-transitions.js",
     "./plugins/with-podwaffle-completion-duration.js",
@@ -76,7 +90,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    nativeRuntimeVersion: "0.4-native-24",
+    nativeRuntimeVersion: "0.4-native-25",
     apiMinVersion: 1,
   },
 });

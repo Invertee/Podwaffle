@@ -1,5 +1,5 @@
 name: Podwaffle
-version: "5.0.25"
+version: "5.0.26"
 slug: podwaffle
 description: Self-hosted, synchronised podcast listening
 url: https://github.com/Invertee/Podwaffle
@@ -30,6 +30,7 @@ options:
   firebase_enabled: false
   firebase_project_id: ""
   firebase_service_account_path: /config/firebase-service-account.json
+  firebase_android_config_path: /config/google-services.json
   backup_retention_count: 7
 schema:
   profiles: str
@@ -44,6 +45,7 @@ schema:
   firebase_enabled: bool
   firebase_project_id: str?
   firebase_service_account_path: str
+  firebase_android_config_path: str
   backup_retention_count: int(1,100)
 ports:
   3000/tcp: 3000

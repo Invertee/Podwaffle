@@ -83,6 +83,27 @@ export function openApiDocument() {
           },
         },
       },
+      "/api/v1/push/config": {
+        get: {
+          security: authenticated,
+          responses: { "200": { description: "Optional FCM status" } },
+        },
+      },
+      "/api/v1/push/registrations": {
+        post: {
+          security: authenticated,
+          responses: {
+            "201": { description: "Android FCM token registered" },
+            "503": { description: "Firebase is disabled" },
+          },
+        },
+      },
+      "/api/v1/push/registrations/{registrationId}": {
+        delete: {
+          security: authenticated,
+          responses: { "200": { description: "FCM token removed" } },
+        },
+      },
       "/api/v1/snapshot": {
         get: {
           security: authenticated,
@@ -185,7 +206,9 @@ export function openApiDocument() {
           security: authenticated,
           responses: {
             "200": { description: "Playback ownership acquired" },
-            "403": { description: "Controller credentials cannot own playback" },
+            "403": {
+              description: "Controller credentials cannot own playback",
+            },
           },
         },
         delete: {
@@ -220,7 +243,9 @@ export function openApiDocument() {
           security: authenticated,
           responses: {
             "202": { description: "Command relayed to the playback owner" },
-            "409": { description: "No active owner or invalid playback target" },
+            "409": {
+              description: "No active owner or invalid playback target",
+            },
           },
         },
       },
@@ -238,6 +263,14 @@ export function openApiDocument() {
           responses: {
             "200": { description: "Playback command status" },
             "404": { description: "Command is not visible to this device" },
+          },
+        },
+      },
+      "/api/v1/playback/commands/pending": {
+        get: {
+          security: authenticated,
+          responses: {
+            "200": { description: "Pending commands for this playback target" },
           },
         },
       },

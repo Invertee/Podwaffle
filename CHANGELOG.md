@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Persisted every receiver-confirmed Cast position into durable episode progress,
+  guarded Cast reconnects against transient zero positions, made web clients
+  refresh and rebuild live sync when a dormant window returns, and added optional
+  FCM wake-up/catch-up for Android remote commands and profile state. Updated
+  Android to 0.4.26 / versionCode 30 / native runtime 0.4-native-25, added schema
+  7 for push-token uniqueness, and bumped the Home Assistant add-on to 5.0.26.
 - Replaced the Android, web/PWA, favicon, add-on and Home Assistant integration
   branding with the new Podwaffle microphone artwork.
 - Prevented background web and Android clients from stealing active playback,

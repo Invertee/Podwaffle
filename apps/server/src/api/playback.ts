@@ -21,6 +21,7 @@ import {
   getCastCommand,
   ingestTelemetry,
   listeningStats,
+  pendingPlaybackCommands,
   playbackState,
   recordMovement,
   releaseLease,
@@ -321,19 +322,40 @@ export function createPlaybackRouter(
           input.commandId,
           "playback.cast.updated",
           (db) => {
-            try {
-              startCast(
+            const priorEpisode = getEpisode(
+              db,
+              profile.id,
+              input.confirmed.episodeId,
+            );
+            const confirmed = {
+              ...input.confirmed,
+              positionMs: guardedPlaybackPosition(
                 db,
                 profile.id,
-                device.id,
-                input.confirmed,
-                input.takeover,
-              );
+                input.confirmed.episodeId,
+                input.confirmed.positionMs,
+              ),
+            };
+            try {
+              startCast(db, profile.id, device.id, confirmed, input.takeover);
             } catch (error) {
               leaseError(error);
             }
+            const episode = setEpisodeProgress(
+              db,
+              profile.id,
+              confirmed.episodeId,
+              confirmed.positionMs,
+              confirmed.durationMs,
+            );
+            if (priorEpisode && !priorEpisode.played && episode.played) {
+              recordEpisodeCompletion(db, profile.id);
+            }
             const playback = playbackState(db, profile.id, device.id);
-            return { result: { playback }, payload: { playback } };
+            return {
+              result: { playback, episode },
+              payload: { playback, episode },
+            };
           },
         );
         response.json({
@@ -359,8 +381,22 @@ export function createPlaybackRouter(
           input.commandId,
           "playback.cast.updated",
           (db) => {
+            const current = playbackState(db, profile.id, device.id);
+            const episodeId = current.episode?.id;
+            const priorEpisode = episodeId
+              ? getEpisode(db, profile.id, episodeId)
+              : null;
+            const guardedInput = {
+              ...input,
+              positionMs: guardedPlaybackPosition(
+                db,
+                profile.id,
+                episodeId,
+                input.positionMs,
+              ),
+            };
             try {
-              stopCast(db, profile.id, device.id, input);
+              stopCast(db, profile.id, device.id, guardedInput);
             } catch (error) {
               if (
                 error instanceof Error &&
@@ -373,8 +409,28 @@ export function createPlaybackRouter(
                 );
               throw error;
             }
+            const episode = episodeId
+              ? setEpisodeProgress(
+                  db,
+                  profile.id,
+                  episodeId,
+                  guardedInput.positionMs,
+                  guardedInput.durationMs,
+                )
+              : null;
+            if (
+              priorEpisode &&
+              episode &&
+              !priorEpisode.played &&
+              episode.played
+            ) {
+              recordEpisodeCompletion(db, profile.id);
+            }
             const playback = playbackState(db, profile.id, device.id);
-            return { result: { playback }, payload: { playback } };
+            return {
+              result: { playback, episode },
+              payload: { playback, episode },
+            };
           },
         );
         response.json({
@@ -468,6 +524,17 @@ export function createPlaybackRouter(
       } catch (error) {
         next(error);
       }
+    },
+  );
+
+  router.get(
+    "/playback/commands/pending",
+    requireScope("playback:target"),
+    (request, response) => {
+      const { profile, device } = request.auth!;
+      response.json({
+        commands: pendingPlaybackCommands(database.db, profile.id, device.id),
+      });
     },
   );
 
@@ -672,13 +739,50 @@ export function applyCastCommandResult(
   }
 
   const applied = sync.mutate(profileId, "playback.cast.updated", (db) => {
-    const result = resolveCastCommand(db, profileId, ownerDeviceId, input);
+    const allowsBackwardMovement = [
+      "seek",
+      "skip-forward",
+      "skip-backward",
+    ].includes(existing.command.action);
+    const confirmed = input.status === "accepted" && input.confirmed
+      ? {
+          ...input.confirmed,
+          positionMs: allowsBackwardMovement
+            ? input.confirmed.positionMs
+            : guardedPlaybackPosition(
+                db,
+                profileId,
+                input.confirmed.episodeId,
+                input.confirmed.positionMs,
+              ),
+        }
+      : undefined;
+    const priorEpisode = confirmed
+      ? getEpisode(db, profileId, confirmed.episodeId)
+      : null;
+    const result = resolveCastCommand(db, profileId, ownerDeviceId, {
+      ...input,
+      ...(confirmed ? { confirmed } : {}),
+    });
+    const episode = confirmed
+      ? setEpisodeProgress(
+          db,
+          profileId,
+          confirmed.episodeId,
+          confirmed.positionMs,
+          confirmed.durationMs,
+        )
+      : null;
+    if (priorEpisode && episode && !priorEpisode.played && episode.played) {
+      recordEpisodeCompletion(db, profileId);
+    }
     return {
-      result,
+      result: { ...result, episode },
       payload: {
         commandId: input.commandId,
         status: input.status,
         playback: result.playback,
+        episode,
       },
     };
   });
