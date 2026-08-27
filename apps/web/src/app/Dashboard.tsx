@@ -6,6 +6,7 @@ import type {
   Session,
   Subscription,
 } from "@podwaffle/contracts";
+import { stripHtml } from "@podwaffle/contracts";
 import { api } from "../api/client";
 import { updateProfilePlaybackSettings } from "../api/profile-settings";
 import { useProfileSync } from "../api/use-profile-sync";
@@ -126,13 +127,15 @@ export function Dashboard({ session }: { session: Session }) {
   >("30d");
   const skipSettingsKey = `podwaffle-skip-settings:${session.profile.id}`;
   const profilePlaybackSettings = snapshot?.profile.settings.playback;
-  const [skipBackwardSeconds, setSkipBackwardSeconds] = useState(() =>
-    profilePlaybackSettings?.skipBackwardSeconds ??
-    skipSetting(skipSettingsKey, "backward", 15),
+  const [skipBackwardSeconds, setSkipBackwardSeconds] = useState(
+    () =>
+      profilePlaybackSettings?.skipBackwardSeconds ??
+      skipSetting(skipSettingsKey, "backward", 15),
   );
-  const [skipForwardSeconds, setSkipForwardSeconds] = useState(() =>
-    profilePlaybackSettings?.skipForwardSeconds ??
-    skipSetting(skipSettingsKey, "forward", 30),
+  const [skipForwardSeconds, setSkipForwardSeconds] = useState(
+    () =>
+      profilePlaybackSettings?.skipForwardSeconds ??
+      skipSetting(skipSettingsKey, "forward", 30),
   );
 
   useEffect(() => {
@@ -459,7 +462,9 @@ export function Dashboard({ session }: { session: Session }) {
               <div>
                 <p className="eyebrow">{selected.author}</p>
                 <h2>{selected.title}</h2>
-                <p>{selected.description}</p>
+                {selected.description ? (
+                  <p>{stripHtml(selected.description)}</p>
+                ) : null}
               </div>
             </div>
             <EpisodeList

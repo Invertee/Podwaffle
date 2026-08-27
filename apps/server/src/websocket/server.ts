@@ -211,11 +211,11 @@ export class PodwaffleWebSocketServer {
     }
   }
 
-  public sendPlaybackCommand(
+  public async sendPlaybackCommand(
     profileId: string,
     ownerDeviceId: string,
     command: StoredPlaybackCommand["command"],
-  ): boolean {
+  ): Promise<boolean> {
     let delivered = false;
     for (const client of this.clients) {
       if (
@@ -231,12 +231,19 @@ export class PodwaffleWebSocketServer {
         delivered = true;
       }
     }
-    // A WebSocket send only proves that bytes entered an open socket. The app
-    // process may still be suspended, so also send an idempotent FCM nudge.
-    void this.push
-      ?.wakePlaybackDevice(ownerDeviceId, command.commandId)
-      .catch(() => undefined);
-    return delivered;
+    // Race the live channel with an idempotent, high-priority FCM wake-up. An
+    // open socket does not prove Android is still executing, while FCM
+    // acceptance does not prove immediate device delivery. Whichever arrives
+    // first causes the target to claim the same durable pending command.
+    const wake = this.push?.wakePlaybackDevice(
+      ownerDeviceId,
+      command.commandId,
+    );
+    if (delivered) {
+      void wake?.catch(() => undefined);
+      return true;
+    }
+    return (await wake?.catch(() => false)) ?? false;
   }
 
   public sweepIdleCasts(now = new Date()): number {

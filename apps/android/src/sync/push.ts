@@ -15,8 +15,10 @@ async function synchronizeFromPush(): Promise<void> {
   if (initial.status === "restoring") await initial.restore();
   const current = useAuthStore.getState();
   if (current.status !== "authenticated" || !current.credentials) return;
-  await current.refresh();
+  // A playback wake-up should claim the durable command before doing the more
+  // expensive full-profile refresh. This keeps background controls responsive.
   await syncRuntime.processPendingCommands();
+  await current.refresh();
   await playbackController.flushPendingPlayback();
 }
 

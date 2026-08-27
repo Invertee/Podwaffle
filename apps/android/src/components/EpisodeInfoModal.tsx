@@ -1,4 +1,4 @@
-import type { Episode } from "@podwaffle/contracts";
+import { stripHtml, type Episode } from "@podwaffle/contracts";
 import { Image } from "expo-image";
 import React from "react";
 import {
@@ -19,21 +19,6 @@ import {
   spacing,
 } from "../styles/tokens";
 import { Icon } from "./Icon";
-
-function textFromHtml(value: string | null): string | null {
-  if (!value) return null;
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 function formatDuration(durationMs: number | null): string | null {
   if (!durationMs || durationMs <= 0) return null;
@@ -65,7 +50,7 @@ export function EpisodeInfoModal({
   loading: boolean;
   onClose: () => void;
 }) {
-  const description = textFromHtml(episode?.descriptionHtml ?? null);
+  const description = stripHtml(episode?.descriptionHtml ?? null);
   const artworkUrl = episode?.artworkUrl ?? episode?.podcastArtworkUrl ?? null;
   const details = [
     formatDate(episode?.publishedAt ?? null),

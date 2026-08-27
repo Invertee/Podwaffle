@@ -1,5 +1,69 @@
 import { z } from "zod";
 
+const htmlEntities: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  bull: "•",
+  cent: "¢",
+  copy: "©",
+  divide: "÷",
+  emsp: "\u2003",
+  ensp: "\u2002",
+  euro: "€",
+  gt: ">",
+  hellip: "…",
+  laquo: "«",
+  ldquo: "“",
+  lt: "<",
+  mdash: "—",
+  middot: "·",
+  nbsp: " ",
+  ndash: "–",
+  pound: "£",
+  plusmn: "±",
+  quot: '"',
+  raquo: "»",
+  reg: "®",
+  rsquo: "’",
+  times: "×",
+  trade: "™",
+  yen: "¥",
+};
+
+function decodeHtmlEntity(_match: string, entity: string): string {
+  if (entity.startsWith("#x") || entity.startsWith("#X")) {
+    const codePoint = Number.parseInt(entity.slice(2), 16);
+    return Number.isInteger(codePoint) &&
+      codePoint >= 0 &&
+      codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : _match;
+  }
+  if (entity.startsWith("#")) {
+    const codePoint = Number.parseInt(entity.slice(1), 10);
+    return Number.isInteger(codePoint) &&
+      codePoint >= 0 &&
+      codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : _match;
+  }
+  return htmlEntities[entity.toLowerCase()] ?? _match;
+}
+
+/** Convert feed HTML into safe, readable plain text for native/UI labels. */
+export function stripHtml(value: string | null): string | null {
+  if (!value) return null;
+  const text = value
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/(?:p|div|li|h[1-6]|ul|ol|blockquote)\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/gi, decodeHtmlEntity)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text || null;
+}
+
 export const platformSchema = z.enum(["web", "android", "home_assistant"]);
 
 export const joinRequestSchema = z.object({

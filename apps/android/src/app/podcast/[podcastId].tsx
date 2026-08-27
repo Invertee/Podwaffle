@@ -1,4 +1,4 @@
-import type { Podcast } from "@podwaffle/contracts";
+import { stripHtml, type Podcast } from "@podwaffle/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -25,21 +25,6 @@ import {
   radii,
   spacing,
 } from "../../styles/tokens";
-
-function textFromHtml(value: string | null): string | null {
-  if (!value) return null;
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 export default function PodcastScreen() {
   const router = useRouter();
@@ -96,13 +81,16 @@ export default function PodcastScreen() {
   }
 
   const item = podcast.data ?? cachedPodcast;
-  const description = textFromHtml(item?.description ?? null);
+  const description = stripHtml(item?.description ?? null);
 
   return (
     <View style={styles.container}>
       <View style={styles.screenHeader}>
         <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.pressed,
+          ]}
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Back to podcasts"

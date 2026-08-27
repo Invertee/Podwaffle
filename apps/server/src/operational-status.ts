@@ -94,10 +94,7 @@ export function formatOperationalSummary(
     })
     .join("; ");
 
-  const firebase = snapshot.push.enabled
-    ? `Firebase is configured for ${plural(snapshot.push.registrations, "registered Android app")}`
-    : "Firebase is disabled";
-  return `${connections}. ${playback}. ${firebase}.`;
+  return `${connections}. ${playback}.`;
 }
 
 function readSnapshot(

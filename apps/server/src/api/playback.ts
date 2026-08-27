@@ -140,7 +140,7 @@ export function createPlaybackRouter(
       profileId: string,
       ownerDeviceId: string,
       command: ReturnType<typeof createCastCommand>["command"],
-    ) => boolean;
+    ) => Promise<boolean>;
   },
 ): express.Router {
   const router = express.Router();
@@ -447,7 +447,7 @@ export function createPlaybackRouter(
   router.post(
     "/playback/commands",
     requireScope("playback:control"),
-    (request, response, next) => {
+    async (request, response, next) => {
       try {
         const command = playbackCommandSchema.parse(request.body);
         const { profile, device } = request.auth!;
@@ -508,12 +508,13 @@ export function createPlaybackRouter(
         }
         const delivered =
           stored.status !== "pending" ||
-          (commandRelay?.sendPlaybackCommand(
-            profile.id,
-            stored.ownerDeviceId,
-            stored.command,
-          ) ??
-            false);
+          (commandRelay
+            ? await commandRelay.sendPlaybackCommand(
+                profile.id,
+                stored.ownerDeviceId,
+                stored.command,
+              )
+            : false);
         response.status(stored.status === "pending" ? 202 : 200).json({
           commandId: command.commandId,
           status: stored.status,
@@ -744,19 +745,20 @@ export function applyCastCommandResult(
       "skip-forward",
       "skip-backward",
     ].includes(existing.command.action);
-    const confirmed = input.status === "accepted" && input.confirmed
-      ? {
-          ...input.confirmed,
-          positionMs: allowsBackwardMovement
-            ? input.confirmed.positionMs
-            : guardedPlaybackPosition(
-                db,
-                profileId,
-                input.confirmed.episodeId,
-                input.confirmed.positionMs,
-              ),
-        }
-      : undefined;
+    const confirmed =
+      input.status === "accepted" && input.confirmed
+        ? {
+            ...input.confirmed,
+            positionMs: allowsBackwardMovement
+              ? input.confirmed.positionMs
+              : guardedPlaybackPosition(
+                  db,
+                  profileId,
+                  input.confirmed.episodeId,
+                  input.confirmed.positionMs,
+                ),
+          }
+        : undefined;
     const priorEpisode = confirmed
       ? getEpisode(db, profileId, confirmed.episodeId)
       : null;

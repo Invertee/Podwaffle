@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from datetime import datetime
 import logging
 from typing import Any
@@ -128,9 +129,46 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
         self._refresh_task = None
 
     async def async_send_command(self, action: str, **parameters: Any) -> None:
-        """Send a command and refresh the entity state."""
+        """Dispatch a command and update latency-sensitive state optimistically."""
         await self.api.async_playback_command(action, **parameters)
-        await self.async_request_refresh()
+        self._apply_optimistic_command(action, parameters)
+        self._schedule_refresh()
+
+    def _apply_optimistic_command(
+        self, action: str, parameters: dict[str, Any]
+    ) -> None:
+        """Reflect simple controls immediately while the target acknowledges them."""
+        if not self.data:
+            return
+        snapshot = deepcopy(self.data.snapshot)
+        playback = snapshot.get("playback")
+        if not isinstance(playback, dict):
+            return
+
+        if action == "play":
+            playback["state"] = "playing"
+        elif action == "pause":
+            playback["state"] = "paused"
+        elif action == "seek":
+            position = parameters.get("positionMs")
+            if isinstance(position, (int, float)) and not isinstance(position, bool):
+                playback["positionMs"] = max(0, round(position))
+        elif action in {"skip-forward", "skip-backward"}:
+            position = playback.get("positionMs")
+            offset = parameters.get("offsetMs")
+            if (
+                isinstance(position, (int, float))
+                and not isinstance(position, bool)
+                and isinstance(offset, (int, float))
+                and not isinstance(offset, bool)
+            ):
+                direction = 1 if action == "skip-forward" else -1
+                playback["positionMs"] = max(0, round(position + direction * offset))
+        else:
+            return
+
+        self.last_snapshot_at = dt_util.utcnow()
+        self.async_set_updated_data(replace(self.data, snapshot=snapshot))
 
     async def _async_listen(self) -> None:
         backoff = 1

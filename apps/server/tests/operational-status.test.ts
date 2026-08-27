@@ -6,7 +6,7 @@ import {
 } from "../src/operational-status.js";
 
 describe("human-readable operational status", () => {
-  it("summarizes app types, connection methods, playback and Firebase", () => {
+  it("summarizes app types, connection methods and playback", () => {
     const snapshot: OperationalSnapshot = {
       apps: [
         { id: "android", name: "Sam's phone", platform: "android" },
@@ -39,7 +39,7 @@ describe("human-readable operational status", () => {
     };
 
     expect(formatOperationalSummary(snapshot)).toBe(
-      "3 apps active in the last 2 minutes (1 Android, 1 web, 1 Home Assistant); 2 live-sync connections, 1 API-only connection. Sam is playing: “A readable episode title” from The Example Podcast on Sam's phone at 12:34 / 45:00. Firebase is configured for 1 registered Android app.",
+      "3 apps active in the last 2 minutes (1 Android, 1 web, 1 Home Assistant); 2 live-sync connections, 1 API-only connection. Sam is playing: “A readable episode title” from The Example Podcast on Sam's phone at 12:34 / 45:00.",
     );
   });
 
@@ -68,7 +68,7 @@ describe("human-readable operational status", () => {
         },
       }),
     ).toBe(
-      "No apps active in the last 2 minutes. Sam is idle. Firebase is disabled.",
+      "No apps active in the last 2 minutes. Sam is idle.",
     );
   });
 });

@@ -135,6 +135,16 @@ config flow uses the direct Podwaffle URL on port `3000`, not its ingress panel
 URL. See [`docs/home-assistant-integration.md`](docs/home-assistant-integration.md)
 for setup, entities and security details.
 
+## Windows tray controller
+
+The repository also includes a small Windows-native Go tray controller under
+[`apps/windows-tray`](apps/windows-tray). It uses the same restricted
+Home Assistant controller API to show a compact player window and relay play,
+pause, skip-forward and skip-backward commands to the active Podwaffle player.
+Build it from Windows with `go build -trimpath -ldflags="-H=windowsgui -s -w" -o PodwaffleTray.exe .` in that
+directory. The setup screen accepts either the server join code or an existing
+profile-scoped bearer token; joined tokens are protected with Windows DPAPI.
+
 ## Authentication
 
 Clients list enabled profiles and join with the configured code. Comparison is

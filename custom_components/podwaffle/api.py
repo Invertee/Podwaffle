@@ -162,23 +162,10 @@ class PodwaffleApi:
             )
         if status in {"rejected", "cancelled"}:
             raise PodwaffleCommandError(_command_error(result))
-        if status != "pending":
-            return result
-
-        # The REST dispatch is intentionally asynchronous. Poll its requester-only
-        # status endpoint briefly so Home Assistant actions report a client-side
-        # rejection rather than appearing successful. The later WebSocket state
-        # event remains authoritative for entity state.
-        for _attempt in range(20):
-            await asyncio.sleep(0.25)
-            confirmed = await self._request(
-                "GET", f"/api/v1/playback/commands/{command_id}"
-            )
-            confirmed_status = confirmed.get("status")
-            if confirmed_status == "accepted":
-                return confirmed
-            if confirmed_status in {"rejected", "cancelled"}:
-                raise PodwaffleCommandError(_command_error(confirmed))
+        # Dispatch is intentionally asynchronous. Waiting for the Android target
+        # to execute and acknowledge the command makes Home Assistant service
+        # calls block for seconds, even though the command is already in flight.
+        # Live sync remains authoritative and corrects optimistic entity state.
         return result
 
     async def async_websocket(

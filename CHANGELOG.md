@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Made remote playback dispatch race the live WebSocket with high-priority FCM,
+  count an accepted Firebase wake-up when Android has no live socket, process
+  pending commands before a full Android refresh, updated Android to 0.4.28 /
+  versionCode 32 while retaining native runtime 0.4-native-25, and bumped the
+  Home Assistant add-on to 5.0.29.
+- Made Home Assistant media controls return after dispatch instead of polling for
+  a remote acknowledgement, with optimistic play, pause, seek and skip state, and
+  bumped the custom integration to 0.2.3.
 - Made the Firebase health check backward-compatible with older add-ons and able
   to validate the current Android device token, moved its Android status into the
   existing Connection card, and replaced noisy JSON request logs with readable

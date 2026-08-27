@@ -6,7 +6,7 @@ entity and listening/queue sensors.
 
 ## Requirements
 
-- Podwaffle add-on `5.0.21` or newer.
+- Podwaffle add-on `5.0.29` or newer for FCM playback-command fallback.
 - Home Assistant `2025.1.0` or newer.
 - A direct URL from Home Assistant to Podwaffle, normally the Home Assistant host
   address on port `3000`. Do not use the ingress panel URL.
@@ -119,9 +119,29 @@ profile-scoped Podwaffle WebSocket. Relevant sync events trigger a debounced
 snapshot refresh. A 60-second poll remains as a fallback, while listening
 statistics are refreshed at most every five minutes.
 
+Playback commands are durable and idempotent. The server sends each command over
+the live WebSocket and also sends a high-priority FCM wake-up to Android. The two
+paths race: WebSocket is normally fastest while the app is active, and FCM wakes
+the app so it can fetch pending commands when Android has suspended its socket.
+Firebase acceptance is treated as a valid dispatch when no live socket is
+available; the Android client still fetches the full command from Podwaffle rather
+than trusting notification contents.
+
+Home Assistant returns as soon as the server accepts the dispatch and reflects
+play, pause, seek and skip actions optimistically. The Android acknowledgement and
+subsequent live-sync event reconcile the authoritative state. This avoids holding
+a dashboard action open while waiting for a remote device round trip.
+
 The media player is a controller for the active Podwaffle Android, web or Cast
 client. It is not an audio renderer. A command will fail when the profile has no
 active connected playback owner.
+
+The standard media-control card is appropriate after these latency changes. If a
+dashboard should remain completely stateless, regular Home Assistant button cards
+can call `media_player.media_play`, `media_player.media_pause`,
+`media_player.media_next_track`, and `media_player.media_previous_track` on the
+same entity. Those buttons use the identical command transport; they change the
+presentation, not delivery speed.
 
 ## Development checks
 
