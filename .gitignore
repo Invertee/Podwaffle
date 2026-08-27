@@ -54,3 +54,4 @@ local.properties
 # APKs
 *.apk
 *.aab
+firebase-service-account.json

@@ -38,6 +38,7 @@ export class PodwaffleWebSocketServer {
   private readonly clients = new Set<Client>();
   private unsubscribe: (() => void) | undefined;
   private castIdleTimer: NodeJS.Timeout | undefined;
+  private connectionObserver: (() => void) | undefined;
 
   public constructor(
     private readonly database: PodwaffleDatabase,
@@ -75,7 +76,11 @@ export class PodwaffleWebSocketServer {
           playbackTarget: deviceIsPlaybackTarget(auth.device),
         };
         this.clients.add(client);
-        webSocket.on("close", () => this.clients.delete(client));
+        this.connectionObserver?.();
+        webSocket.on("close", () => {
+          this.clients.delete(client);
+          this.connectionObserver?.();
+        });
         webSocket.on("error", (error) =>
           log("warn", "websocket.error", {
             deviceId: client.deviceId,
@@ -299,6 +304,7 @@ export class PodwaffleWebSocketServer {
   }
 
   public shutdown(): void {
+    this.connectionObserver = undefined;
     this.unsubscribe?.();
     if (this.castIdleTimer) clearInterval(this.castIdleTimer);
     for (const client of this.clients) {
@@ -314,5 +320,13 @@ export class PodwaffleWebSocketServer {
 
   public get connectionCount(): number {
     return this.clients.size;
+  }
+
+  public connectedDeviceIds(): string[] {
+    return [...new Set([...this.clients].map((client) => client.deviceId))];
+  }
+
+  public setConnectionObserver(observer: () => void): void {
+    this.connectionObserver = observer;
   }
 }

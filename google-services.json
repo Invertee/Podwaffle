@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "39830635722",
+    "project_id": "podwaffle-e4fc7",
+    "storage_bucket": "podwaffle-e4fc7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39830635722:android:d633ea6d720bd0048f6033",
+        "android_client_info": {
+          "package_name": "com.podwaffle.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBRwmD9CTcJoCsIyfUojBSUQO5ibGGtES4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -9,6 +9,7 @@ import { SyncService } from "./sync/service.js";
 import { PodwaffleWebSocketServer } from "./websocket/server.js";
 import { FeedScheduler } from "./podcasts/scheduler.js";
 import { PushService } from "./push/service.js";
+import { OperationalStatusReporter } from "./operational-status.js";
 
 export interface Runtime {
   database: PodwaffleDatabase;
@@ -16,6 +17,7 @@ export interface Runtime {
   webSockets: PodwaffleWebSocketServer;
   feedScheduler: FeedScheduler;
   push: PushService;
+  operationalStatus: OperationalStatusReporter;
   server: Server;
   close: () => Promise<void>;
 }
@@ -42,6 +44,12 @@ export async function createRuntime(
   const push = await PushService.create(config, database);
   push.start(sync);
   const webSockets = new PodwaffleWebSocketServer(database, sync, push);
+  const operationalStatus = new OperationalStatusReporter(
+    database,
+    () => webSockets.connectedDeviceIds(),
+    () => push.config(),
+  );
+  webSockets.setConnectionObserver(() => operationalStatus.report());
   const feedScheduler = new FeedScheduler(database, sync, config);
   const app = createApp({
     config,
@@ -49,6 +57,7 @@ export async function createRuntime(
     sync,
     push,
     webSockets,
+    operationalStatus,
     ...(options.webDistPath === undefined
       ? {}
       : { webDistPath: options.webDistPath }),
@@ -60,6 +69,7 @@ export async function createRuntime(
     database,
     sync,
     webSockets,
+    operationalStatus,
     feedScheduler,
     push,
     server,

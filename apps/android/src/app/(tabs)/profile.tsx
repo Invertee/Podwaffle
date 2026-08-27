@@ -80,8 +80,14 @@ export default function ProfileScreen() {
   const [cacheLoading, setCacheLoading] = useState(false);
   const [cacheError, setCacheError] = useState<string | null>(null);
 
-  useEffect(() => setBackwardInput(String(skipBackwardSeconds)), [skipBackwardSeconds]);
-  useEffect(() => setForwardInput(String(skipForwardSeconds)), [skipForwardSeconds]);
+  useEffect(
+    () => setBackwardInput(String(skipBackwardSeconds)),
+    [skipBackwardSeconds],
+  );
+  useEffect(
+    () => setForwardInput(String(skipForwardSeconds)),
+    [skipForwardSeconds],
+  );
   useEffect(() => {
     void refreshCache(true);
   }, []);
@@ -97,6 +103,12 @@ export default function ProfileScreen() {
     queryFn: () => api.devices(credentials!.serverUrl, credentials!.token),
     enabled: Boolean(credentials),
     initialData: snapshot?.devices,
+  });
+  const pushHealth = useQuery({
+    queryKey: ["android-push-health"],
+    queryFn: () => api.pushHealth(credentials!.serverUrl, credentials!.token),
+    enabled: Boolean(credentials),
+    retry: false,
   });
 
   async function refreshCache(runMaintenance = false) {
@@ -165,7 +177,8 @@ export default function ProfileScreen() {
       setBackwardInput(String(current.skipBackwardSeconds));
       setForwardInput(String(current.skipForwardSeconds));
       const currentCredentials = current.credentials;
-      const revision = current.snapshot?.revision ?? current.session?.profile.revision;
+      const revision =
+        current.snapshot?.revision ?? current.session?.profile.revision;
       if (currentCredentials && revision !== undefined) {
         await updateProfilePlaybackSettings(
           currentCredentials.serverUrl,
@@ -237,9 +250,9 @@ export default function ProfileScreen() {
           style: "destructive",
           onPress: () =>
             void (async () => {
-              await playbackController.stop().catch(() =>
-                playbackController.flush().catch(() => undefined),
-              );
+              await playbackController
+                .stop()
+                .catch(() => playbackController.flush().catch(() => undefined));
               playbackController.reset();
               await logout();
             })(),
@@ -247,6 +260,26 @@ export default function ProfileScreen() {
       ],
     );
   }
+
+  const pushStatus = pushHealth.isLoading
+    ? "Checking…"
+    : pushHealth.data?.status === "working"
+      ? "Working"
+      : pushHealth.data?.status === "configured"
+        ? "Configured"
+        : pushHealth.data?.status === "disabled"
+          ? "Not configured"
+          : pushHealth.data?.status === "not_registered"
+            ? "Not registered"
+            : pushHealth.data
+              ? "Error"
+              : "Unavailable";
+  const pushStatusColor =
+    pushHealth.data?.status === "working"
+      ? colors.success
+      : pushHealth.data?.status === "disabled"
+        ? colors.textMuted
+        : colors.warning;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -257,7 +290,9 @@ export default function ProfileScreen() {
           </Text>
         </View>
         <View style={styles.identityCopy}>
-          <Text style={styles.title}>{profile?.displayName ?? "Podwaffle"}</Text>
+          <Text style={styles.title}>
+            {profile?.displayName ?? "Podwaffle"}
+          </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
             {credentials?.serverUrl}
           </Text>
@@ -400,10 +435,17 @@ export default function ProfileScreen() {
           ) : null}
         </View>
         <Text style={styles.cardDescription}>
-          Played downloads are retained for one day, then removed by daily maintenance. Current and queued episodes are always protected.
+          Played downloads are retained for one day, then removed by daily
+          maintenance. Current and queued episodes are always protected.
         </Text>
-        <Row label="Cached episodes" value={String(cacheSummary.completedCount)} />
-        <Row label="Storage used" value={formatBytes(cacheSummary.completedBytes)} />
+        <Row
+          label="Cached episodes"
+          value={String(cacheSummary.completedCount)}
+        />
+        <Row
+          label="Storage used"
+          value={formatBytes(cacheSummary.completedBytes)}
+        />
         {cacheError ? <Text style={styles.error}>{cacheError}</Text> : null}
         <Pressable
           style={({ pressed }) => [
@@ -469,7 +511,12 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Connection</Text>
+        <View style={styles.cardHeading}>
+          <Text style={styles.cardTitle}>Connection</Text>
+          {pushHealth.isFetching ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : null}
+        </View>
         <Row
           label="Status"
           value={
@@ -486,7 +533,10 @@ export default function ProfileScreen() {
           value={liveSyncConnected ? "Connected" : "Reconnecting"}
           valueColor={liveSyncConnected ? colors.success : colors.warning}
         />
-        <Row label="Cached revision" value={String(snapshot?.revision ?? "None")} />
+        <Row
+          label="Cached revision"
+          value={String(snapshot?.revision ?? "None")}
+        />
         <Row
           label="Last sync"
           value={lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Not yet"}
@@ -495,14 +545,49 @@ export default function ProfileScreen() {
           label="App version"
           value={Constants.expoConfig?.version ?? "Development"}
         />
+        <View style={styles.statusDivider} />
+        <Row
+          label="Firebase messaging"
+          value={pushStatus}
+          valueColor={pushStatusColor}
+        />
+        {pushHealth.data?.projectId ? (
+          <Row label="Firebase project" value={pushHealth.data.projectId} />
+        ) : null}
+        {pushHealth.data?.message ? (
+          <Text
+            style={
+              pushHealth.data.status === "working"
+                ? styles.success
+                : pushHealth.data.status === "disabled"
+                  ? styles.muted
+                  : pushHealth.data.status === "error"
+                    ? styles.error
+                    : styles.warning
+            }
+          >
+            {pushHealth.data.message}
+          </Text>
+        ) : null}
+        {pushHealth.error ? (
+          <Text style={styles.error}>
+            {pushHealth.error instanceof Error
+              ? pushHealth.error.message
+              : "Firebase messaging status could not be checked."}
+          </Text>
+        ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
-          style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.refreshButton,
+            pressed && styles.pressed,
+          ]}
           onPress={() =>
             void Promise.all([
               refresh(),
               stats.refetch(),
               devices.refetch(),
+              pushHealth.refetch(),
               refreshCache(),
             ])
           }
@@ -609,7 +694,11 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     fontWeight: fontWeights.bold,
   },
-  cardDescription: { color: colors.textSecondary, fontSize: fontSizes.sm, lineHeight: 19 },
+  cardDescription: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.sm,
+    lineHeight: 19,
+  },
   settingRow: {
     minHeight: 50,
     flexDirection: "row",
@@ -636,7 +725,11 @@ const styles = StyleSheet.create({
     textAlign: "right",
     paddingHorizontal: spacing.sm,
   },
-  numberSuffix: { color: colors.textMuted, fontSize: fontSizes.xs, paddingRight: spacing.sm },
+  numberSuffix: {
+    color: colors.textMuted,
+    fontSize: fontSizes.xs,
+    paddingRight: spacing.sm,
+  },
   periods: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   periodButton: {
     paddingHorizontal: spacing.sm,
@@ -661,7 +754,11 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xl,
     fontWeight: fontWeights.bold,
   },
-  statLabel: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 4 },
+  statLabel: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.xs,
+    marginTop: 4,
+  },
   cacheButton: {
     minHeight: 44,
     alignItems: "center",
@@ -704,7 +801,11 @@ const styles = StyleSheet.create({
   },
   deviceIconText: { color: colors.accent, fontWeight: fontWeights.bold },
   deviceCopy: { flex: 1 },
-  deviceName: { color: colors.textPrimary, fontSize: fontSizes.sm, fontWeight: fontWeights.semibold },
+  deviceName: {
+    color: colors.textPrimary,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+  },
   deviceMeta: { color: colors.textMuted, fontSize: fontSizes.xs, marginTop: 3 },
   revokeButton: {
     minHeight: 38,
@@ -714,7 +815,11 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: "rgba(239, 68, 68, 0.12)",
   },
-  revokeText: { color: colors.error, fontSize: fontSizes.xs, fontWeight: fontWeights.semibold },
+  revokeText: {
+    color: colors.error,
+    fontSize: fontSizes.xs,
+    fontWeight: fontWeights.semibold,
+  },
   row: {
     minHeight: 34,
     flexDirection: "row",
@@ -729,7 +834,15 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     fontWeight: fontWeights.medium,
   },
+  statusDivider: {
+    height: 1,
+    backgroundColor: colors.borderSubtle,
+    marginVertical: spacing.xs,
+  },
   error: { color: colors.error, fontSize: fontSizes.sm, lineHeight: 19 },
+  success: { color: colors.success, fontSize: fontSizes.sm, lineHeight: 19 },
+  warning: { color: colors.warning, fontSize: fontSizes.sm, lineHeight: 19 },
+  muted: { color: colors.textMuted, fontSize: fontSizes.sm, lineHeight: 19 },
   refreshButton: {
     minHeight: 44,
     alignItems: "center",
@@ -739,7 +852,11 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     marginTop: spacing.sm,
   },
-  refreshText: { color: colors.accent, fontSize: fontSizes.sm, fontWeight: fontWeights.semibold },
+  refreshText: {
+    color: colors.accent,
+    fontSize: fontSizes.sm,
+    fontWeight: fontWeights.semibold,
+  },
   disconnectButton: {
     minHeight: 50,
     alignItems: "center",
@@ -747,7 +864,11 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: "rgba(239, 68, 68, 0.12)",
   },
-  disconnectText: { color: colors.error, fontSize: fontSizes.md, fontWeight: fontWeights.semibold },
+  disconnectText: {
+    color: colors.error,
+    fontSize: fontSizes.md,
+    fontWeight: fontWeights.semibold,
+  },
   pressed: { opacity: 0.7 },
   disabled: { opacity: 0.5 },
 });

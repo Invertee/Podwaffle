@@ -34,6 +34,17 @@ describe("optional Android push", () => {
           .set("authorization", authorization)
       ).body,
     ).toEqual({ enabled: false, projectId: null, androidAppId: null });
+    const health = await client
+      .get("/api/v1/push/health")
+      .set("authorization", authorization)
+      .expect(200);
+    expect(health.body).toMatchObject({
+      status: "disabled",
+      enabled: false,
+      deviceRegistered: false,
+      projectId: null,
+      androidAppId: null,
+    });
     const registration = await client
       .post("/api/v1/push/registrations")
       .set("authorization", authorization)

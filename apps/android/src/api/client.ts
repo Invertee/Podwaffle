@@ -30,6 +30,19 @@ export class ApiClientError extends Error {
   }
 }
 
+export interface PushHealthResponse {
+  enabled: boolean;
+  projectId: string | null;
+  androidAppId: string | null;
+  status: "disabled" | "configured" | "working" | "not_registered" | "error";
+  message: string;
+  checkedAt: string;
+  deviceRegistered: boolean | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureCode: string | null;
+}
+
 export function normalizeServerUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, "");
   if (!trimmed) throw new Error("Enter your Podwaffle server URL.");
@@ -95,6 +108,38 @@ async function request<T>(
     throw error;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function requestPushHealth(
+  serverUrl: string,
+  token: string,
+): Promise<PushHealthResponse> {
+  try {
+    return await request<PushHealthResponse>(
+      serverUrl,
+      "/api/v1/push/health",
+      token,
+    );
+  } catch (error) {
+    if (!(error instanceof ApiClientError) || error.status !== 404) throw error;
+    const config = await request<{
+      enabled: boolean;
+      projectId: string | null;
+      androidAppId: string | null;
+    }>(serverUrl, "/api/v1/push/config", token);
+    return {
+      ...config,
+      status: config.enabled ? "configured" : "disabled",
+      message: config.enabled
+        ? "Firebase is configured on the server. Update the Home Assistant add-on to validate this device token."
+        : "Firebase messaging is disabled on the Podwaffle server.",
+      checkedAt: new Date().toISOString(),
+      deviceRegistered: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureCode: null,
+    };
   }
 }
 
@@ -512,6 +557,8 @@ export const api = {
       projectId: string | null;
       androidAppId: string | null;
     }>(serverUrl, "/api/v1/push/config", token),
+
+  pushHealth: requestPushHealth,
 
   registerPush: (
     serverUrl: string,

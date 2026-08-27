@@ -2,7 +2,7 @@
 set -eu
 
 if [ ! -f /data/options.json ]; then
-  echo '{"level":"error","event":"startup.options_missing","path":"/data/options.json"}'
+  echo "$(date -Iseconds) [ERROR] Home Assistant did not provide /data/options.json"
   exit 1
 fi
 

@@ -3,16 +3,20 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const sharedPodwaffleIcon = "../../podwaffle/icon.png";
-const googleServicesFile = resolve(
-  import.meta.dirname,
-  process.env.PODWAFFLE_GOOGLE_SERVICES_FILE ?? "google-services.json",
-);
+const appDirectory = __dirname;
+const configuredGoogleServicesFile = process.env.PODWAFFLE_GOOGLE_SERVICES_FILE;
+const googleServicesFile = configuredGoogleServicesFile
+  ? resolve(appDirectory, configuredGoogleServicesFile)
+  : [
+      resolve(appDirectory, "google-services.json"),
+      resolve(appDirectory, "../../google-services.json"),
+    ].find((candidate) => existsSync(candidate));
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.4.26",
+  version: "0.4.27",
   orientation: "portrait",
   icon: sharedPodwaffleIcon,
   scheme: "podwaffle",
@@ -26,16 +30,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "30",
+    buildNumber: "31",
   },
   android: {
-    versionCode: 30,
+    versionCode: 31,
     adaptiveIcon: {
       foregroundImage: sharedPodwaffleIcon,
       backgroundColor: "#0D1B2A",
     },
     package: "com.podwaffle.app",
-    ...(existsSync(googleServicesFile) ? { googleServicesFile } : {}),
+    ...(googleServicesFile ? { googleServicesFile } : {}),
     permissions: [
       "android.permission.INTERNET",
       "android.permission.FOREGROUND_SERVICE",

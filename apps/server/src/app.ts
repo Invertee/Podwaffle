@@ -25,6 +25,7 @@ import { createCatalogRouter } from "./api/catalog.js";
 import { createPlaybackRouter } from "./api/playback.js";
 import { createProfileRouter } from "./api/profile.js";
 import type { PushService } from "./push/service.js";
+import type { OperationalStatusReporter } from "./operational-status.js";
 
 export const BUILD_VERSION = process.env.PODWAFFLE_VERSION ?? "0.1.0";
 export const API_VERSION = "v1" as const;
@@ -38,6 +39,7 @@ export interface AppDependencies {
     "revokeDevice" | "connectionCount" | "sendPlaybackCommand"
   >;
   push: PushService;
+  operationalStatus: OperationalStatusReporter;
   webDistPath?: string;
 }
 
@@ -67,7 +69,8 @@ function sessionFor(
 }
 
 export function createApp(dependencies: AppDependencies): Express {
-  const { config, database, sync, webSockets, push } = dependencies;
+  const { config, database, sync, webSockets, push, operationalStatus } =
+    dependencies;
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
@@ -77,15 +80,28 @@ export function createApp(dependencies: AppDependencies): Express {
     response.setHeader("x-request-id", request.requestId);
     const started = performance.now();
     response.on("finish", () => {
-      log("info", "http.request", {
+      const durationMs = Math.round(performance.now() - started);
+      const requestFields = {
         requestId: request.requestId,
         method: request.method,
         path: request.path,
         status: response.statusCode,
-        durationMs: Math.round(performance.now() - started),
+        durationMs,
         deviceId: request.auth?.device.id,
         profileId: request.auth?.profile.id,
-      });
+      };
+      if (response.statusCode >= 400) {
+        log(response.statusCode >= 500 ? "error" : "warn", "http.failed", {
+          message: `${request.method} ${request.path} returned ${response.statusCode} in ${durationMs} ms`,
+          ...requestFields,
+        });
+      } else {
+        log("debug", "http.request", {
+          message: `${request.method} ${request.path} returned ${response.statusCode} in ${durationMs} ms`,
+          ...requestFields,
+        });
+      }
+      operationalStatus.report();
     });
     next();
   });
@@ -225,6 +241,18 @@ export function createApp(dependencies: AppDependencies): Express {
     "/push/config",
     requireScope("snapshot:read"),
     (_request, response) => response.json(push.config()),
+  );
+
+  authenticated.get(
+    "/push/health",
+    requireScope("snapshot:read"),
+    async (request, response, next) => {
+      try {
+        response.json(await push.health(request.auth!.device.id));
+      } catch (error) {
+        next(error);
+      }
+    },
   );
 
   authenticated.post(

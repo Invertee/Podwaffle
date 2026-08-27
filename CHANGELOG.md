@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Made the Firebase health check backward-compatible with older add-ons and able
+  to validate the current Android device token, moved its Android status into the
+  existing Connection card, and replaced noisy JSON request logs with readable
+  app-connection, playback and Firebase summaries. Updated Android to 0.4.27 /
+  versionCode 31 and bumped the Home Assistant add-on to 5.0.27.
 - Persisted every receiver-confirmed Cast position into durable episode progress,
   guarded Cast reconnects against transient zero positions, made web clients
   refresh and rebuild live sync when a dormant window returns, and added optional

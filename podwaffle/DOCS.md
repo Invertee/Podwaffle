@@ -35,18 +35,31 @@ firebase_service_account_path: /config/firebase-service-account.json
 firebase_android_config_path: /config/google-services.json
 ```
 
+The `/addon_configs/...` directory visible from Home Assistant is already mounted
+as `/config` in the add-on. Do not repeat the host-side add-on folder name in the
+container path unless you deliberately created that extra subdirectory.
+
 The add-on validates that both files refer to the configured project and that
 the Android file contains the Podwaffle package. Keep the service-account file
 private.
 
 An APK must also be built with the same `google-services.json`; placing it in the
-add-on directory cannot retrofit Firebase into an already-built APK. Copy it to
-`apps/android/google-services.json` before prebuild, or set
-`PODWAFFLE_GOOGLE_SERVICES_FILE` to its build-machine path. With Firebase
-disabled or absent, normal foreground REST/WebSocket synchronisation continues
-unchanged.
+add-on directory cannot retrofit Firebase into an already-built APK. For a local
+monorepo build, the Android app automatically detects this file at the repository
+root (or `apps/android/google-services.json`). Otherwise, set
+`PODWAFFLE_GOOGLE_SERVICES_FILE` to its build-machine path before prebuild. With
+Firebase disabled or absent, normal foreground REST/WebSocket synchronisation
+continues unchanged.
 
-Home Assistant builds the app locally from the `podwaffle` directory when it is installed from this repository. The Dockerfile fetches the current application source from the repository because Home Assistant does not include the monorepo root in the Docker build context.
+From the repository root, rebuild the Android APK with:
+
+```sh
+cd apps/android
+pnpm exec expo prebuild --platform android --no-install
+gradlew.bat :app:assembleDebug
+```
+
+Home Assistant builds the app locally from the `podwaffle` directory when it is installed from this repository. The Dockerfile fetches the `main` branch from GitHub because Home Assistant does not include the monorepo root in the Docker build context. Commit and publish server changes before increasing the add-on version; otherwise a locally rebuilt Android app can be newer than the server that Home Assistant downloads.
 
 The equivalent local build command is:
 

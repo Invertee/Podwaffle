@@ -89,6 +89,14 @@ export function openApiDocument() {
           responses: { "200": { description: "Optional FCM status" } },
         },
       },
+      "/api/v1/push/health": {
+        get: {
+          security: authenticated,
+          responses: {
+            "200": { description: "FCM configuration and device health" },
+          },
+        },
+      },
       "/api/v1/push/registrations": {
         post: {
           security: authenticated,
