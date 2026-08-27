@@ -1,18 +1,10 @@
 import { requireNativeModule } from "expo-modules-core";
 
 export type NativePlaybackStatus =
-  | "idle"
-  | "buffering"
-  | "ready"
-  | "ended"
-  | "error";
+  "idle" | "buffering" | "ready" | "ended" | "error";
 
 export type NativeCastPlayerState =
-  | "idle"
-  | "buffering"
-  | "playing"
-  | "paused"
-  | "unknown";
+  "idle" | "buffering" | "playing" | "paused" | "unknown";
 
 export interface NativeCastSessionSummary {
   sessionId: string;
@@ -97,12 +89,7 @@ export interface NativeDownload {
   durationMs: number | null;
   localPath: string | null;
   reason: "manual" | "automatic";
-  state:
-    | "queued"
-    | "downloading"
-    | "completed"
-    | "failed"
-    | "removing";
+  state: "queued" | "downloading" | "completed" | "failed" | "removing";
   progressBytes: number;
   totalBytes: number | null;
   failureReason: string | null;
@@ -126,6 +113,11 @@ export interface PodwaffleMediaConfig {
   maxDownloadStorageBytes?: number;
 }
 
+export interface DecryptedNotification {
+  title: string;
+  message: string;
+}
+
 export const MEDIA_EVENTS = {
   STATE_CHANGED: "media.state.changed",
   POSITION_CHANGED: "media.position.changed",
@@ -142,16 +134,22 @@ export const MEDIA_EVENTS = {
   NATIVE_COMMAND_RESULT: "native.command.result",
 } as const;
 
-export type MediaEventName =
-  (typeof MEDIA_EVENTS)[keyof typeof MEDIA_EVENTS];
+export type MediaEventName = (typeof MEDIA_EVENTS)[keyof typeof MEDIA_EVENTS];
 
 interface PodwaffleNativeModule {
   configure(config: PodwaffleMediaConfig): Promise<void>;
   clearConfiguration(): Promise<void>;
+  decryptNotification(
+    input: Record<string, unknown>,
+    joinCode: string,
+  ): Promise<DecryptedNotification>;
   bind(): Promise<NativePlaybackState>;
   getState(): Promise<NativePlaybackState>;
   setQueue(input: NativeQueueSnapshot): Promise<void>;
-  playEpisode(input: NativeEpisodeMedia, startPositionMs: number): Promise<void>;
+  playEpisode(
+    input: NativeEpisodeMedia,
+    startPositionMs: number,
+  ): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
   stop(): Promise<void>;
@@ -195,6 +193,12 @@ export const PodwaffleMediaModule = {
   },
   clearConfiguration(): Promise<void> {
     return nativeModule.clearConfiguration();
+  },
+  decryptNotification(
+    input: Record<string, unknown>,
+    joinCode: string,
+  ): Promise<DecryptedNotification> {
+    return nativeModule.decryptNotification(input, joinCode);
   },
   bind(): Promise<NativePlaybackState> {
     return nativeModule.bind();

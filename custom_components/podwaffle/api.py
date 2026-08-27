@@ -168,6 +168,21 @@ class PodwaffleApi:
         # Live sync remains authoritative and corrects optimistic entity state.
         return result
 
+    async def async_send_notification(
+        self,
+        message: str,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Send an encrypted notification to Android devices on this profile."""
+        payload = {"message": message}
+        if title:
+            payload["title"] = title
+        return await self._request(
+            "POST",
+            "/api/v1/push/notifications",
+            payload=payload,
+        )
+
     async def async_websocket(
         self,
         after_revision: int,

@@ -278,11 +278,17 @@ export function Dashboard({ session }: { session: Session }) {
   });
   const queueRemove = useMutation({
     mutationFn: (id: string) => api.removeQueue(id, revision),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue"] }),
+    onSuccess: (result) => {
+      player.applySharedPlayback(result.playback);
+      return queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
   });
   const queueClear = useMutation({
     mutationFn: () => api.clearQueue(revision),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue"] }),
+    onSuccess: (result) => {
+      player.applySharedPlayback(result.playback);
+      return queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
   });
   const logout = useMutation({
     mutationFn: api.logout,

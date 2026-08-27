@@ -18,7 +18,7 @@
       },
       "profiles": {
         "title": "Select Podwaffle profiles",
-        "description": "A media player and listening sensors will be created for each selected profile.",
+        "description": "A media player, notification target and listening sensors will be created for each selected profile.",
         "data": {
           "profile_ids": "Profiles"
         }

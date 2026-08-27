@@ -77,6 +77,10 @@ class PodwaffleMediaModule : Module() {
             true
         }
 
+        AsyncFunction("decryptNotification") { input: Map<String, Any?>, joinCode: String ->
+            NotificationCrypto.decrypt(input, joinCode)
+        }
+
         AsyncFunction("bind") {
             withServiceOnMain(PodwaffleMediaService::stateMap)
         }

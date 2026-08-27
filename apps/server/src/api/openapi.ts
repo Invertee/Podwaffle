@@ -106,6 +106,19 @@ export function openApiDocument() {
           },
         },
       },
+      "/api/v1/push/notifications": {
+        post: {
+          security: authenticated,
+          responses: {
+            "202": {
+              description:
+                "Join-code-encrypted notification accepted for the profile's Android devices",
+            },
+            "409": { description: "No registered Android push target" },
+            "503": { description: "Firebase is disabled" },
+          },
+        },
+      },
       "/api/v1/push/registrations/{registrationId}": {
         delete: {
           security: authenticated,

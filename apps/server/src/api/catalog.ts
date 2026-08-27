@@ -33,7 +33,11 @@ import {
 } from "../podcasts/service.js";
 import type { SyncService } from "../sync/service.js";
 import { ApiError } from "./errors.js";
-import { recordEpisodeCompletion } from "../playback/service.js";
+import {
+  clearPlayback,
+  playbackState,
+  recordEpisodeCompletion,
+} from "../playback/service.js";
 
 function id(value: string | string[] | undefined): string {
   if (typeof value !== "string")
@@ -508,13 +512,34 @@ export function createCatalogRouter(
         "queue.updated",
         (db) => {
           checkRevision(database, profileId, command.expectedRevision);
+          const current = db
+            .prepare(
+              `SELECT q.episode_id
+               FROM queue_items q
+               JOIN playback_state p
+                 ON p.profile_id = q.profile_id AND p.episode_id = q.episode_id
+               WHERE q.id = ? AND q.profile_id = ?`,
+            )
+            .get(queueItemId, profileId) as { episode_id: string } | undefined;
+          // The restore trigger intentionally protects an active row from an
+          // accidental delete. An explicit queue removal is authoritative, so
+          // idle playback first and then remove the row.
+          if (current) clearPlayback(db, profileId);
           const deleted = db
             .prepare("DELETE FROM queue_items WHERE id = ? AND profile_id = ?")
             .run(queueItemId, profileId);
           if (deleted.changes === 0)
             throw new ApiError(404, "NOT_FOUND", "Queue item was not found");
           const queue = normalizeQueue(db, profileId);
-          return { result: { queue }, payload: { queue } };
+          const playback = playbackState(
+            db,
+            profileId,
+            request.auth!.device.id,
+          );
+          return {
+            result: { queue, playback },
+            payload: { queue, playback },
+          };
         },
       );
       response.json({
@@ -537,10 +562,28 @@ export function createCatalogRouter(
         "queue.updated",
         (db) => {
           checkRevision(database, profileId, command.expectedRevision);
+          const containsCurrent = db
+            .prepare(
+              `SELECT 1
+               FROM playback_state p
+               JOIN queue_items q
+                 ON q.profile_id = p.profile_id AND q.episode_id = p.episode_id
+               WHERE p.profile_id = ?`,
+            )
+            .get(profileId);
+          if (containsCurrent) clearPlayback(db, profileId);
           db.prepare("DELETE FROM queue_items WHERE profile_id = ?").run(
             profileId,
           );
-          return { result: { queue: [] }, payload: { queue: [] } };
+          const playback = playbackState(
+            db,
+            profileId,
+            request.auth!.device.id,
+          );
+          return {
+            result: { queue: [], playback },
+            payload: { queue: [], playback },
+          };
         },
       );
       response.json({

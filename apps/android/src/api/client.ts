@@ -360,12 +360,14 @@ export const api = {
     queueItemId: string,
     revision: number,
   ) =>
-    request<{ queue: QueueItem[]; revision: number }>(
-      serverUrl,
-      `/api/v1/queue/items/${queueItemId}`,
-      token,
-      { method: "DELETE", body: commandBody(revision) },
-    ),
+    request<{
+      queue: QueueItem[];
+      playback: PlaybackState;
+      revision: number;
+    }>(serverUrl, `/api/v1/queue/items/${queueItemId}`, token, {
+      method: "DELETE",
+      body: commandBody(revision),
+    }),
 
   reorderQueue: (
     serverUrl: string,
@@ -384,12 +386,14 @@ export const api = {
     ),
 
   clearQueue: (serverUrl: string, token: string, revision: number) =>
-    request<{ queue: QueueItem[]; revision: number }>(
-      serverUrl,
-      "/api/v1/queue",
-      token,
-      { method: "DELETE", body: commandBody(revision) },
-    ),
+    request<{
+      queue: QueueItem[];
+      playback: PlaybackState;
+      revision: number;
+    }>(serverUrl, "/api/v1/queue", token, {
+      method: "DELETE",
+      body: commandBody(revision),
+    }),
 
   devices: (serverUrl: string, token: string) =>
     request<{ devices: Device[] }>(serverUrl, "/api/v1/devices", token).then(

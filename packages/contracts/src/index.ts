@@ -99,6 +99,11 @@ export const pushRegistrationSchema = z.object({
   runtimeVersion: z.string().max(50).optional(),
 });
 
+export const pushNotificationSchema = z.object({
+  title: z.string().trim().min(1).max(200).default("Podwaffle"),
+  message: z.string().trim().min(1).max(2000),
+});
+
 export const subscribeSchema = commandSchema.extend({
   feedUrl: z.url(),
   appleCollectionId: z.string().max(100).optional(),
@@ -295,6 +300,7 @@ export type PlaybackCommandAction = z.infer<typeof playbackCommandActionSchema>;
 export type CastConfirmedState = z.infer<typeof castConfirmedStateSchema>;
 export type PlaybackSettings = z.infer<typeof playbackSettingsSchema>;
 export type PushRegistrationInput = z.infer<typeof pushRegistrationSchema>;
+export type PushNotificationInput = z.infer<typeof pushNotificationSchema>;
 
 export interface ApiErrorBody {
   error: {

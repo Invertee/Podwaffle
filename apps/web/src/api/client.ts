@@ -189,16 +189,17 @@ export const api = {
       }),
     }),
   removeQueue: (queueItemId: string, revision: number) =>
-    request<{ queue: QueueItem[]; revision: number }>(
-      `/queue/items/${queueItemId}`,
-      {
-        method: "DELETE",
-        body: JSON.stringify({
-          commandId: crypto.randomUUID(),
-          expectedRevision: revision,
-        }),
-      },
-    ),
+    request<{
+      queue: QueueItem[];
+      playback: PlaybackState;
+      revision: number;
+    }>(`/queue/items/${queueItemId}`, {
+      method: "DELETE",
+      body: JSON.stringify({
+        commandId: crypto.randomUUID(),
+        expectedRevision: revision,
+      }),
+    }),
   reorderQueue: (queueItemIds: string[], revision: number) =>
     request<{ queue: QueueItem[]; revision: number }>("/queue/order", {
       method: "PUT",
@@ -209,7 +210,11 @@ export const api = {
       }),
     }),
   clearQueue: (revision: number) =>
-    request<{ queue: QueueItem[]; revision: number }>("/queue", {
+    request<{
+      queue: QueueItem[];
+      playback: PlaybackState;
+      revision: number;
+    }>("/queue", {
       method: "DELETE",
       body: JSON.stringify({
         commandId: crypto.randomUUID(),

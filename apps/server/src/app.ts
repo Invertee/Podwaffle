@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import express, { type Express, type Response } from "express";
 import {
   joinRequestSchema,
+  pushNotificationSchema,
   pushRegistrationSchema,
   revokeDeviceSchema,
   type Session,
@@ -25,6 +26,7 @@ import { createCatalogRouter } from "./api/catalog.js";
 import { createPlaybackRouter } from "./api/playback.js";
 import { createProfileRouter } from "./api/profile.js";
 import type { PushService } from "./push/service.js";
+import { MAX_NOTIFICATION_PLAINTEXT_BYTES } from "./push/encryption.js";
 import type { OperationalStatusReporter } from "./operational-status.js";
 
 export const BUILD_VERSION = process.env.PODWAFFLE_VERSION ?? "0.1.0";
@@ -287,6 +289,54 @@ export function createApp(dependencies: AppDependencies): Express {
           ...applied.result,
           revision: applied.event.revision,
         });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  authenticated.post(
+    "/push/notifications",
+    requireScope("notifications:send"),
+    async (request, response, next) => {
+      try {
+        if (!push.config().enabled) {
+          throw new ApiError(
+            503,
+            "PUSH_NOT_CONFIGURED",
+            "Firebase push is not configured on this server",
+          );
+        }
+        const input = pushNotificationSchema.parse(request.body);
+        if (
+          Buffer.byteLength(JSON.stringify(input), "utf8") >
+          MAX_NOTIFICATION_PLAINTEXT_BYTES
+        ) {
+          throw new ApiError(
+            400,
+            "NOTIFICATION_TOO_LARGE",
+            "The notification is too large for Firebase Cloud Messaging",
+          );
+        }
+        const result = await push.sendProfileNotification(
+          request.auth!.profile.id,
+          input,
+        );
+        if (result.targeted === 0) {
+          throw new ApiError(
+            409,
+            "NO_ANDROID_PUSH_TARGET",
+            "This profile has no Android device registered for push notifications",
+          );
+        }
+        if (!result.accepted) {
+          throw new ApiError(
+            502,
+            "PUSH_DELIVERY_FAILED",
+            "Firebase did not accept the notification for any Android device",
+          );
+        }
+        response.status(202).json(result);
       } catch (error) {
         next(error);
       }

@@ -136,10 +136,28 @@ describe("playback queue invariant", () => {
       .send({ commandId: randomUUID() })
       .expect(200);
     expect(episodeIds(removed.body.queue as QueueResponseItem[])).toEqual([
-      thirdEpisodeId,
       firstEpisodeId,
       secondEpisodeId,
     ]);
+    expect(removed.body.playback).toMatchObject({
+      episode: null,
+      positionMs: 0,
+      durationMs: null,
+      state: "stopped",
+      mode: "local",
+      activeDeviceId: null,
+      castOwnerDeviceId: null,
+    });
+
+    await client
+      .post("/api/v1/playback/lease")
+      .send({
+        episodeId: thirdEpisodeId,
+        positionMs: 0,
+        durationMs: 60_000,
+        playbackRate: 1,
+      })
+      .expect(200);
 
     const completed = await client
       .post(`/api/v1/episodes/${thirdEpisodeId}/progress`)
@@ -158,6 +176,76 @@ describe("playback queue invariant", () => {
       positionMs: 0,
       state: "paused",
       ownedByCurrentDevice: true,
+    });
+  });
+
+  it("clears the active item and returns playback to idle", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const client = supertest.agent(created.baseUrl);
+    await join(client);
+
+    const now = new Date().toISOString();
+    const podcastId = randomUUID();
+    const episodeId = randomUUID();
+    created.runtime.database.db
+      .prepare(
+        `INSERT INTO podcasts(
+          id, feed_url, title, failure_count, created_at, updated_at
+        ) VALUES (?, ?, ?, 0, ?, ?)`,
+      )
+      .run(
+        podcastId,
+        "https://example.test/clear-feed",
+        "Clear show",
+        now,
+        now,
+      );
+    created.runtime.database.db
+      .prepare(
+        `INSERT INTO episodes(
+          id, podcast_id, guid, enclosure_url, title, first_discovered_at,
+          duration_ms, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        episodeId,
+        podcastId,
+        "clear-current",
+        "https://example.test/clear.mp3",
+        "Clear current episode",
+        now,
+        60_000,
+        now,
+        now,
+      );
+
+    await client
+      .post("/api/v1/playback/lease")
+      .send({
+        episodeId,
+        positionMs: 10_000,
+        durationMs: 60_000,
+        playbackRate: 1,
+      })
+      .expect(200);
+
+    const cleared = await client
+      .delete("/api/v1/queue")
+      .send({ commandId: randomUUID() })
+      .expect(200);
+    expect(cleared.body.queue).toEqual([]);
+    expect(cleared.body.playback).toMatchObject({
+      episode: null,
+      state: "stopped",
+      mode: "local",
+      activeDeviceId: null,
+      castOwnerDeviceId: null,
+    });
+    expect((await client.get("/api/v1/queue")).body.queue).toEqual([]);
+    expect((await client.get("/api/v1/playback")).body.playback).toMatchObject({
+      episode: null,
+      state: "stopped",
     });
   });
 });

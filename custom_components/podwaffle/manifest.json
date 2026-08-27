@@ -1,7 +1,7 @@
 {
   "domain": "podwaffle",
   "name": "Podwaffle",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "codeowners": ["@Invertee"],
   "config_flow": true,
   "documentation": "https://github.com/Invertee/Podwaffle",

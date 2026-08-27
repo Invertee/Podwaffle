@@ -1,12 +1,13 @@
 # Home Assistant integration
 
 Podwaffle includes a custom Home Assistant integration that creates one profile
-device for each selected Podwaffle user. Each device contains a `media_player`
-entity and listening/queue sensors.
+device for each selected Podwaffle user. Each device contains a `media_player`,
+a `notify` entity and listening/queue sensors.
 
 ## Requirements
 
-- Podwaffle add-on `5.0.29` or newer for FCM playback-command fallback.
+- Podwaffle add-on `5.0.30` or newer for encrypted profile notifications and
+  FCM playback-command fallback.
 - Home Assistant `2025.1.0` or newer.
 - A direct URL from Home Assistant to Podwaffle, normally the Home Assistant host
   address on port `3000`. Do not use the ingress panel URL.
@@ -47,11 +48,12 @@ The config flow asks for:
   a self-signed certificate.
 - **Profiles** — one or more enabled Podwaffle profiles to expose.
 
-The join code is used only while pairing. Home Assistant stores a separate random
-controller token for each selected profile. The controller tokens are restricted
-to snapshot, sync, statistics and playback-command access. They cannot become the
-playback owner, report listening telemetry, edit the podcast library or revoke
-other devices.
+Home Assistant uses the join code only while pairing and stores a separate random
+controller token for each selected profile. The Podwaffle server also uses its
+configured join code to encrypt notification bodies before they enter FCM. The
+controller tokens are restricted to snapshot, sync, statistics, playback-command
+and profile-notification access. They cannot become the playback owner, report
+listening telemetry, edit the podcast library or revoke other devices.
 
 The Home Assistant controller appears under the profile's connected devices and
 can be revoked from Podwaffle. A revoked token starts Home Assistant's
@@ -65,6 +67,8 @@ Each selected profile creates:
 - `media_player` — current episode, podcast, artwork, progress, active playback
   device, play, pause, seek, next, previous, and `play_media` for a known
   Podwaffle episode ID.
+- `notify` — sends a title and message to every push-registered Android device
+  enrolled in that profile.
 - Queue remaining duration.
 - Queue episode count.
 - Listening time today.
@@ -87,6 +91,37 @@ than being duplicated for 30-day and all-time periods.
 Queue remaining duration subtracts the current episode position and includes full
 durations for following episodes. The sensor includes an
 `unknown_duration_episodes` attribute when feed metadata is incomplete.
+
+## Send a notification
+
+Target the `notify` entity belonging to the intended profile. For example:
+
+```yaml
+action: notify.send_message
+target:
+  entity_id: notify.podwaffle_sam
+data:
+  title: "Front door"
+  message: "Someone is at the door"
+```
+
+The server sends a data-only, high-priority FCM message to every registered
+Android device in that profile. FCM receives only the protocol version, a random
+salt and IV, and AES-256-GCM ciphertext. The key is derived from the join code
+with PBKDF2-HMAC-SHA256; the Android app decrypts the title and message locally
+and then creates the visible notification. A modified payload or a payload
+encrypted with another join code is discarded.
+
+Android installations that were already enrolled before this feature was added
+must sign out and join once more so the app can retain the join code in Android
+secure storage. After that one-time enrolment, no join code is placed in FCM or
+returned to Home Assistant. If the server join code is later changed, rejoin each
+Android device so it can decrypt notifications encrypted with the new code.
+
+The action fails clearly when Firebase is disabled, the profile has no
+push-registered Android device, or FCM rejects every target. Notification delivery
+is still subject to Android notification permission and device-level channel
+settings for **Podwaffle messages**.
 
 ## Play a specific episode
 

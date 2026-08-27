@@ -92,6 +92,10 @@ export function acquireLease(
        episode_id = excluded.episode_id,
        position_ms = excluded.position_ms,
        duration_ms = excluded.duration_ms,
+       state = CASE
+         WHEN playback_state.state = 'stopped' THEN 'paused'
+         ELSE playback_state.state
+       END,
        mode = 'local',
        cast_owner_device_id = NULL,
        cast_session_id = NULL,
@@ -449,6 +453,22 @@ export function releaseLease(
          WHERE profile_id = ? AND active_device_id = ?`,
       )
       .run(new Date().toISOString(), profileId, deviceId).changes > 0
+  );
+}
+
+/** Clears both the selected media and any local/Cast ownership. */
+export function clearPlayback(db: DatabaseSync, profileId: string): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE playback_state SET episode_id = NULL, position_ms = 0,
+         duration_ms = NULL, state = 'stopped', mode = 'local',
+         active_device_id = NULL, lease_expires_at = NULL,
+         cast_owner_device_id = NULL, cast_session_id = NULL,
+         revision = revision + 1, updated_at = ?
+         WHERE profile_id = ?`,
+      )
+      .run(new Date().toISOString(), profileId).changes > 0
   );
 }
 

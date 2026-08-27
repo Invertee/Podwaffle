@@ -120,13 +120,14 @@ shell is not cached.
 
 The repository includes a HACS-compatible custom integration under
 `custom_components/podwaffle`. It creates one Home Assistant device per selected
-Podwaffle profile, containing a `media_player`, queue-duration/count sensors and
-listening-statistic sensors.
+Podwaffle profile, containing a `media_player`, a profile-scoped `notify` target,
+queue-duration/count sensors and listening-statistic sensors.
 
 The media player controls the Android, web or Cast client currently owning that
 profile's playback. Home Assistant does not render the audio itself. Play, pause,
 seek, next and previous are delivered through Podwaffle's existing live playback
-command channel.
+command channel. The notification target sends join-code-encrypted, data-only FCM
+messages to Android devices enrolled in the selected profile.
 
 Install through HACS as a custom integration repository, or copy
 `custom_components/podwaffle` to `/config/custom_components/podwaffle`, restart
@@ -154,10 +155,10 @@ never placed in local storage. Android joins use the same endpoint with
 `platform: "home_assistant"` and receives one restricted controller token for each
 selected profile. Only a SHA-256 hash of each 256-bit random device token is stored.
 
-Home Assistant controller credentials may read snapshots, live sync and statistics
-and relay playback commands. They cannot become playback targets, acquire the
-playback lease, mutate the library, report telemetry or revoke devices. Existing
-web and Android credentials retain full profile access.
+Home Assistant controller credentials may read snapshots, live sync and statistics,
+relay playback commands, and send profile notifications. They cannot become
+playback targets, acquire the playback lease, mutate the library, report telemetry
+or revoke devices. Existing web and Android credentials retain full profile access.
 
 Join attempts are rate-limited by proxy-aware source IP. Active devices are listed
 at `/api/v1/devices`; revocation immediately invalidates REST and WebSocket access.
@@ -225,6 +226,7 @@ To restore:
 5. Verify `/health`, profiles and devices. Existing device tokens remain valid.
 
 Never make a blind filesystem copy of the live WAL database.
-  information.
+information.
+
 - Milestone 10: deduplicated listening telemetry, confirmed typed movements,
   profile-local daily roll-ups, period-filtered statistics and profile cards.

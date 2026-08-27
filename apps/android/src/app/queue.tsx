@@ -107,7 +107,9 @@ export default function QueueScreen() {
       }
       Alert.alert(
         "Queue update failed",
-        error instanceof Error ? error.message : "The queue could not be updated.",
+        error instanceof Error
+          ? error.message
+          : "The queue could not be updated.",
       );
     } finally {
       operationInFlight.current = false;
@@ -150,13 +152,13 @@ export default function QueueScreen() {
   }
 
   function confirmClear() {
-    const keepsCurrent = orderedQueue.some(
+    const clearsCurrent = orderedQueue.some(
       (item) => item.episode.id === currentEpisodeId,
     );
     Alert.alert(
       "Clear queue?",
-      keepsCurrent
-        ? "All upcoming episodes will be removed. The current episode will stay."
+      clearsCurrent
+        ? "All episodes will be removed and playback will stop."
         : "All queued episodes will be removed.",
       [
         { text: "Cancel", style: "cancel" },
@@ -164,9 +166,12 @@ export default function QueueScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () =>
-            void mutate("clear", (serverUrl, token, revision) =>
-              api.clearQueue(serverUrl, token, revision),
-            ),
+            void mutate("clear", async (serverUrl, token, revision) => {
+              if (clearsCurrent) {
+                await playbackController.clearPlayerForQueueRemoval();
+              }
+              return api.clearQueue(serverUrl, token, revision);
+            }),
         },
       ],
     );
@@ -176,7 +181,10 @@ export default function QueueScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.pressed,
+          ]}
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Back"
@@ -236,8 +244,12 @@ export default function QueueScreen() {
               onRemove={() =>
                 void mutate(
                   item.id,
-                  (serverUrl, token, revision) =>
-                    api.removeQueue(serverUrl, token, item.id, revision),
+                  async (serverUrl, token, revision) => {
+                    if (currentEpisodeId === item.episode.id) {
+                      await playbackController.clearPlayerForQueueRemoval();
+                    }
+                    return api.removeQueue(serverUrl, token, item.id, revision);
+                  },
                   true,
                 )
               }
@@ -343,14 +355,16 @@ function QueueRow({
           ]}
           disabled={anyBusy || !item.episode.enclosureUrl}
           onPress={() =>
-            void playbackController.playEpisode(item.episode).catch((error) =>
-              Alert.alert(
-                "Playback failed",
-                error instanceof Error
-                  ? error.message
-                  : "The episode could not be played.",
-              ),
-            )
+            void playbackController
+              .playEpisode(item.episode)
+              .catch((error) =>
+                Alert.alert(
+                  "Playback failed",
+                  error instanceof Error
+                    ? error.message
+                    : "The episode could not be played.",
+                ),
+              )
           }
           accessibilityRole="button"
           accessibilityLabel={`${active ? "Resume" : "Play"} ${item.episode.title}`}
@@ -388,16 +402,14 @@ function QueueRow({
             styles.iconButton,
             styles.removeButton,
             pressed && styles.pressed,
-            (anyBusy || active) && styles.disabled,
+            anyBusy && styles.disabled,
           ]}
-          disabled={anyBusy || active}
+          disabled={anyBusy}
           onPress={onRemove}
           accessibilityRole="button"
-          accessibilityLabel={
-            active
-              ? `${item.episode.title} is currently playing and cannot be removed`
-              : `Remove ${item.episode.title}`
-          }
+          accessibilityLabel={`Remove ${item.episode.title}${
+            active ? " and stop playback" : ""
+          }`}
         >
           {busy ? (
             <ActivityIndicator size="small" color={colors.error} />
@@ -435,7 +447,11 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     fontWeight: fontWeights.bold,
   },
-  subtitle: { color: colors.textSecondary, fontSize: fontSizes.xs, marginTop: 2 },
+  subtitle: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.xs,
+    marginTop: 2,
+  },
   clearButton: {
     width: 38,
     height: 38,

@@ -52,4 +52,28 @@ describe("optional Android push", () => {
       .expect(503);
     expect(registration.body.error.code).toBe("PUSH_NOT_CONFIGURED");
   });
+
+  it("allows a profile-scoped Home Assistant controller to request a notification", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const client = supertest(created.baseUrl);
+    const profiles = await client.get("/api/v1/join/profiles").expect(200);
+    const profileId = profiles.body.profiles[0].id as string;
+    const joined = await client
+      .post("/api/v1/join")
+      .send({
+        profileId,
+        joinCode: "test-secret",
+        deviceName: "Home Assistant",
+        platform: "home_assistant",
+      })
+      .expect(201);
+
+    const response = await client
+      .post("/api/v1/push/notifications")
+      .set("authorization", `Bearer ${joined.body.token as string}`)
+      .send({ title: "Kitchen", message: "The timer is done" })
+      .expect(503);
+    expect(response.body.error.code).toBe("PUSH_NOT_CONFIGURED");
+  });
 });

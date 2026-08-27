@@ -23,6 +23,7 @@ import {
 import { useDownloadsStore } from "./downloads";
 
 const CREDENTIALS_KEY = "podwaffle.credentials.v1";
+const NOTIFICATION_JOIN_CODE_KEY = "podwaffle.notification-join-code.v1";
 const SNAPSHOT_KEY = "podwaffle.snapshot.v1";
 const PLAYBACK_SETTINGS_KEY_PREFIX = "podwaffle.playback-settings.v1";
 const DEFAULT_SKIP_BACKWARD_SECONDS = 15;
@@ -126,6 +127,7 @@ async function writePlaybackSettings(
 async function clearPersistedState(): Promise<void> {
   await Promise.all([
     SecureStore.deleteItemAsync(CREDENTIALS_KEY),
+    SecureStore.deleteItemAsync(NOTIFICATION_JOIN_CODE_KEY),
     AsyncStorage.removeItem(SNAPSHOT_KEY),
     PodwaffleMediaModule.clearConfiguration().catch(() => undefined),
   ]);
@@ -248,6 +250,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       CREDENTIALS_KEY,
       JSON.stringify(credentials),
     );
+    await SecureStore.setItemAsync(NOTIFICATION_JOIN_CODE_KEY, input.joinCode);
     const snapshot = await reconcilePendingCompletionSnapshot(
       await api.snapshot(serverUrl, result.token),
     );
@@ -433,3 +436,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     });
   },
 }));
+
+export async function notificationJoinCode(): Promise<string | null> {
+  return SecureStore.getItemAsync(NOTIFICATION_JOIN_CODE_KEY);
+}

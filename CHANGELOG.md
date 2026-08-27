@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added a Home Assistant `notify` entity per Podwaffle profile, encrypted ad-hoc
+  notification title/body payloads end to end across FCM with join-code-derived
+  AES-256-GCM keys, and decrypted them locally into a dedicated high-importance
+  Android message channel. Updated Android to 0.4.29 / versionCode 33 / native
+  runtime 0.4-native-26, the custom integration to 0.3.0, and the Home Assistant
+  add-on to 5.0.30.
 - Made remote playback dispatch race the live WebSocket with high-priority FCM,
   count an accepted Firebase wake-up when Android has no live socket, process
   pending commands before a full Android refresh, updated Android to 0.4.28 /

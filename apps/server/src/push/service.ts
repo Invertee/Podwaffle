@@ -8,6 +8,7 @@ import type { AppConfig } from "../config.js";
 import type { PodwaffleDatabase } from "../db/connection.js";
 import { log } from "../logging.js";
 import type { SyncService } from "../sync/service.js";
+import { encryptNotification } from "./encryption.js";
 
 interface RegistrationRow {
   id: string;
@@ -53,6 +54,11 @@ export interface PublicPushHealth extends PublicPushConfig {
   lastFailureCode: string | null;
 }
 
+export interface PushDeliveryResult {
+  targeted: number;
+  accepted: boolean;
+}
+
 export class PushService {
   private unsubscribe: (() => void) | undefined;
 
@@ -60,6 +66,7 @@ export class PushService {
     private readonly database: PodwaffleDatabase,
     private readonly firebaseApp: App | null,
     private readonly publicConfig: PublicPushConfig,
+    private readonly joinCode: string,
   ) {}
 
   public static async create(
@@ -67,11 +74,16 @@ export class PushService {
     database: PodwaffleDatabase,
   ): Promise<PushService> {
     if (!config.firebase_enabled) {
-      return new PushService(database, null, {
-        enabled: false,
-        projectId: null,
-        androidAppId: null,
-      });
+      return new PushService(
+        database,
+        null,
+        {
+          enabled: false,
+          projectId: null,
+          androidAppId: null,
+        },
+        config.join_code,
+      );
     }
 
     const [androidConfig, serviceAccount] = await Promise.all([
@@ -117,11 +129,16 @@ export class PushService {
       },
       `podwaffle-${randomUUID()}`,
     );
-    return new PushService(database, firebaseApp, {
-      enabled: true,
-      projectId,
-      androidAppId: androidClient.client_info.mobilesdk_app_id,
-    });
+    return new PushService(
+      database,
+      firebaseApp,
+      {
+        enabled: true,
+        projectId,
+        androidAppId: androidClient.client_info.mobilesdk_app_id,
+      },
+      config.join_code,
+    );
   }
 
   public config(): PublicPushConfig {
@@ -299,6 +316,25 @@ export class PushService {
     );
   }
 
+  public async sendProfileNotification(
+    profileId: string,
+    content: { title: string; message: string },
+  ): Promise<PushDeliveryResult> {
+    const registrations = this.registrationsForProfile(profileId);
+    if (registrations.length === 0) {
+      return { targeted: 0, accepted: false };
+    }
+    const encrypted = encryptNotification(this.joinCode, content);
+    const accepted = await this.sendToRegistrations(
+      registrations,
+      { kind: "notification", ...encrypted },
+      true,
+      undefined,
+      24 * 60 * 60_000,
+    );
+    return { targeted: registrations.length, accepted };
+  }
+
   private async sendProfileUpdate(
     profileId: string,
     event: SyncEvent,
@@ -350,7 +386,8 @@ export class PushService {
     registrations: RegistrationRow[],
     data: Record<string, string>,
     urgent: boolean,
-    collapseKey: string,
+    collapseKey: string | undefined,
+    ttl = urgent ? 60_000 : 6 * 60 * 60_000,
   ): Promise<boolean> {
     if (!this.firebaseApp || registrations.length === 0) return false;
     let delivered = false;
@@ -364,8 +401,8 @@ export class PushService {
           data,
           android: {
             priority: urgent ? "high" : "normal",
-            collapseKey,
-            ttl: urgent ? 60_000 : 6 * 60 * 60_000,
+            ...(collapseKey ? { collapseKey } : {}),
+            ttl,
           },
         });
         delivered ||= response.successCount > 0;

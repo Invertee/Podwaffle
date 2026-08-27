@@ -299,10 +299,11 @@ class PodwaffleMediaService : MediaSessionService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                val player = activeOwner() ?: return
-                if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
-                    player.currentMediaItem?.let(::notifyItemEnded)
-                }
+                if (activeOwner() == null) return
+                // Automatic completion is handled by onMediaItemTransition,
+                // which still has the outgoing MediaItem. By the time this
+                // callback runs currentMediaItem may already be the next item;
+                // treating it as ended completes and skips the new episode.
                 persistPlayback()
             }
 

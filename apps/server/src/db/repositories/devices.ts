@@ -9,6 +9,7 @@ export type DeviceScope =
   | "playback:control"
   | "playback:write"
   | "playback:target"
+  | "notifications:send"
   | "catalog:write"
   | "profile:write"
   | "devices:write";
@@ -43,6 +44,7 @@ function capabilitiesFor(request: JoinRequest): DeviceCapabilities {
       "sync:read",
       "stats:read",
       "playback:control",
+      "notifications:send",
     ],
   };
 }
@@ -73,6 +75,15 @@ export function deviceHasScope(row: DeviceRow, scope: DeviceScope): boolean {
   // Existing web and Android credentials predate scopes and retain full profile
   // access. Only controller-class credentials are constrained.
   if (capabilities.clientKind !== "home_assistant") return true;
+  // Controllers enrolled before notification support already have the
+  // profile-scoped playback control permission. Preserve those credentials so
+  // upgrading the integration does not require Home Assistant reauthentication.
+  if (
+    scope === "notifications:send" &&
+    capabilities.scopes?.includes("playback:control")
+  ) {
+    return true;
+  }
   return Boolean(
     capabilities.scopes?.includes("*") || capabilities.scopes?.includes(scope),
   );

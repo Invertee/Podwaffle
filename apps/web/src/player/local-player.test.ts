@@ -210,6 +210,33 @@ describe("local player restoration", () => {
     expect(audio.playbackRate).toBe(1.25);
     expect(audio.paused).toBe(true);
   });
+
+  it("returns to idle when shared playback is explicitly cleared", async () => {
+    const isolated = new playerModule.LocalPlayer(new FakeCastAdapter());
+    await isolated.load(first, false);
+
+    isolated.applySharedPlayback({
+      episode: null,
+      positionMs: 0,
+      durationMs: null,
+      state: "stopped",
+      mode: "local",
+      playbackRate: 1,
+      activeDeviceId: null,
+      leaseExpiresAt: null,
+      castOwnerDeviceId: null,
+      castSessionId: null,
+      ownedByCurrentDevice: false,
+    });
+
+    expect(playerModule.usePlayer.getState()).toMatchObject({
+      episode: null,
+      playing: false,
+      positionMs: 0,
+      durationMs: 0,
+    });
+    expect(audio.src).toBe("");
+  });
 });
 
 describe("local and Cast handoff", () => {

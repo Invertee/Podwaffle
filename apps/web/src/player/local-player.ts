@@ -673,7 +673,13 @@ export class LocalPlayer {
       return;
     }
     if (!playback.episode || playback.state === "stopped") {
-      if (local.remote) usePlayer.setState({ remote: false, playing: false });
+      if (local.mode === "cast" && !local.remote && this.castState.connected) {
+        this.endingCast = true;
+        void this.cast.endSession().finally(() => {
+          this.endingCast = false;
+        });
+      }
+      this.resetToIdle();
       return;
     }
     if (playback.ownedByCurrentDevice && local.remote) {
