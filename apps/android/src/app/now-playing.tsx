@@ -333,6 +333,16 @@ export default function NowPlayingScreen() {
               <Text style={styles.toolLabel}>Episode info</Text>
             </Pressable>
 
+            <Pressable
+              style={({ pressed }) => [styles.tool, pressed && styles.pressed]}
+              onPress={() => router.push("/queue")}
+              accessibilityRole="button"
+              accessibilityLabel="Open current queue"
+            >
+              <Icon name="queue" size={21} color={colors.textSecondary} />
+              <Text style={styles.toolLabel}>Queue</Text>
+            </Pressable>
+
             {presentation.remote ? (
               <Pressable
                 style={({ pressed }) => [
@@ -559,6 +569,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.full,
+    backgroundColor: colors.transportControl,
   },
   playButton: {
     width: 74,
@@ -575,8 +586,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tool: {
+    flex: 1,
     minHeight: 46,
-    minWidth: 132,
+    minWidth: 0,
     paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",

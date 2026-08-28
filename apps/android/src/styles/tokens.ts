@@ -12,6 +12,7 @@ export const colors = {
   textOnAccent: "#FFFFFF",
   accent: "#E91E8C",
   accentDim: "rgba(233, 30, 140, 0.15)",
+  transportControl: "#2A2148",
   skip: "#F59E0B",
   skipDim: "rgba(245, 158, 11, 0.15)",
   success: "#10B981",

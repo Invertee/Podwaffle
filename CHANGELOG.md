@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added safe Home Assistant ad-hoc notification diagnostics to the add-on log:
+  integration request receipt, Android target discovery, FCM batch results, and
+  final acceptance or failure (without logging message content or FCM tokens).
+  Bumped the Home Assistant add-on to 5.0.31.
 - Kept ordinary playback/sync FCM wake messages silent while retaining their
   background catch-up behavior, limited visible Android alerts to successfully
   decrypted ad-hoc messages, and replaced each Home Assistant `notify` entity

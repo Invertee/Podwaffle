@@ -322,9 +322,22 @@ export class PushService {
   ): Promise<PushDeliveryResult> {
     const registrations = this.registrationsForProfile(profileId);
     if (registrations.length === 0) {
+      log("info", "push.notification.no_targets", {
+        message: "No registered Android devices available for push notification",
+        profileId,
+      });
       return { targeted: 0, accepted: false };
     }
     const encrypted = encryptNotification(this.joinCode, content);
+    log("info", "push.notification.forwarding", {
+      message: "Forwarding encrypted push notification to Firebase",
+      profileId,
+      targeted: registrations.length,
+      encryptedPayloadBytes: Buffer.byteLength(
+        JSON.stringify({ kind: "notification", ...encrypted }),
+        "utf8",
+      ),
+    });
     const accepted = await this.sendToRegistrations(
       registrations,
       { kind: "notification", ...encrypted },
@@ -332,6 +345,14 @@ export class PushService {
       undefined,
       24 * 60 * 60_000,
     );
+    log(accepted ? "info" : "warn", "push.notification.forwarded", {
+      message: accepted
+        ? "Firebase accepted push notification for at least one Android device"
+        : "Firebase did not accept push notification for any Android device",
+      profileId,
+      targeted: registrations.length,
+      accepted,
+    });
     return { targeted: registrations.length, accepted };
   }
 
@@ -406,10 +427,32 @@ export class PushService {
           },
         });
         delivered ||= response.successCount > 0;
+        if (data.kind === "notification") {
+          const failureCodes = response.responses
+            .filter((result) => !result.success)
+            .reduce<Record<string, number>>((codes, result) => {
+              const code = result.error?.code ?? "messaging/unknown-error";
+              codes[code] = (codes[code] ?? 0) + 1;
+              return codes;
+            }, {});
+          log(
+            response.failureCount === 0 ? "info" : "warn",
+            "push.fcm.batch_result",
+            {
+              message: "Firebase processed push notification batch",
+              batchSize: batch.length,
+              successCount: response.successCount,
+              failureCount: response.failureCount,
+              failureCodes,
+            },
+          );
+        }
         this.applyResults(batch, response);
       } catch (error) {
         log("warn", "push.send_failed", {
+          message: "Firebase request failed before a push batch response was received",
           kind: data.kind,
+          batchSize: batch.length,
           error: error instanceof Error ? error.message : "Unknown FCM error",
         });
       }

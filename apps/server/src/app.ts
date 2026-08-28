@@ -300,7 +300,32 @@ export function createApp(dependencies: AppDependencies): Express {
     requireScope("notifications:send"),
     async (request, response, next) => {
       try {
+        const requestFields = {
+          requestId: request.requestId,
+          profileId: request.auth!.profile.id,
+          deviceId: request.auth!.device.id,
+          titleProvided:
+            typeof request.body?.title === "string" && request.body.title.length > 0,
+          titleLength:
+            typeof request.body?.title === "string"
+              ? request.body.title.length
+              : undefined,
+          messageLength:
+            typeof request.body?.message === "string"
+              ? request.body.message.length
+              : undefined,
+        };
+        log("info", "push.notification.received", {
+          message: "Push notification request received from Home Assistant",
+          ...requestFields,
+        });
         if (!push.config().enabled) {
+          log("warn", "push.notification.rejected", {
+            message:
+              "Push notification request rejected because Firebase is not configured",
+            ...requestFields,
+            reason: "PUSH_NOT_CONFIGURED",
+          });
           throw new ApiError(
             503,
             "PUSH_NOT_CONFIGURED",
@@ -308,10 +333,16 @@ export function createApp(dependencies: AppDependencies): Express {
           );
         }
         const input = pushNotificationSchema.parse(request.body);
+        const plaintextBytes = Buffer.byteLength(JSON.stringify(input), "utf8");
         if (
-          Buffer.byteLength(JSON.stringify(input), "utf8") >
-          MAX_NOTIFICATION_PLAINTEXT_BYTES
+          plaintextBytes > MAX_NOTIFICATION_PLAINTEXT_BYTES
         ) {
+          log("warn", "push.notification.rejected", {
+            message: "Push notification request rejected because it is too large",
+            ...requestFields,
+            plaintextBytes,
+            reason: "NOTIFICATION_TOO_LARGE",
+          });
           throw new ApiError(
             400,
             "NOTIFICATION_TOO_LARGE",
@@ -323,6 +354,13 @@ export function createApp(dependencies: AppDependencies): Express {
           input,
         );
         if (result.targeted === 0) {
+          log("warn", "push.notification.rejected", {
+            message:
+              "Push notification request rejected because no Android target is registered",
+            ...requestFields,
+            targeted: result.targeted,
+            reason: "NO_ANDROID_PUSH_TARGET",
+          });
           throw new ApiError(
             409,
             "NO_ANDROID_PUSH_TARGET",
@@ -330,12 +368,23 @@ export function createApp(dependencies: AppDependencies): Express {
           );
         }
         if (!result.accepted) {
+          log("warn", "push.notification.rejected", {
+            message: "Push notification request was not accepted by Firebase",
+            ...requestFields,
+            targeted: result.targeted,
+            reason: "PUSH_DELIVERY_FAILED",
+          });
           throw new ApiError(
             502,
             "PUSH_DELIVERY_FAILED",
             "Firebase did not accept the notification for any Android device",
           );
         }
+        log("info", "push.notification.accepted", {
+          message: "Push notification accepted by Firebase",
+          ...requestFields,
+          targeted: result.targeted,
+        });
         response.status(202).json(result);
       } catch (error) {
         next(error);
