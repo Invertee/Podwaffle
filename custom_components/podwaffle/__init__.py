@@ -6,6 +6,7 @@ from typing import cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import PodwaffleApi
@@ -54,6 +55,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
+    entity_registry = er.async_get(hass)
+    for profile_id in coordinators:
+        legacy_entity_id = entity_registry.async_get_entity_id(
+            "notify", DOMAIN, f"{profile_id}_notifications"
+        )
+        if legacy_entity_id:
+            entity_registry.async_remove(legacy_entity_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     for coordinator in coordinators.values():
         coordinator.async_start_live_sync()

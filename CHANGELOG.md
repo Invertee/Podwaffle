@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kept ordinary playback/sync FCM wake messages silent while retaining their
+  background catch-up behavior, limited visible Android alerts to successfully
+  decrypted ad-hoc messages, and replaced each Home Assistant `notify` entity
+  with notification title/message fields and an explicit send button. Updated
+  Android to 0.4.30 / versionCode 34 while retaining native runtime
+  0.4-native-26, and updated the custom integration to 0.4.0.
 - Added a Home Assistant `notify` entity per Podwaffle profile, encrypted ad-hoc
   notification title/body payloads end to end across FCM with join-code-derived
   AES-256-GCM keys, and decrypted them locally into a dedicated high-importance

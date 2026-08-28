@@ -60,6 +60,8 @@ class PodwaffleCoordinator(DataUpdateCoordinator[PodwaffleProfileData]):
         self.profile_id = profile["profile_id"]
         self.profile_name = profile["profile_name"]
         self.device_id = profile["device_id"]
+        self.notification_title = "Podwaffle"
+        self.notification_message = ""
         self.last_snapshot_at: datetime | None = None
         self._stats_updated_at: datetime | None = None
         self._stats_today: dict[str, Any] = {}

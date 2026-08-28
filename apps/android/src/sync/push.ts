@@ -7,22 +7,15 @@ import { api } from "../api/client";
 import { playbackController } from "../playback/controller";
 import { PodwaffleMediaModule } from "../native-media";
 import { notificationJoinCode, useAuthStore } from "../stores/auth";
+import {
+  asPushData,
+  isVisibleLocalNotification,
+  type PushData,
+} from "./pushPayload";
 import { syncRuntime } from "./runtime";
 
 const PUSH_WAKE_TASK = "podwaffle.push-wake.v1";
 const MESSAGE_CHANNEL_ID = "podwaffle-messages";
-
-type PushData = Record<string, unknown>;
-
-function asPushData(value: unknown): PushData | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const outer = value as PushData;
-  const nested = outer.data;
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    return nested as PushData;
-  }
-  return outer;
-}
 
 async function displayEncryptedNotification(data: PushData): Promise<void> {
   const joinCode = await notificationJoinCode();
@@ -56,12 +49,19 @@ async function handlePush(value: unknown): Promise<void> {
 }
 
 Notifications.setNotificationHandler({
-  handleNotification: () =>
-    Promise.resolve({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
+  handleNotification: (notification) => {
+    const shouldDisplay = isVisibleLocalNotification(
+      notification.request.content.data,
+    );
+    return Promise.resolve({
+      // FCM wake messages are data-only and must never surface as an empty
+      // system notification. Only the local notification created after a
+      // Home Assistant payload has been decrypted is user-visible.
+      shouldShowAlert: shouldDisplay,
+      shouldPlaySound: shouldDisplay,
       shouldSetBadge: false,
-    }),
+    });
+  },
 });
 
 async function synchronizeFromPush(): Promise<void> {

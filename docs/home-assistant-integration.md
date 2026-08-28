@@ -2,7 +2,7 @@
 
 Podwaffle includes a custom Home Assistant integration that creates one profile
 device for each selected Podwaffle user. Each device contains a `media_player`,
-a `notify` entity and listening/queue sensors.
+notification title/message fields, a send button and listening/queue sensors.
 
 ## Requirements
 
@@ -67,8 +67,10 @@ Each selected profile creates:
 - `media_player` — current episode, podcast, artwork, progress, active playback
   device, play, pause, seek, next, previous, and `play_media` for a known
   Podwaffle episode ID.
-- `notify` — sends a title and message to every push-registered Android device
-  enrolled in that profile.
+- Notification title — editable title for the next ad-hoc message.
+- Notification message — editable body for the next ad-hoc message.
+- Send notification — encrypts and sends the two fields to every push-registered
+  Android device enrolled in that profile.
 - Queue remaining duration.
 - Queue episode count.
 - Listening time today.
@@ -94,16 +96,28 @@ durations for following episodes. The sensor includes an
 
 ## Send a notification
 
-Target the `notify` entity belonging to the intended profile. For example:
+Set the title and message fields belonging to the intended profile, then press its
+send button. For example:
 
 ```yaml
-action: notify.send_message
-target:
-  entity_id: notify.podwaffle_sam
-data:
-  title: "Front door"
-  message: "Someone is at the door"
+sequence:
+  - action: text.set_value
+    target:
+      entity_id: text.podwaffle_sam_notification_title
+    data:
+      value: "Front door"
+  - action: text.set_value
+    target:
+      entity_id: text.podwaffle_sam_notification_message
+    data:
+      value: "Someone is at the door"
+  - action: button.press
+    target:
+      entity_id: button.podwaffle_sam_send_notification
 ```
+
+The send button refuses an empty message. Leaving the title empty uses
+**Podwaffle** as the default title.
 
 The server sends a data-only, high-priority FCM message to every registered
 Android device in that profile. FCM receives only the protocol version, a random
@@ -160,7 +174,8 @@ paths race: WebSocket is normally fastest while the app is active, and FCM wakes
 the app so it can fetch pending commands when Android has suspended its socket.
 Firebase acceptance is treated as a valid dispatch when no live socket is
 available; the Android client still fetches the full command from Podwaffle rather
-than trusting notification contents.
+than trusting notification contents. These playback and sync wake messages are
+unencrypted data-only messages and are never shown as user notifications.
 
 Home Assistant returns as soon as the server accepts the dispatch and reflects
 play, pause, seek and skip actions optimistically. The Android acknowledgement and

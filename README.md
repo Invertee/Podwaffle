@@ -120,14 +120,17 @@ shell is not cached.
 
 The repository includes a HACS-compatible custom integration under
 `custom_components/podwaffle`. It creates one Home Assistant device per selected
-Podwaffle profile, containing a `media_player`, a profile-scoped `notify` target,
-queue-duration/count sensors and listening-statistic sensors.
+Podwaffle profile, containing a `media_player`, notification title/message fields,
+an explicit send button, queue-duration/count sensors and listening-statistic
+sensors.
 
 The media player controls the Android, web or Cast client currently owning that
 profile's playback. Home Assistant does not render the audio itself. Play, pause,
 seek, next and previous are delivered through Podwaffle's existing live playback
-command channel. The notification target sends join-code-encrypted, data-only FCM
-messages to Android devices enrolled in the selected profile.
+command channel. The notification button sends the draft title and message as a
+join-code-encrypted, data-only FCM payload to Android devices enrolled in the
+selected profile. Normal playback and sync wake payloads remain unencrypted and
+silent.
 
 Install through HACS as a custom integration repository, or copy
 `custom_components/podwaffle` to `/config/custom_components/podwaffle`, restart
