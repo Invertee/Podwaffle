@@ -16,32 +16,48 @@ import { syncRuntime } from "./runtime";
 
 const PUSH_WAKE_TASK = "podwaffle.push-wake.v1";
 const MESSAGE_CHANNEL_ID = "podwaffle-messages";
+const displayedMessageIds = new Set<string>();
+
+function messageIdentifier(data: PushData): string | undefined {
+  return typeof data.ciphertext === "string"
+    ? `podwaffle-message-${data.ciphertext.slice(0, 32)}`
+    : undefined;
+}
 
 async function displayEncryptedNotification(data: PushData): Promise<void> {
   const joinCode = await notificationJoinCode();
   if (!joinCode) return;
-  const content = await PodwaffleMediaModule.decryptNotification(
-    data,
-    joinCode,
-  );
-  await Notifications.scheduleNotificationAsync({
-    identifier:
-      typeof data.ciphertext === "string"
-        ? `podwaffle-message-${data.ciphertext.slice(0, 32)}`
-        : undefined,
-    content: {
-      title: content.title,
-      body: content.message,
-      sound: "default",
-      data: { kind: "podwaffle-local-notification" },
-    },
-    trigger: { channelId: MESSAGE_CHANNEL_ID },
-  });
+
+  const identifier = messageIdentifier(data);
+  if (identifier && displayedMessageIds.has(identifier)) return;
+  if (identifier) displayedMessageIds.add(identifier);
+
+  try {
+    const content = await PodwaffleMediaModule.decryptNotification(
+      data,
+      joinCode,
+    );
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: {
+        title: content.title,
+        body: content.message,
+        sound: "default",
+        data: { kind: "podwaffle-local-notification" },
+      },
+      trigger: { channelId: MESSAGE_CHANNEL_ID },
+    });
+  } catch (error) {
+    if (identifier) displayedMessageIds.delete(identifier);
+    throw error;
+  }
 }
 
 async function handlePush(value: unknown): Promise<void> {
   const data = asPushData(value);
-  if (data?.kind === "notification") {
+  if (!data) return;
+  if (data.kind === "podwaffle-local-notification") return;
+  if (data.kind === "notification") {
     await displayEncryptedNotification(data);
     return;
   }
@@ -137,8 +153,7 @@ export async function registerPushWake(): Promise<() => void> {
   });
   const receiveSubscription = Notifications.addNotificationReceivedListener(
     (notification) => {
-      const data = asPushData(notification.request.content.data);
-      if (data?.kind !== "notification") void synchronizeFromPush();
+      void handlePush(notification.request.content.data).catch(() => undefined);
     },
   );
   return () => {
