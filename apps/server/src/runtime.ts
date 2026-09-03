@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import type { AppConfig } from "./config.js";
 import { createApp } from "./app.js";
+import { withBrowserControllerCors } from "./browser-controller-cors.js";
 import { openDatabase, type PodwaffleDatabase } from "./db/connection.js";
 import { synchronizeConfiguredProfiles } from "./db/repositories/profiles.js";
 import { SyncService } from "./sync/service.js";
@@ -62,7 +63,11 @@ export async function createRuntime(
       ? {}
       : { webDistPath: options.webDistPath }),
   });
-  const server = createServer(app);
+  const server = createServer(
+    withBrowserControllerCors((request, response) => {
+      app(request, response);
+    }),
+  );
   webSockets.attach(server);
   feedScheduler.start();
   return {
