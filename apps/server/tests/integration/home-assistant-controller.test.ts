@@ -45,7 +45,25 @@ describe("Home Assistant controller credentials", () => {
 
     const request = supertest(created.baseUrl);
     const authorization = { authorization: `Bearer ${controller.token}` };
-    await request.get("/api/v1/snapshot").set(authorization).expect(200);
+    const origin = "https://hello.pecker.party";
+    const preflight = await request
+      .options("/api/v1/playback/commands")
+      .set("Origin", origin)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "authorization,content-type")
+      .expect(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe(origin);
+    expect(preflight.headers["access-control-allow-headers"]).toContain(
+      "Authorization",
+    );
+    expect(preflight.headers["access-control-allow-methods"]).toContain("POST");
+
+    const snapshot = await request
+      .get("/api/v1/snapshot")
+      .set(authorization)
+      .set("Origin", origin)
+      .expect(200);
+    expect(snapshot.headers["access-control-allow-origin"]).toBe(origin);
     await request
       .get("/api/v1/stats?period=today")
       .set(authorization)
@@ -72,9 +90,11 @@ describe("Home Assistant controller credentials", () => {
     const relayed = await request
       .post("/api/v1/playback/commands")
       .set(authorization)
+      .set("Origin", origin)
       .send({ commandId, action: "play" })
       .expect(202);
     expect((relayed.body as { status: string }).status).toBe("pending");
+    expect(relayed.headers["access-control-allow-origin"]).toBe(origin);
     await request
       .get(`/api/v1/playback/commands/${commandId}`)
       .set(authorization)
