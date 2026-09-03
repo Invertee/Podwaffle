@@ -254,6 +254,8 @@ describe("cross-client Google Cast control", () => {
 
     const stop = {
       commandId: randomUUID(),
+      episodeId,
+      castSessionId: "lost-cast",
       positionMs: 20_000,
       durationMs: 600_000,
       state: "paused",
@@ -280,6 +282,84 @@ describe("cross-client Google Cast control", () => {
       positionMs: 20_000,
     });
   });
+
+  it("ignores late Cast reports for a completed item and rejects stale stop identities", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    await join(owner, "Sam", "Android Cast owner");
+    const firstEpisodeId = insertEpisode(created.runtime, "late-first");
+    const nextEpisodeId = insertEpisode(created.runtime, "late-next");
+
+    for (const episodeId of [firstEpisodeId, nextEpisodeId]) {
+      await owner
+        .post("/api/v1/queue/items")
+        .send({ commandId: randomUUID(), episodeId, position: "bottom" })
+        .expect(201);
+    }
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          episodeId: firstEpisodeId,
+          positionMs: 55_000,
+          durationMs: 60_000,
+          state: "playing",
+          playbackRate: 1,
+          castSessionId: "advancing-cast",
+        },
+      })
+      .expect(200);
+    await owner
+      .post(`/api/v1/episodes/${firstEpisodeId}/progress`)
+      .send({
+        commandId: randomUUID(),
+        positionMs: 60_000,
+        durationMs: 60_000,
+        completed: true,
+      })
+      .expect(200);
+
+    const lateReport = await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          episodeId: firstEpisodeId,
+          positionMs: 0,
+          durationMs: 60_000,
+          state: "paused",
+          playbackRate: 1,
+          castSessionId: "advancing-cast",
+        },
+      })
+      .expect(200);
+    expect(lateReport.body.playback).toMatchObject({
+      episode: { id: nextEpisodeId },
+      positionMs: 0,
+      mode: "cast",
+    });
+
+    const staleStop = await owner
+      .delete("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        episodeId: firstEpisodeId,
+        castSessionId: "advancing-cast",
+        positionMs: 60_000,
+        durationMs: 60_000,
+        state: "stopped",
+        playbackRate: 1,
+      })
+      .expect(409);
+    expect(staleStop.body.error.code).toBe("CAST_STATE_STALE");
+    expect((await owner.get("/api/v1/playback")).body.playback).toMatchObject({
+      episode: { id: nextEpisodeId },
+      positionMs: 0,
+      mode: "cast",
+    });
+  });
 });
 
 function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
@@ -290,7 +370,7 @@ function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
   );
 }
 
-function insertEpisode(runtime: Runtime): string {
+function insertEpisode(runtime: Runtime, label = "cast"): string {
   const now = new Date().toISOString();
   const podcastId = randomUUID();
   const episodeId = randomUUID();
@@ -300,7 +380,7 @@ function insertEpisode(runtime: Runtime): string {
         id, feed_url, title, failure_count, created_at, updated_at
       ) VALUES (?, ?, 'Cast show', 0, ?, ?)`,
     )
-    .run(podcastId, "https://example.test/cast-feed", now, now);
+    .run(podcastId, `https://example.test/${label}-feed`, now, now);
   runtime.database.db
     .prepare(
       `INSERT INTO episodes(
@@ -312,7 +392,7 @@ function insertEpisode(runtime: Runtime): string {
       episodeId,
       podcastId,
       episodeId,
-      "https://example.test/cast.mp3",
+      `https://example.test/${label}.mp3`,
       now,
       now,
       now,

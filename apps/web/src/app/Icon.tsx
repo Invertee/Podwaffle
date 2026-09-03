@@ -29,10 +29,11 @@ export function Icon({
 }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const paths: Record<IconName, ReactNode> = {
     cast: (
-      <>
-        <path d="M4 18.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" />
-        <path d="M2.5 14.5a7 7 0 0 1 7 7M2.5 9.5a12 12 0 0 1 12 12M9 4h8a3 3 0 0 1 3 3v10" />
-      </>
+      <path
+        d="M1 18v3h3a3 3 0 0 0-3-3Zm0-4v2a5 5 0 0 1 5 5h2a7 7 0 0 0-7-7Zm2-11a2 2 0 0 0-2 2v7h2V5h18v14h-9v2h9a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H3Zm-2 7v2a9 9 0 0 1 9 9h2c0-6.08-4.92-11-11-11Z"
+        fill="currentColor"
+        stroke="none"
+      />
     ),
     check: (
       <>

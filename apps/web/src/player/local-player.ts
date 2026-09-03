@@ -376,6 +376,17 @@ export class LocalPlayer {
         playbackRate: this.audio.playbackRate,
         takeover: true,
       });
+      const resumePositionMs =
+        acquired.episode?.id === episode.id
+          ? acquired.positionMs
+          : usePlayer.getState().positionMs;
+      if (!this.audio.src) {
+        await this.restoreLocalMedia(
+          episode,
+          resumePositionMs,
+          this.audio.playbackRate,
+        );
+      }
       if (
         acquired.episode?.id === episode.id &&
         Math.abs(acquired.positionMs - this.audio.currentTime * 1000) > 1_000
@@ -584,7 +595,7 @@ export class LocalPlayer {
       if (next) {
         await this.load(next);
       } else if (source === "cast") {
-        await this.finishCastPlayback(durationMs);
+        await this.finishCastPlayback();
       } else {
         this.resetToIdle();
       }
@@ -602,18 +613,11 @@ export class LocalPlayer {
     }
   }
 
-  private async finishCastPlayback(durationMs: number | null): Promise<void> {
-    const state = usePlayer.getState();
+  private async finishCastPlayback(): Promise<void> {
     this.endingCast = true;
     usePlayer.setState({ castStatus: "stopping" });
     try {
       await this.cast.endSession();
-      await api.stopCast({
-        positionMs: durationMs ?? this.castState.positionMs,
-        durationMs,
-        state: "stopped",
-        playbackRate: state.rate,
-      });
       usePlayer.setState({
         mode: "local",
         castDeviceName: null,
@@ -685,7 +689,11 @@ export class LocalPlayer {
     if (playback.ownedByCurrentDevice && local.remote) {
       usePlayer.setState({ remote: false });
     }
-    if (!playback.ownedByCurrentDevice && playback.mode !== "cast") {
+    if (
+      playback.activeDeviceId &&
+      !playback.ownedByCurrentDevice &&
+      playback.mode !== "cast"
+    ) {
       usePlayer.setState({
         episode: playback.episode,
         playing: playback.state === "playing",
@@ -701,6 +709,24 @@ export class LocalPlayer {
         error: null,
       });
       this.audio.pause();
+      return;
+    }
+    if (!playback.activeDeviceId && playback.mode === "local") {
+      this.audio.pause();
+      usePlayer.setState({
+        episode: playback.episode,
+        playing: false,
+        buffering: false,
+        positionMs: playback.positionMs,
+        durationMs: playback.durationMs ?? playback.episode.durationMs ?? 0,
+        rate: playback.playbackRate,
+        mode: "local",
+        remote: false,
+        castDeviceName: null,
+        castSessionId: null,
+        castStatus: "idle",
+        error: null,
+      });
       return;
     }
     if (playback.mode === "cast" && !playback.ownedByCurrentDevice) {
@@ -793,8 +819,6 @@ export class LocalPlayer {
 
   public async startCasting(): Promise<void> {
     const state = usePlayer.getState();
-    if (state.remote)
-      throw new Error("Move playback to this browser before starting Cast.");
     const episode = state.episode;
     if (!episode) return;
     const wasPlaying = state.playing;
@@ -836,7 +860,8 @@ export class LocalPlayer {
       this.transitioningToCast = false;
     } catch (error) {
       this.transitioningToCast = false;
-      await this.restoreLocalMedia(episode, positionMs, state.rate);
+      if (!state.remote)
+        await this.restoreLocalMedia(episode, positionMs, state.rate);
       usePlayer.setState({
         mode: "local",
         castStatus: "error",
@@ -845,8 +870,10 @@ export class LocalPlayer {
             ? error.message
             : "Google Cast could not be started.",
       });
-      if (wasPlaying) await this.play();
-      else this.publish();
+      if (!state.remote) {
+        if (wasPlaying) await this.play();
+        else this.publish();
+      }
     }
   }
 
@@ -999,7 +1026,11 @@ export class LocalPlayer {
   ): Promise<void> {
     usePlayer.setState({ castStatus: "stopping", error: null });
     try {
+      if (!state.castSessionId)
+        throw new Error("The Cast session identity is missing.");
       await api.stopCast({
+        episodeId: episode.id,
+        castSessionId: state.castSessionId,
         positionMs: state.positionMs,
         durationMs: state.durationMs || episode.durationMs,
         state: "paused",
@@ -1034,6 +1065,9 @@ export class LocalPlayer {
     const state = usePlayer.getState();
     const episode = state.episode;
     if (!episode || state.mode !== "cast") return;
+    const castSessionId = remote.sessionId ?? state.castSessionId;
+    if (!castSessionId)
+      throw new Error("The Cast session identity is missing.");
     await this.restoreLocalMedia(episode, remote.positionMs, state.rate);
     usePlayer.setState({
       mode: "local",
@@ -1044,6 +1078,8 @@ export class LocalPlayer {
       castStatus: "stopping",
     });
     await api.stopCast({
+      episodeId: episode.id,
+      castSessionId,
       positionMs: remote.positionMs,
       durationMs: remote.durationMs || episode.durationMs,
       state: resume ? "playing" : "paused",
@@ -1214,7 +1250,8 @@ export class LocalPlayer {
   }
 
   private publish(): void {
-    if (usePlayer.getState().mode === "cast") return;
+    const current = usePlayer.getState();
+    if (current.mode === "cast" || current.remote) return;
     const state: Partial<PlayerView> = {
       playing: !this.audio.paused,
       positionMs: Math.round(this.audio.currentTime * 1000) || 0,

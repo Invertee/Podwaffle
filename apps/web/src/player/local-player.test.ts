@@ -211,6 +211,49 @@ describe("local player restoration", () => {
     expect(audio.paused).toBe(true);
   });
 
+  it("keeps an idled renderer dormant until play is pressed", async () => {
+    const isolated = new playerModule.LocalPlayer(new FakeCastAdapter());
+    const dormant: PlaybackState = {
+      episode: first,
+      positionMs: 25_000,
+      durationMs: 60_000,
+      state: "paused",
+      mode: "local",
+      playbackRate: 1.25,
+      activeDeviceId: null,
+      leaseExpiresAt: null,
+      castOwnerDeviceId: null,
+      castSessionId: null,
+      ownedByCurrentDevice: false,
+    };
+    api.acquirePlayback.mockResolvedValue({
+      ...dormant,
+      activeDeviceId: "this-device",
+      leaseExpiresAt: "2026-07-29T16:01:00.000Z",
+      ownedByCurrentDevice: true,
+    });
+
+    isolated.applySharedPlayback(dormant);
+
+    expect(playerModule.usePlayer.getState()).toMatchObject({
+      episode: first,
+      playing: false,
+      remote: false,
+      positionMs: 25_000,
+    });
+    expect(audio.src).toBe("");
+
+    await isolated.play();
+
+    expect(api.playbackCommand).not.toHaveBeenCalled();
+    expect(api.acquirePlayback).toHaveBeenCalledWith(
+      expect.objectContaining({ episodeId: first.id, takeover: true }),
+    );
+    expect(audio.src).toBe(first.enclosureUrl);
+    expect(audio.currentTime).toBe(25);
+    expect(audio.paused).toBe(false);
+  });
+
   it("returns to idle when shared playback is explicitly cleared", async () => {
     const isolated = new playerModule.LocalPlayer(new FakeCastAdapter());
     await isolated.load(first, false);
@@ -239,7 +282,7 @@ describe("local player restoration", () => {
   });
 });
 
-describe("local and Cast handoff", () => {
+describe("local and Cast transitions", () => {
   it("publishes Cast only after receiver load and restores local playback", async () => {
     const cast = new FakeCastAdapter();
     const isolated = new playerModule.LocalPlayer(cast);
@@ -493,6 +536,45 @@ describe("local and Cast handoff", () => {
       expect.objectContaining({ action: "play" }),
     );
     expect(cast.state().connected).toBe(false);
+  });
+
+  it("routes an active remote local session directly to Cast", async () => {
+    const cast = new FakeCastAdapter();
+    const isolated = new playerModule.LocalPlayer(cast);
+    const shared: PlaybackState = {
+      episode: first,
+      positionMs: 25_000,
+      durationMs: 60_000,
+      state: "playing",
+      mode: "local",
+      playbackRate: 1,
+      activeDeviceId: "phone-device",
+      leaseExpiresAt: "2026-07-29T16:00:00.000Z",
+      castOwnerDeviceId: null,
+      castSessionId: null,
+      ownedByCurrentDevice: false,
+    };
+
+    isolated.applySharedPlayback(shared);
+    await isolated.startCasting();
+
+    expect(api.playbackCommand).not.toHaveBeenCalled();
+    expect(api.startCast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        episodeId: first.id,
+        positionMs: 25_000,
+        castSessionId: "mock-session",
+      }),
+      true,
+    );
+    expect(playerModule.usePlayer.getState()).toMatchObject({
+      episode: first,
+      mode: "cast",
+      remote: false,
+      playing: true,
+      positionMs: 25_000,
+    });
+    expect(audio.paused).toBe(true);
   });
 });
 

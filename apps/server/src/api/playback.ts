@@ -12,10 +12,6 @@ import {
 } from "@podwaffle/contracts";
 import type { PodwaffleDatabase } from "../db/connection.js";
 import {
-  deviceIsPlaybackTarget,
-  type DeviceRow,
-} from "../db/repositories/devices.js";
-import {
   acquireLease,
   createCastCommand,
   getCastCommand,
@@ -179,9 +175,9 @@ export function createPlaybackRouter(
             );
             const guardedInput = {
               ...input,
-              // A device handoff resumes the last state confirmed by the old
-              // owner. This prevents a stale episode object on the new client
-              // from rewinding an otherwise successful switch.
+              // An ownership change resumes the last state confirmed by the old
+              // renderer. This prevents a stale episode object on the new client
+              // from rewinding playback.
               positionMs: sameEpisodeOnAnotherDevice
                 ? prior.positionMs
                 : guardedPlaybackPosition(
@@ -322,10 +318,15 @@ export function createPlaybackRouter(
           input.commandId,
           "playback.cast.updated",
           (db) => {
+            const currentPlayback = playbackState(db, profile.id, device.id);
             const priorEpisode = getEpisode(
               db,
               profile.id,
               input.confirmed.episodeId,
+            );
+            const staleCompletedReport = Boolean(
+              priorEpisode?.played &&
+              currentPlayback.episode?.id !== input.confirmed.episodeId,
             );
             const confirmed = {
               ...input.confirmed,
@@ -336,19 +337,28 @@ export function createPlaybackRouter(
                 input.confirmed.positionMs,
               ),
             };
-            try {
-              startCast(db, profile.id, device.id, confirmed, input.takeover);
-            } catch (error) {
-              leaseError(error);
+            if (!staleCompletedReport) {
+              try {
+                startCast(db, profile.id, device.id, confirmed, input.takeover);
+              } catch (error) {
+                leaseError(error);
+              }
             }
-            const episode = setEpisodeProgress(
-              db,
-              profile.id,
-              confirmed.episodeId,
-              confirmed.positionMs,
-              confirmed.durationMs,
-            );
-            if (priorEpisode && !priorEpisode.played && episode.played) {
+            const episode = staleCompletedReport
+              ? priorEpisode!
+              : setEpisodeProgress(
+                  db,
+                  profile.id,
+                  confirmed.episodeId,
+                  confirmed.positionMs,
+                  confirmed.durationMs,
+                );
+            if (
+              !staleCompletedReport &&
+              priorEpisode &&
+              !priorEpisode.played &&
+              episode.played
+            ) {
               recordEpisodeCompletion(db, profile.id);
             }
             const playback = playbackState(db, profile.id, device.id);
@@ -381,11 +391,8 @@ export function createPlaybackRouter(
           input.commandId,
           "playback.cast.updated",
           (db) => {
-            const current = playbackState(db, profile.id, device.id);
-            const episodeId = current.episode?.id;
-            const priorEpisode = episodeId
-              ? getEpisode(db, profile.id, episodeId)
-              : null;
+            const episodeId = input.episodeId;
+            const priorEpisode = getEpisode(db, profile.id, episodeId);
             const guardedInput = {
               ...input,
               positionMs: guardedPlaybackPosition(
@@ -407,23 +414,25 @@ export function createPlaybackRouter(
                   "CAST_OWNER_REQUIRED",
                   "This device does not own the Cast session",
                 );
+              if (
+                error instanceof Error &&
+                error.message === "CAST_STATE_STALE"
+              )
+                throw new ApiError(
+                  409,
+                  "CAST_STATE_STALE",
+                  "The Cast session or episode has already changed",
+                );
               throw error;
             }
-            const episode = episodeId
-              ? setEpisodeProgress(
-                  db,
-                  profile.id,
-                  episodeId,
-                  guardedInput.positionMs,
-                  guardedInput.durationMs,
-                )
-              : null;
-            if (
-              priorEpisode &&
-              episode &&
-              !priorEpisode.played &&
-              episode.played
-            ) {
+            const episode = setEpisodeProgress(
+              db,
+              profile.id,
+              episodeId,
+              guardedInput.positionMs,
+              guardedInput.durationMs,
+            );
+            if (priorEpisode && !priorEpisode.played && episode.played) {
               recordEpisodeCompletion(db, profile.id);
             }
             const playback = playbackState(db, profile.id, device.id);
@@ -453,50 +462,9 @@ export function createPlaybackRouter(
         const { profile, device } = request.auth!;
         let stored: ReturnType<typeof createCastCommand>;
         try {
-          stored = database.transaction(() => {
-            const targetDeviceId = command.targetDeviceId;
-            if (targetDeviceId) {
-              const target = database.db
-                .prepare(
-                  "SELECT * FROM devices WHERE id = ? AND profile_id = ? AND revoked_at IS NULL",
-                )
-                .get(targetDeviceId, profile.id) as DeviceRow | undefined;
-              if (!target) {
-                throw new ApiError(
-                  404,
-                  "DEVICE_NOT_FOUND",
-                  "The playback device was not found",
-                );
-              }
-              if (!deviceIsPlaybackTarget(target)) {
-                throw new ApiError(
-                  409,
-                  "DEVICE_NOT_PLAYBACK_TARGET",
-                  "The selected device is a controller and cannot render audio",
-                );
-              }
-            }
-            const created = createCastCommand(
-              database.db,
-              profile.id,
-              device.id,
-              command,
-            );
-            if (
-              targetDeviceId &&
-              created.status === "pending" &&
-              !created.replayed &&
-              created.ownerDeviceId !== targetDeviceId
-            ) {
-              database.db
-                .prepare(
-                  "UPDATE playback_commands SET owner_device_id = ? WHERE command_id = ? AND profile_id = ?",
-                )
-                .run(targetDeviceId, command.commandId, profile.id);
-              return { ...created, ownerDeviceId: targetDeviceId };
-            }
-            return created;
-          });
+          stored = database.transaction(() =>
+            createCastCommand(database.db, profile.id, device.id, command),
+          );
         } catch (error) {
           if (error instanceof Error && error.message === "PLAYBACK_NOT_ACTIVE")
             throw new ApiError(
@@ -762,19 +730,25 @@ export function applyCastCommandResult(
     const priorEpisode = confirmed
       ? getEpisode(db, profileId, confirmed.episodeId)
       : null;
+    const staleCompletedConfirmation = Boolean(
+      confirmed &&
+      priorEpisode?.played &&
+      current.episode?.id !== confirmed.episodeId,
+    );
     const result = resolveCastCommand(db, profileId, ownerDeviceId, {
       ...input,
       ...(confirmed ? { confirmed } : {}),
     });
-    const episode = confirmed
-      ? setEpisodeProgress(
-          db,
-          profileId,
-          confirmed.episodeId,
-          confirmed.positionMs,
-          confirmed.durationMs,
-        )
-      : null;
+    const episode =
+      confirmed && !staleCompletedConfirmation
+        ? setEpisodeProgress(
+            db,
+            profileId,
+            confirmed.episodeId,
+            confirmed.positionMs,
+            confirmed.durationMs,
+          )
+        : priorEpisode;
     if (priorEpisode && episode && !priorEpisode.played && episode.played) {
       recordEpisodeCompletion(db, profileId);
     }

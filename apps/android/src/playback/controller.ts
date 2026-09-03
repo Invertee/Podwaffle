@@ -37,6 +37,7 @@ import {
   pendingProgressIsStale,
   resumePositionMs,
 } from "./progressReconciliation";
+import { isConfirmedPlaybackEnd } from "./completion";
 
 let notificationPermissionRequested = false;
 
@@ -565,23 +566,31 @@ class AndroidPlaybackController {
   }
 
   public async startCasting(): Promise<void> {
-    if (this.remotePlayback()) {
-      throw new Error("Move playback to this device before starting Cast.");
-    }
+    const remote = this.remotePlayback();
     const state = useNativeMediaStore.getState().state;
-    if (!state?.episodeId)
-      throw new Error("Load an episode before starting Cast.");
-    const episode = await this.resolveEpisode(state.episodeId);
+    const episodeId = remote?.episode?.id ?? state?.episodeId;
+    if (!episodeId) throw new Error("Load an episode before starting Cast.");
+    const episode = await this.resolveEpisode(episodeId);
     if (!episode) throw new Error("The active episode could not be loaded.");
+    const positionMs =
+      remote?.positionMs ?? state?.positionMs ?? episode.positionMs;
+    const playWhenReady = remote
+      ? remote.state === "playing"
+      : (state?.playWhenReady ?? false);
     usePlayerUiStore.getState().setCastStatus("connecting");
     this.castTakeoverRequested = true;
     this.activeEpisode = episode;
-    await PodwaffleMediaModule.pause();
+    if (!remote) await PodwaffleMediaModule.pause();
     try {
       await PodwaffleMediaModule.startCast(
-        episodeMedia(episode, state.queueItemId),
-        state.positionMs,
-        state.playWhenReady,
+        episodeMedia(
+          episode,
+          state?.episodeId === episodeId
+            ? state.queueItemId
+            : this.queueItemId(episodeId),
+        ),
+        positionMs,
+        playWhenReady,
       );
     } catch (error) {
       this.castTakeoverRequested = false;
@@ -607,6 +616,8 @@ class AndroidPlaybackController {
         session.positionMs,
         session.durationMs,
         "paused",
+        session.episodeId ?? this.activeEpisode?.id ?? null,
+        session.sessionId,
       );
       this.castBackendActive = false;
       if (resumeLocal) {
@@ -631,11 +642,16 @@ class AndroidPlaybackController {
         if (episode) this.activeEpisode = episode;
       });
     }
-    if (state.playbackStatus === "ended" && state.episodeId) {
+    const durationMs = durationFor(state, this.activeEpisode);
+    if (
+      state.playbackStatus === "ended" &&
+      state.episodeId &&
+      isConfirmedPlaybackEnd(state.positionMs, durationMs)
+    ) {
       void this.finishEpisode({
         episodeId: state.episodeId,
         positionMs: state.positionMs,
-        durationMs: durationFor(state, this.activeEpisode),
+        durationMs,
       });
       return;
     }
@@ -789,20 +805,6 @@ class AndroidPlaybackController {
     } finally {
       this.handlingRemoteCommand = false;
     }
-  }
-
-  public async takeOverPlayback(): Promise<void> {
-    const playback = useAuthStore.getState().snapshot?.playback;
-    if (!playback?.episode)
-      throw new Error("There is no shared playback to move.");
-    const episode: Episode = {
-      ...playback.episode,
-      positionMs: playback.positionMs,
-      durationMs: playback.durationMs ?? playback.episode.durationMs,
-    };
-    await this.playEpisode(episode, true);
-    if (playback.state !== "playing") await this.pause();
-    await useAuthStore.getState().refresh();
   }
 
   public applySharedPlayback(playback: PlaybackState | null): void {
@@ -1308,10 +1310,20 @@ class AndroidPlaybackController {
     positionMs: number,
     durationMs: number | null,
     state: "playing" | "paused" | "stopped",
+    episodeId: string | null = useNativeMediaStore.getState().castState.session
+      ?.episodeId ??
+      this.activeEpisode?.id ??
+      null,
+    castSessionId: string | null = useNativeMediaStore.getState().castState
+      .session?.sessionId ?? null,
   ): Promise<void> {
     if (!this.castBackendActive) return;
+    if (!episodeId || !castSessionId)
+      throw new Error("The Cast session identity is missing.");
     const { serverUrl, token } = this.connection();
     await api.stopCast(serverUrl, token, {
+      episodeId,
+      castSessionId,
       positionMs,
       durationMs,
       state,
@@ -1330,6 +1342,8 @@ class AndroidPlaybackController {
         session.positionMs,
         session.durationMs,
         resume ? "playing" : "paused",
+        session.episodeId ?? this.activeEpisode?.id ?? null,
+        session.sessionId,
       );
     } catch {
       // A server-side idle timeout may already have cleared the Cast owner.
@@ -1503,43 +1517,50 @@ class AndroidPlaybackController {
       .getState()
       .applyQueueMutation(completed.queue, completed.revision)
       .catch(() => undefined);
+    const nextEpisode = completed.queue[0]?.episode;
+    const native = useNativeMediaStore.getState().state;
+    if (nextEpisode) {
+      // Media3/Cast may have auto-advanced using an older native playlist while
+      // the completion request was in flight. The queue returned by the server
+      // is authoritative, including a newly inserted "play next" item.
+      if (native?.episodeId !== nextEpisode.id) {
+        await this.playEpisode(nextEpisode);
+      } else {
+        this.activeEpisode = nextEpisode;
+        await this.syncNativeQueue(nextEpisode.id).catch(() => undefined);
+        if (useNativeMediaStore.getState().castState.connected) {
+          await this.reportCastState(true).catch(() => undefined);
+        } else {
+          void this.reportCurrentState(true).catch(() => undefined);
+        }
+      }
+      void useAuthStore
+        .getState()
+        .refresh()
+        .catch(() => undefined);
+      return;
+    }
 
+    this.activeEpisode = null;
+    this.leaseExpiresAt = 0;
     if (useNativeMediaStore.getState().castState.connected) {
-      await this.stopBackendCast(
-        completionState.positionMs,
-        durationMs,
-        "stopped",
-      ).catch(() => undefined);
+      // Completion already cleared shared Cast ownership. Only end the native
+      // receiver session; do not submit the old episode's final position again.
       this.castBackendActive = false;
+      this.endingCast = true;
+      try {
+        await PodwaffleMediaModule.stopCast({ stopReceiver: true });
+      } finally {
+        this.endingCast = false;
+      }
+      usePlayerUiStore.getState().setCastStatus("idle");
     } else {
-      this.leaseExpiresAt = 0;
+      await PodwaffleMediaModule.stop();
     }
     void useAuthStore
       .getState()
       .refresh()
       .catch(() => undefined);
-
-    const native = useNativeMediaStore.getState().state;
-    if (native?.episodeId && native.episodeId !== completion.episodeId) {
-      const nativeEpisode =
-        completed.queue.find((item) => item.episode.id === native.episodeId)
-          ?.episode ?? (await this.resolveEpisode(native.episodeId));
-      if (nativeEpisode) this.activeEpisode = nativeEpisode;
-      void this.reportCurrentState(true).catch(() => undefined);
-      return;
-    }
-
-    const nextEpisode = completed.queue[0]?.episode;
-    if (nextEpisode) {
-      await this.playEpisode(nextEpisode);
-    } else {
-      this.activeEpisode = null;
-      if (useNativeMediaStore.getState().castState.connected) {
-        await PodwaffleMediaModule.stopCast({ stopReceiver: true });
-      } else {
-        await PodwaffleMediaModule.stop();
-      }
-    }
   }
 
   public async flushPendingPlayback(): Promise<void> {

@@ -1,6 +1,9 @@
 package com.podwaffle.media
 
+import androidx.media3.common.Player
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QueueSelectionTest {
@@ -28,5 +31,40 @@ class QueueSelectionTest {
                 requestedIndex = 0,
             ),
         )
+    }
+
+    @Test
+    fun suppressesOnlyUnexpectedAutomaticTransitionsDuringCastStartup() {
+        assertTrue(
+            shouldSuppressCastStartupTransition(
+                Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                guardActive = true,
+                expectedMediaId = "current",
+                transitionedMediaId = "next",
+            ),
+        )
+        assertFalse(
+            shouldSuppressCastStartupTransition(
+                Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+                guardActive = true,
+                expectedMediaId = "current",
+                transitionedMediaId = "current",
+            ),
+        )
+        assertFalse(
+            shouldSuppressCastStartupTransition(
+                Player.MEDIA_ITEM_TRANSITION_REASON_SEEK,
+                guardActive = true,
+                expectedMediaId = "current",
+                transitionedMediaId = "next",
+            ),
+        )
+    }
+
+    @Test
+    fun guardsOnlyUnfinishedCastStartupPositions() {
+        assertTrue(shouldGuardCastStartupPosition(positionMs = 120_000L, durationMs = 3_600_000L))
+        assertFalse(shouldGuardCastStartupPosition(positionMs = 3_596_000L, durationMs = 3_600_000L))
+        assertTrue(shouldGuardCastStartupPosition(positionMs = 120_000L, durationMs = null))
     }
 }

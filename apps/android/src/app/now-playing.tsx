@@ -61,7 +61,8 @@ function SeekBar({
   const [width, setWidth] = useState(1);
   const duration = durationMs ?? 0;
   const progress = duration > 0 ? Math.min(1, positionMs / duration) : 0;
-  const buffered = duration > 0 ? Math.min(1, bufferedPositionMs / duration) : 0;
+  const buffered =
+    duration > 0 ? Math.min(1, bufferedPositionMs / duration) : 0;
 
   function seekAt(locationX: number) {
     if (duration <= 0) return;
@@ -71,7 +72,9 @@ function SeekBar({
   return (
     <Pressable
       style={styles.seekTouch}
-      onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
+      onLayout={(event: LayoutChangeEvent) =>
+        setWidth(event.nativeEvent.layout.width)
+      }
       onPress={(event) => seekAt(event.nativeEvent.locationX)}
       accessibilityRole="adjustable"
       accessibilityLabel="Playback position"
@@ -108,7 +111,11 @@ export default function NowPlayingScreen() {
   const episode = useQuery({
     queryKey: ["android-now-playing-episode", media?.episodeId],
     queryFn: () =>
-      api.episode(credentials!.serverUrl, credentials!.token, media!.episodeId!),
+      api.episode(
+        credentials!.serverUrl,
+        credentials!.token,
+        media!.episodeId!,
+      ),
     enabled: Boolean(credentials && media?.episodeId),
   });
 
@@ -169,7 +176,9 @@ export default function NowPlayingScreen() {
     } catch (error) {
       Alert.alert(
         "Playback failed",
-        error instanceof Error ? error.message : "Playback could not be changed.",
+        error instanceof Error
+          ? error.message
+          : "Playback could not be changed.",
       );
     }
   }
@@ -189,7 +198,8 @@ export default function NowPlayingScreen() {
   const cachedEpisode =
     playbackEpisode?.id === media?.episodeId
       ? playbackEpisode
-      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
+      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)
+          ?.episode;
   const infoEpisode = episode.data ?? cachedEpisode ?? null;
   const remaining = Math.max(
     0,
@@ -197,7 +207,10 @@ export default function NowPlayingScreen() {
   );
   const buffering = media?.playbackStatus === "buffering";
   const artworkUrl =
-    infoEpisode?.podcastArtworkUrl ?? media?.artworkUrl ?? infoEpisode?.artworkUrl ?? null;
+    infoEpisode?.podcastArtworkUrl ??
+    media?.artworkUrl ??
+    infoEpisode?.artworkUrl ??
+    null;
   const castBusy = castStatus === "connecting" || castStatus === "stopping";
 
   return (
@@ -283,7 +296,9 @@ export default function NowPlayingScreen() {
               onSeek={(position) => void playbackController.seekTo(position)}
             />
             <View style={styles.timestamps}>
-              <Text style={styles.timestamp}>{formatMs(media?.positionMs ?? 0)}</Text>
+              <Text style={styles.timestamp}>
+                {formatMs(media?.positionMs ?? 0)}
+              </Text>
               <Text style={styles.timestamp}>-{formatMs(remaining)}</Text>
             </View>
           </View>
@@ -295,7 +310,10 @@ export default function NowPlayingScreen() {
               onPress={() => playbackController.skipBackward()}
             />
             <Pressable
-              style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.playButton,
+                pressed && styles.pressed,
+              ]}
               onPress={() => void togglePlay()}
               accessibilityRole="button"
               accessibilityLabel={isPlaying ? "Pause" : "Play"}
@@ -343,47 +361,36 @@ export default function NowPlayingScreen() {
               <Text style={styles.toolLabel}>Queue</Text>
             </Pressable>
 
-            {presentation.remote ? (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.tool,
-                  styles.toolActive,
-                  pressed && styles.pressed,
+            <Pressable
+              style={({ pressed }) => [
+                styles.tool,
+                cast.connected && styles.toolActive,
+                pressed && !castBusy && styles.pressed,
+                castBusy && styles.disabled,
+              ]}
+              disabled={castBusy}
+              onPress={() => void changeCast()}
+              accessibilityRole="button"
+              accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
+            >
+              {castBusy ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <Icon
+                  name="cast"
+                  size={21}
+                  color={cast.connected ? colors.accent : colors.textSecondary}
+                />
+              )}
+              <Text
+                style={[
+                  styles.toolLabel,
+                  cast.connected && styles.toolActiveText,
                 ]}
-                onPress={() => void playbackController.takeOverPlayback()}
-                accessibilityRole="button"
-                accessibilityLabel="Move playback to this device"
               >
-                <Icon name="device" size={21} color={colors.accent} />
-                <Text style={[styles.toolLabel, styles.toolActiveText]}>Play here</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.tool,
-                  cast.connected && styles.toolActive,
-                  pressed && !castBusy && styles.pressed,
-                  castBusy && styles.disabled,
-                ]}
-                disabled={castBusy}
-                onPress={() => void changeCast()}
-                accessibilityRole="button"
-                accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
-              >
-                {castBusy ? (
-                  <ActivityIndicator size="small" color={colors.accent} />
-                ) : (
-                  <Icon
-                    name="cast"
-                    size={21}
-                    color={cast.connected ? colors.accent : colors.textSecondary}
-                  />
-                )}
-                <Text style={[styles.toolLabel, cast.connected && styles.toolActiveText]}>
-                  {cast.connected ? "Stop Cast" : "Cast"}
-                </Text>
-              </Pressable>
-            )}
+                {cast.connected ? "Stop Cast" : "Cast"}
+              </Text>
+            </Pressable>
           </View>
 
           {media?.lastError ? (

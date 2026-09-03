@@ -261,6 +261,8 @@ export const api = {
       }),
     }),
   stopCast: (body: {
+    episodeId: string;
+    castSessionId: string;
     positionMs: number;
     durationMs: number | null;
     state: "playing" | "paused" | "stopped";

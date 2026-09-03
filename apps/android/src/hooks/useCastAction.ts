@@ -11,33 +11,14 @@ export function useCastAction() {
   const nativeEpisodeId = useNativeMediaStore(
     (state) => state.state?.episodeId ?? null,
   );
-  const currentDeviceId = useAuthStore(
-    (state) => state.session?.device.id ?? null,
-  );
   const sharedEpisodeId = useAuthStore(
     (state) => state.snapshot?.playback?.episode?.id ?? null,
   );
-  const activeDeviceId = useAuthStore(
-    (state) => state.snapshot?.playback?.activeDeviceId ?? null,
-  );
-  const sharedState = useAuthStore(
-    (state) => state.snapshot?.playback?.state ?? "stopped",
-  );
   const castStatus = usePlayerUiStore((state) => state.castStatus);
   const setCastStatus = usePlayerUiStore((state) => state.setCastStatus);
-  const remote = Boolean(
-    sharedEpisodeId &&
-      activeDeviceId &&
-      currentDeviceId &&
-      activeDeviceId !== currentDeviceId &&
-      sharedState !== "stopped",
-  );
-  const hasMedia = remote ? Boolean(sharedEpisodeId) : Boolean(nativeEpisodeId);
+  const hasMedia = Boolean(sharedEpisodeId || nativeEpisodeId);
 
   const toggleCast = useCallback(async () => {
-    if (remote) {
-      throw new Error("Move playback to this device before starting Cast.");
-    }
     if (cast.connected) {
       await playbackController.stopCasting(true);
       return;
@@ -53,11 +34,13 @@ export function useCastAction() {
       playbackController.handleCastState(state);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "The Cast picker could not be opened.";
+        error instanceof Error
+          ? error.message
+          : "The Cast picker could not be opened.";
       setCastStatus("error", message);
       throw error;
     }
-  }, [cast.connected, hasMedia, remote, setCastStatus]);
+  }, [cast.connected, hasMedia, setCastStatus]);
 
   return {
     cast,

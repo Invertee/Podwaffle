@@ -46,7 +46,10 @@ describe("Home Assistant controller credentials", () => {
     const request = supertest(created.baseUrl);
     const authorization = { authorization: `Bearer ${controller.token}` };
     await request.get("/api/v1/snapshot").set(authorization).expect(200);
-    await request.get("/api/v1/stats?period=today").set(authorization).expect(200);
+    await request
+      .get("/api/v1/stats?period=today")
+      .set(authorization)
+      .expect(200);
     await request.get("/api/v1/devices").set(authorization).expect(200);
 
     await request
@@ -76,14 +79,5 @@ describe("Home Assistant controller credentials", () => {
       .get(`/api/v1/playback/commands/${commandId}`)
       .set(authorization)
       .expect(200);
-
-    await browser
-      .post("/api/v1/playback/commands")
-      .send({
-        commandId: randomUUID(),
-        action: "play",
-        targetDeviceId: controller.session.device.id,
-      })
-      .expect(409);
   });
 });

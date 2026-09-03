@@ -19,8 +19,8 @@ import type { SyncService } from "../sync/service.js";
 import { log } from "../logging.js";
 import { applyCastCommandResult } from "../api/playback.js";
 import {
-  expireIdleCast,
-  idleCastProfiles,
+  expireIdlePlayback,
+  idlePlaybackProfiles,
   playbackState,
   type StoredPlaybackCommand,
 } from "../playback/service.js";
@@ -55,7 +55,7 @@ export class PodwaffleWebSocketServer {
     this.unsubscribe = this.sync.subscribe((profileId, event) =>
       this.broadcast(profileId, event),
     );
-    this.castIdleTimer = setInterval(() => this.sweepIdleCasts(), 60_000);
+    this.castIdleTimer = setInterval(() => this.sweepIdlePlayback(), 60_000);
     server.on("upgrade", (request, socket, head) => {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (url.pathname !== "/ws") {
@@ -246,19 +246,21 @@ export class PodwaffleWebSocketServer {
     return (await wake?.catch(() => false)) ?? false;
   }
 
-  public sweepIdleCasts(now = new Date()): number {
+  public sweepIdlePlayback(now = new Date()): number {
     let expired = 0;
-    for (const profileId of idleCastProfiles(this.database.db, now)) {
+    for (const profileId of idlePlaybackProfiles(this.database.db, now)) {
+      const before = playbackState(this.database.db, profileId, "");
       const applied = this.sync.mutate(
         profileId,
-        "playback.cast.updated",
+        before.mode === "cast"
+          ? "playback.cast.updated"
+          : "playback.owner.updated",
         (db) => {
-          // Cast position is kept in playback_state while the receiver owns
-          // playback. Persist its last confirmed value before clearing the
-          // session so the episode does not reopen from stale (often zero)
-          // progress after the idle timeout.
+          // The last renderer report is authoritative. Persist it before
+          // dropping routing ownership so a later local play resumes from the
+          // same position without waking an hours-old phone or Cast sender.
           const current = playbackState(db, profileId, "");
-          if (!expireIdleCast(db, profileId, now))
+          if (!expireIdlePlayback(db, profileId, now))
             return { result: false, payload: {} };
           const episode = current.episode
             ? setEpisodeProgress(
@@ -276,7 +278,7 @@ export class PodwaffleWebSocketServer {
           return {
             result: true,
             payload: {
-              reason: "cast_idle_timeout",
+              reason: "playback_idle_timeout",
               playback: playbackState(db, profileId, ""),
               episode,
             },
@@ -289,12 +291,18 @@ export class PodwaffleWebSocketServer {
           if (client.profileId === profileId)
             this.sendMessage(client.socket, {
               type: "playback.command.cancelled",
-              reason: "Cast returned to local mode after 30 minutes idle",
+              reason:
+                "Playback controls idled after 30 minutes without a renderer report",
             });
         }
       }
     }
     return expired;
+  }
+
+  /** Retained for callers compiled against the previous Cast-only sweep. */
+  public sweepIdleCasts(now = new Date()): number {
+    return this.sweepIdlePlayback(now);
   }
 
   public revokeDevice(deviceId: string): void {

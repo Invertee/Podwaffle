@@ -47,6 +47,26 @@ internal fun reconcileQueueSelection(
     )
 }
 
+internal fun shouldSuppressCastStartupTransition(
+    reason: Int,
+    guardActive: Boolean,
+    expectedMediaId: String?,
+    transitionedMediaId: String?,
+): Boolean =
+    reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+        guardActive &&
+        expectedMediaId != null &&
+        transitionedMediaId != expectedMediaId
+
+internal fun shouldGuardCastStartupPosition(
+    positionMs: Long,
+    durationMs: Long?,
+    guardWindowMs: Long = 5_000L,
+): Boolean =
+    durationMs == null ||
+        durationMs <= 0L ||
+        positionMs < (durationMs - guardWindowMs).coerceAtLeast(0L)
+
 /**
  * Long-lived Android playback authority for local, downloaded and Cast media.
  *
@@ -76,6 +96,11 @@ class PodwaffleMediaService : MediaSessionService() {
     private var pendingCastEpisodeId: String? = null
     private var pendingCastPositionMs = 0L
     private var pendingCastAutoplay = false
+    private var castStartupEpisodeId: String? = null
+    private var castStartupPositionMs = 0L
+    private var castStartupAutoplay = false
+    private var castStartupGuardUntilMs = 0L
+    private var castStartupCorrectionScheduled = false
     private var explicitCastStop = false
     private var lastCastSnapshot = CastPlaybackSnapshot()
     private var lastMediaItem: MediaItem? = null
@@ -89,6 +114,7 @@ class PodwaffleMediaService : MediaSessionService() {
         private const val DEFAULT_SKIP_BACK_MS = 15_000L
         private const val DEFAULT_SKIP_FORWARD_MS = 30_000L
         private const val CAST_VOLUME_STEP = 0.05f
+        private const val CAST_STARTUP_GUARD_MS = 5_000L
         private const val ACTION_SKIP_BACK = "com.podwaffle.media.SKIP_BACK"
         private const val ACTION_SKIP_FORWARD = "com.podwaffle.media.SKIP_FORWARD"
 
@@ -275,9 +301,25 @@ class PodwaffleMediaService : MediaSessionService() {
             private fun activeOwner(): Player? = owner()?.takeIf { it === activePlayer }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (activeOwner() == null) return
+                val player = activeOwner() ?: return
+                if (
+                    player === castPlayer &&
+                    shouldSuppressCastStartupTransition(
+                        reason,
+                        castStartupGuardActive(),
+                        castStartupEpisodeId,
+                        mediaItem?.mediaId,
+                    )
+                ) {
+                    // Ignore transient Cast queue advancement while Media3 swaps
+                    // from the local player. Restore any concrete wrong item to
+                    // the episode and position explicitly selected for Cast.
+                    if (mediaItem != null) restoreCastStartupSelection()
+                    return
+                }
                 val completedItem = if (
-                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                    lastMediaItem?.mediaId != mediaItem?.mediaId
                 ) {
                     lastMediaItem
                 } else {
@@ -325,6 +367,14 @@ class PodwaffleMediaService : MediaSessionService() {
 
             override fun onEvents(player: Player, events: Player.Events) {
                 if (player !== activePlayer) return
+                if (
+                    player === castPlayer &&
+                    castStartupGuardActive() &&
+                    player.currentMediaItem?.mediaId != castStartupEpisodeId
+                ) {
+                    if (player.currentMediaItem != null) restoreCastStartupSelection()
+                    return
+                }
                 if (player === castPlayer) notifyCastStateChanged()
                 notifyStateChanged()
                 if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
@@ -733,8 +783,29 @@ class PodwaffleMediaService : MediaSessionService() {
         }
         val autoplay = if (pendingCastEpisodeId != null) pendingCastAutoplay else local.playWhenReady
         val speed = local.playbackParameters.speed
+        val targetItem = remoteItems.getOrNull(index)
+
+        val targetDurationMs = EpisodeMedia.fromMediaItem(targetItem)?.durationMs
+        castStartupEpisodeId = targetItem?.mediaId ?: mediaId
+        castStartupPositionMs = position
+        castStartupAutoplay = autoplay
+        castStartupGuardUntilMs = if (shouldGuardCastStartupPosition(position, targetDurationMs)) {
+            System.currentTimeMillis() + CAST_STARTUP_GUARD_MS
+        } else {
+            0L
+        }
+        castStartupCorrectionScheduled = false
+        lastMediaItem = targetItem
+        lastObservedMediaId = targetItem?.mediaId
+        lastObservedPositionMs = position
+        lastObservedDurationMs = targetDurationMs
 
         if (remoteItems.isNotEmpty()) {
+            // A CastPlayer can inherit playWhenReady from an existing receiver
+            // session. Freeze it before replacing the queue so it cannot advance
+            // the newly selected episode while the new start position is loading.
+            remote.playWhenReady = false
+            runCatching { remote.pause() }
             remote.setMediaItems(remoteItems, index, position)
             remote.playbackParameters = PlaybackParameters(speed)
             remote.prepare()
@@ -744,10 +815,6 @@ class PodwaffleMediaService : MediaSessionService() {
         local.pause()
         activePlayer = remote
         mediaSession?.setPlayer(remote)
-        lastMediaItem = remoteItems.getOrNull(index)
-        lastObservedMediaId = lastMediaItem?.mediaId
-        lastObservedPositionMs = position
-        lastObservedDurationMs = EpisodeMedia.fromMediaItem(lastMediaItem)?.durationMs
         clearPendingCast()
         castConnecting = false
         lastCastSnapshot = currentCastSnapshot()
@@ -757,7 +824,53 @@ class PodwaffleMediaService : MediaSessionService() {
         notifyStateChanged()
     }
 
+    private fun castStartupGuardActive(): Boolean =
+        castStartupEpisodeId != null &&
+            System.currentTimeMillis() <= castStartupGuardUntilMs
+
+    private fun restoreCastStartupSelection() {
+        if (castStartupCorrectionScheduled || !castStartupGuardActive()) return
+        val expectedMediaId = castStartupEpisodeId ?: return
+        castStartupCorrectionScheduled = true
+        handler.post {
+            castStartupCorrectionScheduled = false
+            if (!castStartupGuardActive() || castStartupEpisodeId != expectedMediaId) return@post
+            val remote = castPlayer ?: return@post
+            if (activePlayer !== remote || !remote.isCastSessionAvailable) return@post
+            val index = remoteItems.indexOfFirst { it.mediaId == expectedMediaId }
+            if (index < 0 || remote.currentMediaItem?.mediaId == expectedMediaId) return@post
+            val targetItem = remoteItems[index]
+            val speed = remote.playbackParameters.speed
+
+            remote.playWhenReady = false
+            runCatching { remote.pause() }
+            lastMediaItem = targetItem
+            lastObservedMediaId = expectedMediaId
+            lastObservedPositionMs = castStartupPositionMs
+            lastObservedDurationMs = EpisodeMedia.fromMediaItem(targetItem)?.durationMs
+            remote.setMediaItems(remoteItems, index, castStartupPositionMs)
+            remote.playbackParameters = PlaybackParameters(speed)
+            remote.prepare()
+            remote.playWhenReady = castStartupAutoplay
+            if (castStartupAutoplay) remote.play()
+            lastCastSnapshot = currentCastSnapshot()
+            persistPlayback()
+            notifyQueueChanged()
+            notifyCastStateChanged()
+            notifyStateChanged()
+        }
+    }
+
+    private fun clearCastStartupGuard() {
+        castStartupEpisodeId = null
+        castStartupPositionMs = 0L
+        castStartupAutoplay = false
+        castStartupGuardUntilMs = 0L
+        castStartupCorrectionScheduled = false
+    }
+
     private fun transferToLocal(positionMs: Long, resume: Boolean) {
+        clearCastStartupGuard()
         val local = localPlayer ?: return
         if (activePlayer === local && !isCasting()) {
             if (local.currentMediaItem != null) {

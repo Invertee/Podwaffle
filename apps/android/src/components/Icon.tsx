@@ -59,16 +59,11 @@ export function Icon({
         return <Path d="m15 18-6-6 6-6" {...common} />;
       case "cast":
         return (
-          <>
-            <Path
-              d="M4 18.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-              {...common}
-            />
-            <Path
-              d="M2.5 14.5a7 7 0 0 1 7 7M2.5 9.5a12 12 0 0 1 12 12M9 4h8a3 3 0 0 1 3 3v10"
-              {...common}
-            />
-          </>
+          <Path
+            d="M1 18v3h3a3 3 0 0 0-3-3Zm0-4v2a5 5 0 0 1 5 5h2a7 7 0 0 0-7-7Zm2-11a2 2 0 0 0-2 2v7h2V5h18v14h-9v2h9a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H3Zm-2 7v2a9 9 0 0 1 9 9h2c0-6.08-4.92-11-11-11Z"
+            fill={color}
+            stroke="none"
+          />
         );
       case "check":
         return (
@@ -105,7 +100,10 @@ export function Icon({
       case "history":
         return (
           <>
-            <Path d="M4.8 7.5H2v-3M4.2 17.8A9 9 0 1 0 4.8 7.5M12 7v5l3.5 2" {...common} />
+            <Path
+              d="M4.8 7.5H2v-3M4.2 17.8A9 9 0 1 0 4.8 7.5M12 7v5l3.5 2"
+              {...common}
+            />
           </>
         );
       case "info":
@@ -116,7 +114,12 @@ export function Icon({
           </>
         );
       case "list":
-        return <Path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" {...common} />;
+        return (
+          <Path
+            d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"
+            {...common}
+          />
+        );
       case "next":
         return (
           <>
@@ -176,7 +179,9 @@ export function Icon({
       case "stop":
         return <Rect x="7" y="7" width="10" height="10" rx="1" fill={color} />;
       case "trash":
-        return <Path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" {...common} />;
+        return (
+          <Path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" {...common} />
+        );
       default:
         return null;
     }

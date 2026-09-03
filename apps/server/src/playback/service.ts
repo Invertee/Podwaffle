@@ -11,7 +11,8 @@ import type { z } from "zod";
 import { getEpisode } from "../podcasts/service.js";
 
 const LEASE_MS = 45_000;
-export const CAST_IDLE_MS = 30 * 60 * 1000;
+export const PLAYBACK_CONTROL_IDLE_MS = 30 * 60 * 1000;
+export const CAST_IDLE_MS = PLAYBACK_CONTROL_IDLE_MS;
 
 function localDate(instant: string, timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -179,6 +180,8 @@ export function stopCast(
   profileId: string,
   deviceId: string,
   input: {
+    episodeId: string;
+    castSessionId: string;
     positionMs: number;
     durationMs: number | null;
     state: "playing" | "paused" | "stopped";
@@ -187,12 +190,14 @@ export function stopCast(
 ): void {
   const current = db
     .prepare(
-      `SELECT cast_owner_device_id, lease_expires_at
+      `SELECT episode_id, cast_owner_device_id, cast_session_id, lease_expires_at
        FROM playback_state WHERE profile_id = ? AND mode = 'cast'`,
     )
     .get(profileId) as
     | {
+        episode_id: string | null;
         cast_owner_device_id: string | null;
+        cast_session_id: string | null;
         lease_expires_at: string | null;
       }
     | undefined;
@@ -201,6 +206,13 @@ export function stopCast(
     Date.parse(current.lease_expires_at) > Date.now();
   if (current?.cast_owner_device_id !== deviceId && ownerLeaseActive)
     throw new Error("CAST_OWNER_REQUIRED");
+  if (
+    !current ||
+    current.episode_id !== input.episodeId ||
+    current.cast_session_id !== input.castSessionId
+  ) {
+    throw new Error("CAST_STATE_STALE");
+  }
   const now = new Date();
   db.prepare(
     `UPDATE playback_state SET position_ms = ?, duration_ms = ?, state = ?,
@@ -269,15 +281,17 @@ export function createCastCommand(
   if (existing) return mapPlaybackCommand(existing, true);
   const playback = db
     .prepare(
-      `SELECT mode, active_device_id, cast_owner_device_id
+      `SELECT mode, state, active_device_id, cast_owner_device_id, updated_at
        FROM playback_state
        WHERE profile_id = ?`,
     )
     .get(profileId) as
     | {
         mode: "local" | "cast";
+        state: "playing" | "paused" | "stopped";
         active_device_id: string | null;
         cast_owner_device_id: string | null;
+        updated_at: string;
       }
     | undefined;
   const ownerDeviceId =
@@ -285,6 +299,15 @@ export function createCastCommand(
       ? playback.cast_owner_device_id
       : playback?.active_device_id;
   if (!ownerDeviceId) throw new Error("PLAYBACK_NOT_ACTIVE");
+  const lastReportAt = playback?.updated_at
+    ? Date.parse(playback.updated_at)
+    : Number.NaN;
+  const controlIsActive = Boolean(
+    playback?.state !== "stopped" &&
+    Number.isFinite(lastReportAt) &&
+    lastReportAt > Date.now() - PLAYBACK_CONTROL_IDLE_MS,
+  );
+  if (!controlIsActive) throw new Error("PLAYBACK_NOT_ACTIVE");
   db.prepare(
     `INSERT INTO playback_commands(
        command_id, profile_id, requested_by_device_id, owner_device_id,
@@ -363,12 +386,19 @@ export function resolveCastCommand(
 
   if (input.status === "accepted" && confirmed) {
     const before = playbackState(db, profileId, ownerDeviceId);
-    startCast(db, profileId, ownerDeviceId, confirmed);
+    const confirmedEpisode = getEpisode(db, profileId, confirmed.episodeId);
+    const staleCompletedConfirmation = Boolean(
+      confirmedEpisode?.played && before.episode?.id !== confirmed.episodeId,
+    );
+    if (!staleCompletedConfirmation) {
+      startCast(db, profileId, ownerDeviceId, confirmed);
+    }
     const action = existing.command.action;
     if (
-      action === "seek" ||
-      action === "skip-forward" ||
-      action === "skip-backward"
+      !staleCompletedConfirmation &&
+      (action === "seek" ||
+        action === "skip-forward" ||
+        action === "skip-backward")
     ) {
       recordMovement(db, profileId, ownerDeviceId, {
         commandId: input.commandId,
@@ -408,37 +438,51 @@ export function resolveCastCommand(
   };
 }
 
-export function idleCastProfiles(db: DatabaseSync, now = new Date()): string[] {
-  const cutoff = new Date(now.getTime() - CAST_IDLE_MS).toISOString();
+export function idlePlaybackProfiles(
+  db: DatabaseSync,
+  now = new Date(),
+): string[] {
+  const cutoff = new Date(
+    now.getTime() - PLAYBACK_CONTROL_IDLE_MS,
+  ).toISOString();
   return (
     db
       .prepare(
         `SELECT profile_id FROM playback_state
-         WHERE mode = 'cast' AND state != 'playing' AND updated_at <= ?`,
+         WHERE active_device_id IS NOT NULL AND updated_at <= ?`,
       )
       .all(cutoff) as unknown as Array<{ profile_id: string }>
   ).map((row) => row.profile_id);
 }
 
-export function expireIdleCast(
+export function expireIdlePlayback(
   db: DatabaseSync,
   profileId: string,
   now = new Date(),
 ): boolean {
-  const cutoff = new Date(now.getTime() - CAST_IDLE_MS).toISOString();
+  const cutoff = new Date(
+    now.getTime() - PLAYBACK_CONTROL_IDLE_MS,
+  ).toISOString();
   return (
     db
       .prepare(
-        `UPDATE playback_state SET mode = 'local', state = 'paused',
+        `UPDATE playback_state SET mode = 'local',
+         state = CASE WHEN episode_id IS NULL THEN 'stopped' ELSE 'paused' END,
          active_device_id = NULL, lease_expires_at = NULL,
          cast_owner_device_id = NULL, cast_session_id = NULL,
          revision = revision + 1, updated_at = ?
-         WHERE profile_id = ? AND mode = 'cast' AND state != 'playing'
+         WHERE profile_id = ? AND active_device_id IS NOT NULL
          AND updated_at <= ?`,
       )
       .run(now.toISOString(), profileId, cutoff).changes > 0
   );
 }
+
+/** @deprecated Use idlePlaybackProfiles; retained for integration compatibility. */
+export const idleCastProfiles = idlePlaybackProfiles;
+
+/** @deprecated Use expireIdlePlayback; retained for integration compatibility. */
+export const expireIdleCast = expireIdlePlayback;
 
 export function releaseLease(
   db: DatabaseSync,

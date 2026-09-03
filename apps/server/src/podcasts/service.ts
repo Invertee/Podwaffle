@@ -658,12 +658,18 @@ export function advanceQueueAfterCompletion(
     db.prepare(
       `UPDATE playback_state SET episode_id = ?, position_ms = 0,
        duration_ms = ?, state = CASE WHEN ? IS NULL THEN 'stopped' ELSE state END,
+       mode = CASE WHEN ? IS NULL THEN 'local' ELSE mode END,
        active_device_id = CASE WHEN ? IS NULL THEN NULL ELSE active_device_id END,
        lease_expires_at = CASE WHEN ? IS NULL THEN NULL ELSE lease_expires_at END,
+       cast_owner_device_id = CASE WHEN ? IS NULL THEN NULL ELSE cast_owner_device_id END,
+       cast_session_id = CASE WHEN ? IS NULL THEN NULL ELSE cast_session_id END,
        updated_at = ? WHERE profile_id = ?`,
     ).run(
       nextEpisode?.id ?? null,
       nextEpisode?.durationMs ?? null,
+      nextEpisode?.id ?? null,
+      nextEpisode?.id ?? null,
+      nextEpisode?.id ?? null,
       nextEpisode?.id ?? null,
       nextEpisode?.id ?? null,
       nextEpisode?.id ?? null,

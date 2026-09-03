@@ -117,6 +117,59 @@ describe("playback ownership", () => {
       (await browser.get(`/api/v1/episodes/${episodeId}`)).body.episode,
     ).toMatchObject({ played: false, positionMs: 120_000 });
   });
+
+  it("does not wake a renderer after 30 minutes without a playback report", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    await join(owner, "Sam", "Sleeping phone");
+    const controller = supertest.agent(created.baseUrl);
+    await join(controller, "Sam", "Web controller");
+    const episodeId = insertEpisode(created.runtime);
+
+    await owner
+      .post("/api/v1/playback/lease")
+      .send({
+        episodeId,
+        positionMs: 145_000,
+        durationMs: 600_000,
+        playbackRate: 1,
+        takeover: true,
+      })
+      .expect(200);
+    await owner
+      .post("/api/v1/playback/state")
+      .send({
+        episodeId,
+        positionMs: 145_000,
+        durationMs: 600_000,
+        state: "playing",
+        playbackRate: 1,
+      })
+      .expect(200);
+    const now = new Date("2026-08-30T12:00:00.000Z");
+    created.runtime.database.db
+      .prepare("UPDATE playback_state SET updated_at = ?")
+      .run(new Date(now.getTime() - 31 * 60_000).toISOString());
+
+    const rejected = await controller
+      .post("/api/v1/playback/commands")
+      .send({ commandId: randomUUID(), action: "play" })
+      .expect(409);
+    expect(rejected.body.error.code).toBe("PLAYBACK_NOT_ACTIVE");
+
+    expect(created.runtime.webSockets.sweepIdlePlayback(now)).toBe(1);
+    expect(
+      (await controller.get("/api/v1/playback")).body.playback,
+    ).toMatchObject({
+      episode: { id: episodeId },
+      positionMs: 145_000,
+      state: "paused",
+      mode: "local",
+      activeDeviceId: null,
+      castOwnerDeviceId: null,
+    });
+  });
 });
 
 function insertEpisode(runtime: Runtime): string {

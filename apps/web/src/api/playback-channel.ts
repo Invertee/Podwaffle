@@ -5,7 +5,6 @@ type CommandHandler = (command: OwnerCommand) => Promise<void>;
 
 let socket: WebSocket | undefined;
 let handler: CommandHandler | undefined;
-let handoffHandler: CommandHandler | undefined;
 
 export function bindPlaybackSocket(next: WebSocket | undefined): void {
   socket = next;
@@ -20,26 +19,9 @@ export function registerPlaybackCommandHandler(
   };
 }
 
-export function registerPlaybackHandoffHandler(
-  next: CommandHandler,
-): () => void {
-  handoffHandler = next;
-  return () => {
-    if (handoffHandler === next) handoffHandler = undefined;
-  };
-}
-
 export async function dispatchPlaybackCommand(
   command: OwnerCommand,
 ): Promise<void> {
-  if (
-    command.action === "play-episode" &&
-    command.targetDeviceId &&
-    handoffHandler
-  ) {
-    await handoffHandler(command);
-    return;
-  }
   await handler?.(command);
 }
 

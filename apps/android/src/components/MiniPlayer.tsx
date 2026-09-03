@@ -1,8 +1,9 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
+  Alert,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -11,15 +12,10 @@ import {
 
 import { playbackController } from "../playback/controller";
 import { usePlaybackPresentation } from "../playback/presentation";
+import { useCastAction } from "../hooks/useCastAction";
 import { useAuthStore } from "../stores/auth";
-import {
-  colors,
-  MINI_PLAYER_HEIGHT,
-  radii,
-  spacing,
-} from "../styles/tokens";
+import { colors, MINI_PLAYER_HEIGHT, radii, spacing } from "../styles/tokens";
 import { Icon } from "./Icon";
-import { PlaybackDeviceModal } from "./PlaybackDeviceModal";
 
 export function MiniPlayer() {
   const router = useRouter();
@@ -27,15 +23,21 @@ export function MiniPlayer() {
   const snapshot = useAuthStore((state) => state.snapshot);
   const media = playback.media;
   const enabled = playback.hasMedia;
-  const [devicePickerOpen, setDevicePickerOpen] = useState(false);
+  const { cast, castStatus, toggleCast } = useCastAction();
+  const castBusy =
+    cast.connecting || ["connecting", "stopping"].includes(castStatus);
 
   const playbackEpisode = snapshot?.playback?.episode;
   const activeEpisode =
     playbackEpisode?.id === media?.episodeId
       ? playbackEpisode
-      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)?.episode;
+      : snapshot?.queue.find((item) => item.episode.id === media?.episodeId)
+          ?.episode;
   const artworkUrl =
-    activeEpisode?.podcastArtworkUrl ?? media?.artworkUrl ?? activeEpisode?.artworkUrl ?? null;
+    activeEpisode?.podcastArtworkUrl ??
+    media?.artworkUrl ??
+    activeEpisode?.artworkUrl ??
+    null;
   const progress =
     media?.durationMs && media.durationMs > 0
       ? Math.max(0, Math.min(1, media.positionMs / media.durationMs))
@@ -49,7 +51,9 @@ export function MiniPlayer() {
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          enabled && gesture.dy < -8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+          enabled &&
+          gesture.dy < -8 &&
+          Math.abs(gesture.dy) > Math.abs(gesture.dx),
         onPanResponderRelease: (_event, gesture) => {
           if (enabled && (gesture.dy < -28 || gesture.vy < -0.35)) {
             openNowPlaying();
@@ -60,117 +64,125 @@ export function MiniPlayer() {
   );
 
   return (
-    <>
-      <View style={styles.container} {...panResponder.panHandlers}>
+    <View style={styles.container} {...panResponder.panHandlers}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.openSurface,
+          pressed && enabled && styles.surfacePressed,
+        ]}
+        disabled={!enabled}
+        onPress={openNowPlaying}
+        accessibilityRole="button"
+        accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
+      />
+
+      <View style={styles.progressTrack} pointerEvents="none">
+        <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+      </View>
+
+      <View style={styles.sideSlot} pointerEvents="box-none">
         <Pressable
           style={({ pressed }) => [
-            styles.openSurface,
-            pressed && enabled && styles.surfacePressed,
+            styles.artworkButton,
+            !enabled && styles.disabled,
+            pressed && enabled && styles.pressed,
           ]}
           disabled={!enabled}
           onPress={openNowPlaying}
           accessibilityRole="button"
           accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
+        >
+          {artworkUrl ? (
+            <Image
+              source={{ uri: artworkUrl }}
+              style={styles.artwork}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
+          ) : (
+            <View style={styles.artworkFallback}>
+              <Icon name="podcasts" size={22} color={colors.textMuted} />
+            </View>
+          )}
+        </Pressable>
+      </View>
+
+      <View style={styles.controls} pointerEvents="box-none">
+        <ChromeControl
+          icon="previous"
+          label="Skip backward"
+          disabled={!enabled}
+          onPress={() => playbackController.skipBackward()}
         />
+        <Pressable
+          style={({ pressed }) => [
+            styles.control,
+            styles.play,
+            !enabled && styles.disabled,
+            pressed && enabled && styles.pressed,
+          ]}
+          disabled={!enabled}
+          onPress={() =>
+            void (playback.isPlaying
+              ? playbackController.pause()
+              : playbackController.play())
+          }
+          accessibilityRole="button"
+          accessibilityLabel={playback.isPlaying ? "Pause" : "Play"}
+        >
+          {media?.playbackStatus === "buffering" ? (
+            <ActivityIndicator size="small" color={colors.textOnAccent} />
+          ) : (
+            <Icon
+              name={playback.isPlaying ? "pause" : "play"}
+              size={18}
+              color={colors.textOnAccent}
+            />
+          )}
+        </Pressable>
+        <ChromeControl
+          icon="next"
+          label="Skip forward"
+          disabled={!enabled}
+          onPress={() => playbackController.skipForward()}
+        />
+      </View>
 
-        <View style={styles.progressTrack} pointerEvents="none">
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-        </View>
-
-        <View style={styles.sideSlot} pointerEvents="box-none">
+      <View style={styles.sideSlot} pointerEvents="box-none">
+        {cast.available || cast.connected ? (
           <Pressable
             style={({ pressed }) => [
-              styles.artworkButton,
-              !enabled && styles.disabled,
-              pressed && enabled && styles.pressed,
+              styles.transfer,
+              cast.connected && styles.transferActive,
+              pressed && !castBusy && styles.pressed,
             ]}
-            disabled={!enabled}
-            onPress={openNowPlaying}
-            accessibilityRole="button"
-            accessibilityLabel={enabled ? "Open now playing" : "Nothing playing"}
-          >
-            {artworkUrl ? (
-              <Image
-                source={{ uri: artworkUrl }}
-                style={styles.artwork}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <View style={styles.artworkFallback}>
-                <Icon name="podcasts" size={22} color={colors.textMuted} />
-              </View>
-            )}
-          </Pressable>
-        </View>
-
-        <View style={styles.controls} pointerEvents="box-none">
-          <ChromeControl
-            icon="previous"
-            label="Skip backward"
-            disabled={!enabled}
-            onPress={() => playbackController.skipBackward()}
-          />
-          <Pressable
-            style={({ pressed }) => [
-              styles.control,
-              styles.play,
-              !enabled && styles.disabled,
-              pressed && enabled && styles.pressed,
-            ]}
-            disabled={!enabled}
+            disabled={castBusy}
             onPress={() =>
-              void (playback.isPlaying
-                ? playbackController.pause()
-                : playbackController.play())
+              void toggleCast().catch((error) =>
+                Alert.alert(
+                  "Google Cast",
+                  error instanceof Error
+                    ? error.message
+                    : "The Cast picker could not be opened.",
+                ),
+              )
             }
             accessibilityRole="button"
-            accessibilityLabel={playback.isPlaying ? "Pause" : "Play"}
+            accessibilityLabel={cast.connected ? "Stop casting" : "Cast"}
           >
-            {media?.playbackStatus === "buffering" ? (
-              <ActivityIndicator size="small" color={colors.textOnAccent} />
+            {castBusy ? (
+              <ActivityIndicator size="small" color={colors.accent} />
             ) : (
               <Icon
-                name={playback.isPlaying ? "pause" : "play"}
-                size={18}
-                color={colors.textOnAccent}
+                name="cast"
+                size={22}
+                color={cast.connected ? colors.accent : colors.textSecondary}
               />
             )}
           </Pressable>
-          <ChromeControl
-            icon="next"
-            label="Skip forward"
-            disabled={!enabled}
-            onPress={() => playbackController.skipForward()}
-          />
-        </View>
-
-        <View style={styles.sideSlot} pointerEvents="box-none">
-          {enabled ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.transfer,
-                playback.remote && styles.transferActive,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setDevicePickerOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Choose playback device"
-            >
-              <Icon
-                name="device"
-                size={21}
-                color={playback.remote ? colors.accent : colors.textSecondary}
-              />
-            </Pressable>
-          ) : null}
-        </View>
+        ) : null}
       </View>
-      <PlaybackDeviceModal
-        visible={devicePickerOpen}
-        onClose={() => setDevicePickerOpen(false)}
-      />
-    </>
+    </View>
   );
 }
 
@@ -259,7 +271,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 20,
   },
-  play: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent },
+  play: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+  },
   transfer: {
     width: 42,
     height: 42,

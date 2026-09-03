@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../app/Icon";
 import { useSyncStore } from "../stores/sync";
-import { PlaybackDevicePicker } from "./PlaybackDevicePicker";
 import { player, usePlayer } from "./local-player";
 
 function time(ms: number): string {
@@ -19,7 +18,9 @@ export function PlayerBar({
 }) {
   const queryClient = useQueryClient();
   const state = usePlayer();
-  const remotePlayback = useSyncStore((store) => store.snapshot?.playback ?? null);
+  const remotePlayback = useSyncStore(
+    (store) => store.snapshot?.playback ?? null,
+  );
   const [remotePositionMs, setRemotePositionMs] = useState<number | null>(null);
   const remoteClock = useRef({
     episodeId: "",
@@ -27,7 +28,6 @@ export function PlayerBar({
     zeroSamples: 0,
   });
   const [info, setInfo] = useState(false);
-  const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const episode = state.episode;
   const castBusy = [
     "connecting",
@@ -76,7 +76,10 @@ export function PlayerBar({
           : 0;
       const next = Math.max(
         0,
-        Math.min(durationMs || Number.MAX_SAFE_INTEGER, anchorPositionMs + elapsedMs),
+        Math.min(
+          durationMs || Number.MAX_SAFE_INTEGER,
+          anchorPositionMs + elapsedMs,
+        ),
       );
       remoteClock.current.lastPositionMs = next;
       setRemotePositionMs(next);
@@ -96,7 +99,9 @@ export function PlayerBar({
 
   const displayDurationMs =
     state.remote && remotePlayback?.episode
-      ? (remotePlayback.durationMs ?? remotePlayback.episode.durationMs ?? state.durationMs)
+      ? (remotePlayback.durationMs ??
+        remotePlayback.episode.durationMs ??
+        state.durationMs)
       : state.durationMs;
   const displayPositionMs =
     state.remote && remotePositionMs !== null
@@ -128,8 +133,8 @@ export function PlayerBar({
             <span>
               {state.remote
                 ? `${episode?.podcastTitle ?? "Podcast"} · playing on another device`
-                : episode?.podcastTitle ??
-                  "Choose an episode to start listening"}
+                : (episode?.podcastTitle ??
+                  "Choose an episode to start listening")}
             </span>
           </div>
         </div>
@@ -206,22 +211,13 @@ export function PlayerBar({
                 max={1}
                 step={0.05}
                 value={state.volume}
-                onChange={(event) => player.setVolume(Number(event.target.value))}
+                onChange={(event) =>
+                  player.setVolume(Number(event.target.value))
+                }
               />
             </label>
           )}
-          {episode && (
-            <button
-              className="icon-button"
-              aria-label="Choose playback device"
-              title="Play on…"
-              onClick={() => setDevicePickerOpen(true)}
-            >
-              <Icon name="device" />
-            </button>
-          )}
           {episode &&
-            !state.remote &&
             state.mode === "local" &&
             state.castAvailable && (
               <button
@@ -295,10 +291,6 @@ export function PlayerBar({
           </button>
         </div>
       </section>
-      <PlaybackDevicePicker
-        open={devicePickerOpen}
-        onClose={() => setDevicePickerOpen(false)}
-      />
       {info && episode && (
         <div className="drawer-backdrop" onClick={() => setInfo(false)}>
           <aside
