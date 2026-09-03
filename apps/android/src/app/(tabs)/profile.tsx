@@ -15,6 +15,7 @@ import {
 
 import { api } from "../../api/client";
 import { updateProfilePlaybackSettings } from "../../api/profileSettings";
+import { PushDiagnosticsCard } from "../../components/PushDiagnosticsCard";
 import {
   authenticatedConnection,
   refreshProfile,
@@ -596,6 +597,8 @@ export default function ProfileScreen() {
           <Text style={styles.refreshText}>Sync now</Text>
         </Pressable>
       </View>
+
+      <PushDiagnosticsCard />
 
       <Pressable
         style={({ pressed }) => [

@@ -440,3 +440,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 export async function notificationJoinCode(): Promise<string | null> {
   return SecureStore.getItemAsync(NOTIFICATION_JOIN_CODE_KEY);
 }
+
+export async function saveNotificationJoinCode(value: string): Promise<void> {
+  const joinCode = value.trim();
+  if (!joinCode) throw new Error("The notification join code cannot be empty.");
+  await SecureStore.setItemAsync(NOTIFICATION_JOIN_CODE_KEY, joinCode);
+}

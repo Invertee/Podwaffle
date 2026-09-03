@@ -13,6 +13,7 @@ export {
   type NativeCastSessionSummary,
   type NativeMediaError,
   type NativeEpisodeCompletion,
+  type NativeNotificationDisplayResult,
 } from "../../modules/podwaffle-media/src/index";
 
 export {

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced background local scheduling for encrypted Home Assistant messages with
+  direct Android NotificationManager delivery, added persistent on-device push
+  diagnostics and a notification-channel test to the Settings status page, and
+  added a secure join-code repair path for devices upgraded from builds that did
+  not retain the notification decryption key. Updated Android to 0.4.33 /
+  versionCode 37 / native runtime 0.4-native-27.
 - Added safe Home Assistant ad-hoc notification diagnostics to the add-on log:
   integration request receipt, Android target discovery, FCM batch results, and
   final acceptance or failure (without logging message content or FCM tokens).

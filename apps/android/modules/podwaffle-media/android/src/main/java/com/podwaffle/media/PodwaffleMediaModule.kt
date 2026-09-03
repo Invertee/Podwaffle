@@ -81,6 +81,10 @@ class PodwaffleMediaModule : Module() {
             NotificationCrypto.decrypt(input, joinCode)
         }
 
+        AsyncFunction("showMessageNotification") { input: Map<String, Any?> ->
+            PodwaffleNotificationPresenter.show(context, input)
+        }
+
         AsyncFunction("bind") {
             withServiceOnMain(PodwaffleMediaService::stateMap)
         }

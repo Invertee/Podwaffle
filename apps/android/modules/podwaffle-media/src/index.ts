@@ -118,6 +118,14 @@ export interface DecryptedNotification {
   message: string;
 }
 
+export interface NativeNotificationDisplayResult {
+  shown: boolean;
+  notificationId: number;
+  notificationsEnabled: boolean;
+  channelImportance: number | null;
+  reason: string | null;
+}
+
 export const MEDIA_EVENTS = {
   STATE_CHANGED: "media.state.changed",
   POSITION_CHANGED: "media.position.changed",
@@ -143,6 +151,11 @@ interface PodwaffleNativeModule {
     input: Record<string, unknown>,
     joinCode: string,
   ): Promise<DecryptedNotification>;
+  showMessageNotification(input: {
+    identifier: string;
+    title: string;
+    message: string;
+  }): Promise<NativeNotificationDisplayResult>;
   bind(): Promise<NativePlaybackState>;
   getState(): Promise<NativePlaybackState>;
   setQueue(input: NativeQueueSnapshot): Promise<void>;
@@ -199,6 +212,13 @@ export const PodwaffleMediaModule = {
     joinCode: string,
   ): Promise<DecryptedNotification> {
     return nativeModule.decryptNotification(input, joinCode);
+  },
+  showMessageNotification(input: {
+    identifier: string;
+    title: string;
+    message: string;
+  }): Promise<NativeNotificationDisplayResult> {
+    return nativeModule.showMessageNotification(input);
   },
   bind(): Promise<NativePlaybackState> {
     return nativeModule.bind();
