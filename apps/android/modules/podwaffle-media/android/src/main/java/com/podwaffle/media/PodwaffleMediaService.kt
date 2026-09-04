@@ -68,6 +68,11 @@ internal fun shouldHoldLocalPlaybackForCastRecovery(
         !pendingCastRequest &&
         (hadActiveCast || savedCastAuthority)
 
+internal fun shouldDeferNativePlaybackMutationForCastRecovery(
+    recoveryExpected: Boolean,
+    sessionAvailable: Boolean,
+): Boolean = recoveryExpected && !sessionAvailable
+
 internal fun shouldAdoptExistingCastSession(
     sessionAvailable: Boolean,
     recoveryExpected: Boolean,
@@ -595,6 +600,19 @@ class PodwaffleMediaService : MediaSessionService() {
         localItems = local
         remoteItems = remote
         reconcileCastSessionState()
+        if (
+            shouldDeferNativePlaybackMutationForCastRecovery(
+                recoveryExpected = castReconnectExpected,
+                sessionAvailable = isCasting(),
+            )
+        ) {
+            // Keep the refreshed queue in memory, but do not load or prepare it
+            // on either player until the existing receiver has been re-adopted.
+            persistPlayback()
+            notifyCastStateChanged()
+            notifyStateChanged()
+            return
+        }
         val player = activePlayer ?: return
         val candidates = if (isCasting()) remoteItems else localItems
         if (candidates.isEmpty()) {
@@ -693,6 +711,15 @@ class PodwaffleMediaService : MediaSessionService() {
     ) {
         upsertQueueItem(localItems, local).also { localItems = it }
         upsertQueueItem(remoteItems, remote).also { remoteItems = it }
+        reconcileCastSessionState()
+        if (
+            shouldDeferNativePlaybackMutationForCastRecovery(
+                recoveryExpected = castReconnectExpected,
+                sessionAvailable = isCasting(),
+            )
+        ) {
+            throw IllegalStateException("The Cast session is reconnecting")
+        }
 
         val candidates = if (isCasting()) remoteItems else localItems
         val index = candidates.indexOfFirst { it.mediaId == local.mediaId }
@@ -1051,6 +1078,17 @@ class PodwaffleMediaService : MediaSessionService() {
             }
             if (!castReconnectExpected) return
 
+            // Keep MediaSession transport commands attached to the CastPlayer
+            // placeholder throughout recovery. The local player stays paused and
+            // cannot be resumed by Android while the receiver may still be active.
+            remote?.let { recoveringPlayer ->
+                if (activePlayer !== recoveringPlayer) {
+                    localPlayer?.pause()
+                    activePlayer = recoveringPlayer
+                    mediaSession?.setPlayer(recoveringPlayer)
+                }
+            }
+
             val now = System.currentTimeMillis()
             if (
                 currentCastSession() != null &&
@@ -1058,7 +1096,14 @@ class PodwaffleMediaService : MediaSessionService() {
                 now - castReconnectStartedAtMs >= CAST_PLAYER_REBUILD_DELAY_MS
             ) {
                 rebuildCastPlayerForRecovery()
-                if (castPlayer?.isCastSessionAvailable == true) {
+                val replacement = castPlayer
+                if (
+                    replacement?.isCastSessionAvailable == true &&
+                    (activePlayer !== replacement ||
+                        castReconnectExpected ||
+                        castConnecting ||
+                        !lastCastSnapshot.connected)
+                ) {
                     adoptExistingCastSession()
                     return
                 }

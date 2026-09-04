@@ -106,6 +106,28 @@ class QueueSelectionTest {
     }
 
     @Test
+    fun defersNativePlaybackMutationOnlyWhileCastRecoveryIsUnresolved() {
+        assertTrue(
+            shouldDeferNativePlaybackMutationForCastRecovery(
+                recoveryExpected = true,
+                sessionAvailable = false,
+            ),
+        )
+        assertFalse(
+            shouldDeferNativePlaybackMutationForCastRecovery(
+                recoveryExpected = true,
+                sessionAvailable = true,
+            ),
+        )
+        assertFalse(
+            shouldDeferNativePlaybackMutationForCastRecovery(
+                recoveryExpected = false,
+                sessionAvailable = false,
+            ),
+        )
+    }
+
+    @Test
     fun adoptsOnlyKnownOrRecoveringCastSessions() {
         val known = listOf("current", "next")
         assertTrue(
