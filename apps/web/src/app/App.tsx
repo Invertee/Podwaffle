@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiClientError, api } from "../api/client";
+import { ApiKeyManagerPortal } from "./ApiKeyManagerPortal";
 import { Dashboard } from "./Dashboard";
 import { JoinScreen } from "./JoinScreen";
 
@@ -19,6 +20,13 @@ export function App() {
       </main>
     );
   }
-  if (session.data) return <Dashboard session={session.data} />;
+  if (session.data) {
+    return (
+      <>
+        <Dashboard session={session.data} />
+        <ApiKeyManagerPortal />
+      </>
+    );
+  }
   return <JoinScreen />;
 }
