@@ -29,7 +29,20 @@ jobs:
           corepack prepare pnpm@10.15.0 --activate
       - name: Apply Cast session recovery
         run: |
-          sed -i "s/version = '0.4.22' /version = '0.4.22'/g; s/version = '0.4.23' /version = '0.4.23'/g" tools/apply_cast_session_recovery.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply_cast_session_recovery.py")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace(
+              "    '''version = '0.4.22' ''',",
+              '    "version = \'0.4.22\'",',
+          )
+          source = source.replace(
+              "    '''version = '0.4.23' ''',",
+              '    "version = \'0.4.23\'",',
+          )
+          path.write_text(source, encoding="utf-8")
+          PY
           python tools/apply_cast_session_recovery.py
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -50,7 +63,7 @@ jobs:
           rm tools/apply_cast_session_recovery.py
           rm .github/workflows/validate-cast-session-recovery.yml
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+Invertee@users.noreply.github.com"
           git add -A
           git commit -m "fix(android): recover active Cast sessions without local autoplay [skip ci]"
           git push
