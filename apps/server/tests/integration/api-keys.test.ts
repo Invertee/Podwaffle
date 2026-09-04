@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import supertest from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -51,11 +52,17 @@ describe("profile API keys", () => {
 
     const authorization = { authorization: `Bearer ${result.token}` };
     await request.get("/api/v1/snapshot").set(authorization).expect(200);
+
+    await browser
+      .post("/api/v1/playback/lease")
+      .send({ positionMs: 0, playbackRate: 1 })
+      .expect(200);
     await request
       .post("/api/v1/playback/commands")
       .set(authorization)
-      .send({ commandId: crypto.randomUUID(), action: "play" })
+      .send({ commandId: randomUUID(), action: "play" })
       .expect(202);
+
     await request
       .post("/api/v1/api-keys")
       .set(authorization)
