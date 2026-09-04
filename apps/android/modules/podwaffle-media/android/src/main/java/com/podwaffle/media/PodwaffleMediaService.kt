@@ -352,6 +352,12 @@ class PodwaffleMediaService : MediaSessionService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val player = activeOwner() ?: return
+                if (player === castPlayer && castReconnectExpected) {
+                    // A sender reconnect can temporarily clear or replace the
+                    // CastPlayer item while the receiver continues normally.
+                    // Do not treat that transport churn as episode completion.
+                    return
+                }
                 if (
                     player === castPlayer &&
                     shouldSuppressCastStartupTransition(
@@ -417,6 +423,7 @@ class PodwaffleMediaService : MediaSessionService() {
 
             override fun onEvents(player: Player, events: Player.Events) {
                 if (player !== activePlayer) return
+                if (player === castPlayer && castReconnectExpected) return
                 if (
                     player === castPlayer &&
                     castStartupGuardActive() &&
@@ -945,16 +952,31 @@ class PodwaffleMediaService : MediaSessionService() {
         val context = castContext ?: return
         castPlayerRebuiltForRecovery = true
         val previous = castPlayer
-        if (activePlayer === previous) {
-            localPlayer?.pause()
-            activePlayer = localPlayer
-            localPlayer?.let { mediaSession?.setPlayer(it) }
-        }
+        val wasActive = activePlayer === previous
         previous?.setSessionAvailabilityListener(null)
         previous?.removeListener(castPlayerListener)
-        previous?.release()
-        castPlayer = null
-        installCastPlayer(context)
+
+        try {
+            // Build and attach the replacement before releasing the old sender.
+            // The media session is never pointed at the local player during this
+            // operation, so a hardware/system play command cannot start duplicate
+            // phone audio in the middle of Cast recovery.
+            installCastPlayer(context)
+            val replacement = castPlayer
+            if (wasActive && replacement != null && activePlayer === previous) {
+                activePlayer = replacement
+                mediaSession?.setPlayer(replacement)
+            }
+            previous?.release()
+        } catch (error: Exception) {
+            castPlayer = previous
+            previous?.addListener(castPlayerListener)
+            previous?.setSessionAvailabilityListener(castAvailabilityListener)
+            emitError(
+                "CAST_RECONNECTION_FAILED",
+                error.message ?: "Google Cast could not be reconnected",
+            )
+        }
     }
 
     private fun beginCastRecovery() {
@@ -1007,8 +1029,16 @@ class PodwaffleMediaService : MediaSessionService() {
         try {
             val remote = castPlayer
             if (remote?.isCastSessionAvailable == true) {
-                if (pendingCastEpisodeId != null) transferToCast()
-                else adoptExistingCastSession()
+                if (pendingCastEpisodeId != null) {
+                    transferToCast()
+                } else if (
+                    activePlayer !== remote ||
+                    castReconnectExpected ||
+                    castConnecting ||
+                    !lastCastSnapshot.connected
+                ) {
+                    adoptExistingCastSession()
+                }
                 return
             }
 
@@ -1207,6 +1237,7 @@ class PodwaffleMediaService : MediaSessionService() {
     }
 
     private fun transferToLocal(positionMs: Long, resume: Boolean) {
+        val previousCastSnapshot = lastCastSnapshot
         clearCastStartupGuard()
         clearCastRecovery(clearPersistedAuthority = true)
         val local = localPlayer ?: return
@@ -1226,7 +1257,7 @@ class PodwaffleMediaService : MediaSessionService() {
             notifyStateChanged()
             return
         }
-        val currentId = lastCastSnapshot.episode?.episodeId
+        val currentId = previousCastSnapshot.episode?.episodeId
             ?: castPlayer?.currentMediaItem?.mediaId
         val index = localItems.indexOfFirst { it.mediaId == currentId }
             .takeIf { it >= 0 }
@@ -1532,6 +1563,7 @@ class PodwaffleMediaService : MediaSessionService() {
 
     private fun restorePlayback() {
         val raw = playbackPreferences.getString("items", null) ?: return
+        val savedCastAuthority = playbackPreferences.getBoolean("casting", false)
         try {
             val array = JSONArray(raw)
             val media = buildList {
@@ -1566,7 +1598,7 @@ class PodwaffleMediaService : MediaSessionService() {
             lastObservedPositionMs = position
             lastObservedDurationMs = media.getOrNull(index)?.durationMs
 
-            persistedCastAuthority = playbackPreferences.getBoolean("casting", false)
+            persistedCastAuthority = savedCastAuthority
             if (persistedCastAuthority) {
                 val now = System.currentTimeMillis()
                 val wasPlaying = playbackPreferences.getBoolean("castPlaying", false)
@@ -1601,6 +1633,7 @@ class PodwaffleMediaService : MediaSessionService() {
     }
 
     private fun clearPersistedPlayback() {
+        persistedCastAuthority = false
         playbackPreferences.edit().clear().apply()
     }
 
