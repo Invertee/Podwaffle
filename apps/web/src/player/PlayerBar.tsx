@@ -305,20 +305,22 @@ export function PlayerBar({
               <Icon name="close" />
             </button>
             {episode.artworkUrl && <img src={episode.artworkUrl} alt="" />}
-            <p className="eyebrow">{episode.podcastTitle}</p>
-            <h2>{episode.title}</h2>
-            <p>
-              {episode.publishedAt
-                ? new Date(episode.publishedAt).toLocaleDateString()
-                : ""}{" "}
-              · {time(displayDurationMs)}
-            </p>
-            <div className="show-notes">{notes(episode.descriptionHtml)}</div>
-            {episode.episodeUrl && (
-              <a href={episode.episodeUrl} target="_blank" rel="noreferrer">
-                Open episode source
-              </a>
-            )}
+            <div className="episode-info-copy">
+              <p className="eyebrow">{episode.podcastTitle}</p>
+              <h2>{episode.title}</h2>
+              <p>
+                {episode.publishedAt
+                  ? new Date(episode.publishedAt).toLocaleDateString()
+                  : ""}{" "}
+                · {time(displayDurationMs)}
+              </p>
+              <div className="show-notes">{notes(episode.descriptionHtml)}</div>
+              {episode.episodeUrl && (
+                <a href={episode.episodeUrl} target="_blank" rel="noreferrer">
+                  Open episode source
+                </a>
+              )}
+            </div>
           </aside>
         </div>
       )}

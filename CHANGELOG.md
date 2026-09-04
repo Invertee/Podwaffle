@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refined the web episode information drawer with smaller centred artwork and
+  padded copy, compacted queue/profile action buttons, and reduced desktop
+  podcast tiles by roughly ten percent for a denser library layout.
 - Kept active Cast playback loaded when queue changes arrive from another client,
   reconciling only future receiver queue items instead of reloading and preparing
   the current episode, which could pause audio and destabilize sender control.
