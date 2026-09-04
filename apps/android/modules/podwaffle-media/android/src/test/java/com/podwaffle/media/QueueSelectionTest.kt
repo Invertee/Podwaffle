@@ -34,6 +34,42 @@ class QueueSelectionTest {
     }
 
     @Test
+    fun keepsTheCurrentCastItemLoadedWhenOnlyTheFutureQueueChanges() {
+        assertTrue(
+            canReconcileActiveCastQueueWithoutReload(
+                activeCast = true,
+                currentId = "current",
+                currentIndex = 0,
+                candidateIds = listOf("current", "next", "new"),
+            ),
+        )
+        assertFalse(
+            canReconcileActiveCastQueueWithoutReload(
+                activeCast = true,
+                currentId = "current",
+                currentIndex = 1,
+                candidateIds = listOf("previous", "current", "next"),
+            ),
+        )
+        assertFalse(
+            canReconcileActiveCastQueueWithoutReload(
+                activeCast = true,
+                currentId = "current",
+                currentIndex = 0,
+                candidateIds = listOf("replacement", "next"),
+            ),
+        )
+        assertFalse(
+            canReconcileActiveCastQueueWithoutReload(
+                activeCast = false,
+                currentId = "current",
+                currentIndex = 0,
+                candidateIds = listOf("current", "next"),
+            ),
+        )
+    }
+
+    @Test
     fun suppressesOnlyUnexpectedAutomaticTransitionsDuringCastStartup() {
         assertTrue(
             shouldSuppressCastStartupTransition(

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kept active Cast playback loaded when queue changes arrive from another client,
+  reconciling only future receiver queue items instead of reloading and preparing
+  the current episode, which could pause audio and destabilize sender control.
+  Also compacted the Android push diagnostics viewer into a four-row-height
+  scrollable console. Updated Android to 0.4.34 / versionCode 38 / native runtime
+  0.4-native-28.
 - Replaced background local scheduling for encrypted Home Assistant messages with
   direct Android NotificationManager delivery, added persistent on-device push
   diagnostics and a notification-channel test to the Settings status page, and

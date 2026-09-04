@@ -47,6 +47,17 @@ internal fun reconcileQueueSelection(
     )
 }
 
+internal fun canReconcileActiveCastQueueWithoutReload(
+    activeCast: Boolean,
+    currentId: String?,
+    currentIndex: Int,
+    candidateIds: List<String>,
+): Boolean =
+    activeCast &&
+        currentIndex == 0 &&
+        currentId != null &&
+        candidateIds.firstOrNull() == currentId
+
 internal fun shouldSuppressCastStartupTransition(
     reason: Int,
     guardActive: Boolean,
@@ -519,8 +530,35 @@ class PodwaffleMediaService : MediaSessionService() {
 
         val currentId = player.currentMediaItem?.mediaId
         val currentPosition = player.currentPosition.coerceAtLeast(0L)
+        val candidateIds = candidates.map { it.mediaId }
+        if (
+            canReconcileActiveCastQueueWithoutReload(
+                player === castPlayer && isCasting(),
+                currentId,
+                player.currentMediaItemIndex,
+                candidateIds,
+            )
+        ) {
+            // Do not reload/prepare the active Cast item for a queue-only change.
+            // CastPlayer.setMediaItems() sends a receiver queue load which can
+            // briefly pause playback and, on some receivers, detach the sender.
+            // The playback invariant keeps the current episode at queue index 0,
+            // so mutate only the future queue while the receiver keeps playing.
+            reconcileActiveCastQueueTail(player, candidates)
+            lastMediaItem = player.currentMediaItem
+            lastObservedMediaId = currentId
+            lastObservedPositionMs = currentPosition
+            lastObservedDurationMs =
+                EpisodeMedia.fromMediaItem(player.currentMediaItem)?.durationMs
+                    ?: lastObservedDurationMs
+            persistPlayback()
+            notifyQueueChanged()
+            notifyCastStateChanged()
+            notifyStateChanged()
+            return
+        }
         val selection = reconcileQueueSelection(
-            candidates.map { it.mediaId },
+            candidateIds,
             currentId,
             currentPosition,
             requestedIndex,
@@ -539,6 +577,35 @@ class PodwaffleMediaService : MediaSessionService() {
         persistPlayback()
         notifyQueueChanged()
         notifyStateChanged()
+    }
+
+    private fun reconcileActiveCastQueueTail(
+        player: Player,
+        candidates: List<MediaItem>,
+    ) {
+        val desiredTail = candidates.drop(1)
+        val existingTail = buildList {
+            for (index in 1 until player.mediaItemCount) {
+                add(player.getMediaItemAt(index))
+            }
+        }
+        var sharedPrefix = 0
+        while (
+            sharedPrefix < existingTail.size &&
+            sharedPrefix < desiredTail.size &&
+            existingTail[sharedPrefix].mediaId == desiredTail[sharedPrefix].mediaId
+        ) {
+            sharedPrefix += 1
+        }
+
+        val replaceFrom = 1 + sharedPrefix
+        if (player.mediaItemCount > replaceFrom) {
+            player.removeMediaItems(replaceFrom, player.mediaItemCount)
+        }
+        val replacement = desiredTail.drop(sharedPrefix)
+        if (replacement.isNotEmpty()) {
+            player.addMediaItems(replaceFrom, replacement)
+        }
     }
 
     fun playEpisode(

@@ -3,6 +3,7 @@ import {
   Alert,
   Linking,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -223,7 +224,12 @@ export function PushDiagnosticsCard() {
         </Pressable>
       </View>
 
-      <View style={styles.console}>
+      <ScrollView
+        style={styles.console}
+        contentContainerStyle={styles.consoleContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+      >
         {entries.length === 0 ? (
           <Text style={styles.empty}>
             No push events recorded. Send a Home Assistant message, then tap
@@ -251,7 +257,7 @@ export function PushDiagnosticsCard() {
             </View>
           ))
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -346,12 +352,15 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.semibold,
   },
   console: {
-    gap: spacing.xs,
-    padding: spacing.sm,
+    height: 200,
     borderRadius: radii.md,
     backgroundColor: colors.bgPrimary,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
+  },
+  consoleContent: {
+    gap: spacing.xs,
+    padding: spacing.sm,
   },
   empty: { color: colors.textMuted, fontSize: fontSizes.xs, lineHeight: 17 },
   entry: {
