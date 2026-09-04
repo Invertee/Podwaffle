@@ -31,6 +31,7 @@ jobs:
         run: |
           pnpm --filter @podwaffle/web typecheck
           pnpm --filter @podwaffle/web test
+          pnpm --filter @podwaffle/contracts build
           pnpm --filter @podwaffle/web build
       - name: Check patch formatting
         run: git diff --check
