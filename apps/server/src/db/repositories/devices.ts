@@ -15,9 +15,10 @@ export type DeviceScope =
   | "devices:write";
 
 interface DeviceCapabilities {
-  clientKind?: "home_assistant";
+  clientKind?: "home_assistant" | "api_key";
   playbackTarget?: boolean;
   scopes?: Array<DeviceScope | "*">;
+  keyPrefix?: string;
 }
 
 export interface DeviceRow {
@@ -33,6 +34,22 @@ export interface DeviceRow {
   revoked_at: string | null;
   created_at: string;
 }
+
+export interface ApiKeySummary {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: DeviceScope[];
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+const API_KEY_SCOPES: DeviceScope[] = [
+  "snapshot:read",
+  "sync:read",
+  "stats:read",
+  "playback:control",
+];
 
 function capabilitiesFor(request: JoinRequest): DeviceCapabilities {
   if (request.platform !== "home_assistant") return {};
@@ -58,6 +75,10 @@ export function deviceCapabilities(row: DeviceRow): DeviceCapabilities {
   }
 }
 
+export function deviceIsApiKey(row: DeviceRow): boolean {
+  return deviceCapabilities(row).clientKind === "api_key";
+}
+
 export function publicDevicePlatform(row: DeviceRow): Platform {
   return deviceCapabilities(row).clientKind === "home_assistant"
     ? "home_assistant"
@@ -66,19 +87,25 @@ export function publicDevicePlatform(row: DeviceRow): Platform {
 
 export function deviceIsPlaybackTarget(row: DeviceRow): boolean {
   const capabilities = deviceCapabilities(row);
-  if (capabilities.clientKind === "home_assistant") return false;
+  if (
+    capabilities.clientKind === "home_assistant" ||
+    capabilities.clientKind === "api_key"
+  ) {
+    return false;
+  }
   return capabilities.playbackTarget !== false;
 }
 
 export function deviceHasScope(row: DeviceRow, scope: DeviceScope): boolean {
   const capabilities = deviceCapabilities(row);
   // Existing web and Android credentials predate scopes and retain full profile
-  // access. Only controller-class credentials are constrained.
-  if (capabilities.clientKind !== "home_assistant") return true;
+  // access. Controller-class credentials and API keys are constrained.
+  if (!capabilities.clientKind) return true;
   // Controllers enrolled before notification support already have the
   // profile-scoped playback control permission. Preserve those credentials so
   // upgrading the integration does not require Home Assistant reauthentication.
   if (
+    capabilities.clientKind === "home_assistant" &&
     scope === "notifications:send" &&
     capabilities.scopes?.includes("playback:control")
   ) {
@@ -127,6 +154,40 @@ export function createDevice(
   };
 }
 
+export function createApiKey(
+  db: DatabaseSync,
+  profileId: string,
+  name: string,
+): { apiKey: ApiKeySummary; token: string } {
+  const id = randomUUID();
+  const token = `pwk_${randomBytes(32).toString("base64url")}`;
+  const now = new Date().toISOString();
+  const capabilities: DeviceCapabilities = {
+    clientKind: "api_key",
+    playbackTarget: false,
+    scopes: API_KEY_SCOPES,
+    keyPrefix: token.slice(0, 12),
+  };
+  db.prepare(
+    `INSERT INTO devices
+     (id, profile_id, name, platform, token_hash, app_version, runtime_version,
+      capabilities_json, last_seen_at, created_at)
+     VALUES (?, ?, ?, 'web', ?, NULL, NULL, ?, ?, ?)`,
+  ).run(
+    id,
+    profileId,
+    name,
+    hashDeviceToken(token),
+    JSON.stringify(capabilities),
+    now,
+    now,
+  );
+  const row = db
+    .prepare("SELECT * FROM devices WHERE id = ?")
+    .get(id) as unknown as DeviceRow;
+  return { token, apiKey: apiKeySummary(row) };
+}
+
 export function authenticateDevice(
   db: DatabaseSync,
   token: string,
@@ -146,11 +207,61 @@ export function listProfileDevices(
   db: DatabaseSync,
   profileId: string,
 ): DeviceRow[] {
-  return db
+  const rows = db
     .prepare(
       `SELECT * FROM devices
        WHERE profile_id = ? AND revoked_at IS NULL
        ORDER BY created_at`,
     )
     .all(profileId) as unknown as DeviceRow[];
+  return rows.filter((row) => !deviceIsApiKey(row));
+}
+
+function apiKeySummary(row: DeviceRow): ApiKeySummary {
+  const capabilities = deviceCapabilities(row);
+  return {
+    id: row.id,
+    name: row.name,
+    prefix: capabilities.keyPrefix || "pwk_",
+    scopes: (capabilities.scopes || []).filter(
+      (scope): scope is DeviceScope => scope !== "*",
+    ),
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+  };
+}
+
+export function listProfileApiKeys(
+  db: DatabaseSync,
+  profileId: string,
+): ApiKeySummary[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM devices
+       WHERE profile_id = ? AND revoked_at IS NULL
+       ORDER BY created_at DESC`,
+    )
+    .all(profileId) as unknown as DeviceRow[];
+  return rows.filter(deviceIsApiKey).map(apiKeySummary);
+}
+
+export function revokeProfileApiKey(
+  db: DatabaseSync,
+  profileId: string,
+  apiKeyId: string,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT * FROM devices
+       WHERE id = ? AND profile_id = ? AND revoked_at IS NULL`,
+    )
+    .get(apiKeyId, profileId) as DeviceRow | undefined;
+  if (!row || !deviceIsApiKey(row)) return false;
+  return (
+    Number(
+      db
+        .prepare("UPDATE devices SET revoked_at = ? WHERE id = ?")
+        .run(new Date().toISOString(), apiKeyId).changes,
+    ) > 0
+  );
 }
