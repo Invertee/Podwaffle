@@ -182,6 +182,7 @@ interface PodwaffleNativeModule {
   castSeek(positionMs: number): Promise<NativeCastState>;
   showCastPicker(): Promise<NativeCastState>;
   stopCast(input: { stopReceiver: boolean }): Promise<NativeCastState>;
+  refreshCastSession(): Promise<NativeCastState>;
   getCastState(): Promise<NativeCastState>;
   setCastVolume(volume: number): Promise<NativeCastState>;
   addDownload(
@@ -280,6 +281,9 @@ export const PodwaffleMediaModule = {
   },
   stopCast(input: { stopReceiver: boolean }): Promise<NativeCastState> {
     return nativeModule.stopCast(input);
+  },
+  refreshCastSession(): Promise<NativeCastState> {
+    return nativeModule.refreshCastSession();
   },
   getCastState(): Promise<NativeCastState> {
     return nativeModule.getCastState();

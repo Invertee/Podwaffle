@@ -70,6 +70,79 @@ class QueueSelectionTest {
     }
 
     @Test
+    fun holdsLocalPlaybackDuringTransientOrSavedCastRecovery() {
+        assertTrue(
+            shouldHoldLocalPlaybackForCastRecovery(
+                explicitStop = false,
+                pendingCastRequest = false,
+                hadActiveCast = true,
+                savedCastAuthority = false,
+            ),
+        )
+        assertTrue(
+            shouldHoldLocalPlaybackForCastRecovery(
+                explicitStop = false,
+                pendingCastRequest = false,
+                hadActiveCast = false,
+                savedCastAuthority = true,
+            ),
+        )
+        assertFalse(
+            shouldHoldLocalPlaybackForCastRecovery(
+                explicitStop = true,
+                pendingCastRequest = false,
+                hadActiveCast = true,
+                savedCastAuthority = true,
+            ),
+        )
+        assertFalse(
+            shouldHoldLocalPlaybackForCastRecovery(
+                explicitStop = false,
+                pendingCastRequest = true,
+                hadActiveCast = true,
+                savedCastAuthority = true,
+            ),
+        )
+    }
+
+    @Test
+    fun adoptsOnlyKnownOrRecoveringCastSessions() {
+        val known = listOf("current", "next")
+        assertTrue(
+            shouldAdoptExistingCastSession(
+                sessionAvailable = true,
+                recoveryExpected = false,
+                currentMediaId = "current",
+                knownMediaIds = known,
+            ),
+        )
+        assertTrue(
+            shouldAdoptExistingCastSession(
+                sessionAvailable = true,
+                recoveryExpected = true,
+                currentMediaId = null,
+                knownMediaIds = known,
+            ),
+        )
+        assertFalse(
+            shouldAdoptExistingCastSession(
+                sessionAvailable = true,
+                recoveryExpected = false,
+                currentMediaId = "another-app",
+                knownMediaIds = known,
+            ),
+        )
+        assertFalse(
+            shouldAdoptExistingCastSession(
+                sessionAvailable = false,
+                recoveryExpected = true,
+                currentMediaId = "current",
+                knownMediaIds = known,
+            ),
+        )
+    }
+
+    @Test
     fun suppressesOnlyUnexpectedAutomaticTransitionsDuringCastStartup() {
         assertTrue(
             shouldSuppressCastStartupTransition(

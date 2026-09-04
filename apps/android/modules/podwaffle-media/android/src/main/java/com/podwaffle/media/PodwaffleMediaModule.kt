@@ -236,6 +236,10 @@ class PodwaffleMediaModule : Module() {
             }
         }
 
+        AsyncFunction("refreshCastSession") {
+            withServiceOnMain(PodwaffleMediaService::refreshCastSession)
+        }
+
         AsyncFunction("getCastState") {
             onMain {
                 PodwaffleMediaService.instance?.getCastState()

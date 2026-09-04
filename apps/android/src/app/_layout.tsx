@@ -49,10 +49,12 @@ function NativeMediaBinder() {
   const bindToService = useCallback(async () => {
     setBinding(true);
     try {
-      const [initialState, castState] = await Promise.all([
-        PodwaffleMediaModule.bind(),
-        PodwaffleMediaModule.getCastState().catch(() => null),
-      ]);
+      // Give the native service a chance to re-adopt a resumed Cast session
+      // before exposing local playback state to React Native.
+      const castState = await PodwaffleMediaModule.refreshCastSession().catch(
+        () => null,
+      );
+      const initialState = await PodwaffleMediaModule.bind();
       updateState(initialState);
       playbackController.handleNativeState(initialState);
       if (castState) playbackController.handleCastState(castState);
@@ -178,6 +180,13 @@ function RuntimeBinder() {
     }
   }, [applyConnectionState]);
 
+  const refreshNativeCastSession = useCallback(async () => {
+    const cast = await PodwaffleMediaModule.refreshCastSession().catch(
+      () => null,
+    );
+    if (cast) playbackController.handleCastState(cast);
+  }, []);
+
   useEffect(() => void restore(), [restore]);
 
   useEffect(() => {
@@ -227,6 +236,16 @@ function RuntimeBinder() {
     }
     return () => syncRuntime.stop();
   }, [status, credentials, liveSyncEnabled]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !credentials) return;
+    const check = () => {
+      if (AppState.currentState === "active") void refreshNativeCastSession();
+    };
+    check();
+    const timer = setInterval(check, 10_000);
+    return () => clearInterval(timer);
+  }, [status, credentials, refreshNativeCastSession]);
 
   useEffect(() => {
     const previous = priorLiveSyncEnabled.current;
@@ -281,6 +300,7 @@ function RuntimeBinder() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
+        void refreshNativeCastSession();
         void refreshConnectionState();
         void refresh();
         void playbackController.flushPendingPlayback();
@@ -291,7 +311,7 @@ function RuntimeBinder() {
       }
     });
     return () => subscription.remove();
-  }, [refresh, refreshConnectionState]);
+  }, [refresh, refreshConnectionState, refreshNativeCastSession]);
 
   return null;
 }

@@ -685,7 +685,9 @@ class AndroidPlaybackController {
     this.sampleListening();
 
     if (castState.connected && castState.session) {
-      usePlayerUiStore.getState().setCastStatus("connected");
+      usePlayerUiStore
+        .getState()
+        .setCastStatus(castState.connecting ? "connecting" : "connected");
       if (
         castState.session.episodeId &&
         this.activeEpisode?.id !== castState.session.episodeId
@@ -700,16 +702,23 @@ class AndroidPlaybackController {
               return;
             }
             this.activeEpisode = episode;
-            // A restored Cast session can arrive before JS has reconstructed
-            // its episode object. Retry the confirmation once metadata exists
-            // so the receiver's position is not lost across process death.
-            void this.reportCastState(true).catch(() => undefined);
+            if (!useNativeMediaStore.getState().castState.connecting) {
+              // A restored Cast session can arrive before JS has reconstructed
+              // its episode object. Retry confirmation once metadata exists.
+              void this.reportCastState(true).catch(() => undefined);
+            }
           },
         );
       }
+      if (castState.connecting) return;
       const takeover = this.castTakeoverRequested;
       this.castTakeoverRequested = false;
       void this.reportCastState(!this.castBackendActive, undefined, takeover);
+      return;
+    }
+
+    if (castState.connecting) {
+      usePlayerUiStore.getState().setCastStatus("connecting");
       return;
     }
 
@@ -718,10 +727,7 @@ class AndroidPlaybackController {
       return;
     }
 
-    if (
-      !castState.connecting &&
-      usePlayerUiStore.getState().castStatus === "connecting"
-    ) {
+    if (usePlayerUiStore.getState().castStatus === "connecting") {
       this.castTakeoverRequested = false;
       usePlayerUiStore.getState().setCastStatus("idle");
     }
@@ -1199,7 +1205,13 @@ class AndroidPlaybackController {
   ): Promise<void> {
     const cast = useNativeMediaStore.getState().castState;
     const episodeId = cast.session?.episodeId;
-    if (this.clearingPlayback || !cast.connected || !cast.session || !episodeId)
+    if (
+      this.clearingPlayback ||
+      cast.connecting ||
+      !cast.connected ||
+      !cast.session ||
+      !episodeId
+    )
       return;
     if (
       episodeId !== allowedCompletedEpisodeId &&
@@ -1336,12 +1348,11 @@ class AndroidPlaybackController {
   ): Promise<void> {
     const session = previous.session;
     if (!session) return;
-    const resume = session.playerState === "playing";
     try {
       await this.stopBackendCast(
         session.positionMs,
         session.durationMs,
-        resume ? "playing" : "paused",
+        "paused",
         session.episodeId ?? this.activeEpisode?.id ?? null,
         session.sessionId,
       );
@@ -1352,8 +1363,9 @@ class AndroidPlaybackController {
     await PodwaffleMediaModule.seekTo(session.positionMs).catch(
       () => undefined,
     );
-    if (resume) await PodwaffleMediaModule.play().catch(() => undefined);
-    else await PodwaffleMediaModule.pause().catch(() => undefined);
+    // Never auto-resume after an unexpected Cast loss. The receiver may still
+    // be playing even when this sender has lost its session connection.
+    await PodwaffleMediaModule.pause().catch(() => undefined);
     usePlayerUiStore.getState().setCastStatus("idle");
   }
 

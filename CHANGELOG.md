@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Made Android retain and re-adopt active Google Cast sessions across transient
+  sender disconnects, process recreation, and foreground transitions; blocked
+  local media resumption while Cast recovery is pending; and changed a confirmed
+  Cast loss to return to local playback paused instead of starting a duplicate
+  stream. Added periodic native and foreground Cast reconciliation. Updated
+  Android to 0.4.35 / versionCode 39 / native runtime 0.4-native-29.
 - Refined the web episode information drawer with smaller centred artwork and
   padded copy, compacted queue/profile action buttons, and reduced desktop
   podcast tiles by roughly ten percent for a denser library layout.
