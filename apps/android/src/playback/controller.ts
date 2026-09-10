@@ -123,6 +123,8 @@ class AndroidPlaybackController {
       throw new Error("This episode does not have a playable audio enclosure.");
     }
     await this.ensureNotificationPermission();
+    // Native expiry may have happened while JS was suspended overnight.
+    this.handleCastState(await PodwaffleMediaModule.refreshCastSession());
     const cast = useNativeMediaStore.getState().castState;
     if (cast.connected) {
       this.activeEpisode = playbackEpisode;
@@ -288,6 +290,7 @@ class AndroidPlaybackController {
       });
       return;
     }
+    this.handleCastState(await PodwaffleMediaModule.refreshCastSession());
     const cast = useNativeMediaStore.getState().castState;
     if (cast.connected) {
       await PodwaffleMediaModule.castPlay();
@@ -1360,13 +1363,11 @@ class AndroidPlaybackController {
       // A server-side idle timeout may already have cleared the Cast owner.
     }
     this.castBackendActive = false;
-    await PodwaffleMediaModule.seekTo(session.positionMs).catch(
-      () => undefined,
-    );
-    // Never auto-resume after an unexpected Cast loss. The receiver may still
-    // be playing even when this sender has lost its session connection.
-    await PodwaffleMediaModule.pause().catch(() => undefined);
-    usePlayerUiStore.getState().setCastStatus("idle");
+    // The native service already restored paused local playback. Repeating a
+    // seek/pause after this network request can interrupt a new user Play action.
+    if (!useNativeMediaStore.getState().castState.connected) {
+      usePlayerUiStore.getState().setCastStatus("idle");
+    }
   }
 
   private async flushTelemetry(

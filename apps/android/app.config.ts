@@ -16,7 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Podwaffle",
   slug: "podwaffle",
-  version: "0.4.35",
+  version: "0.4.36",
   orientation: "portrait",
   icon: sharedPodwaffleIcon,
   scheme: "podwaffle",
@@ -30,10 +30,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: "com.podwaffle.app",
-    buildNumber: "37",
+    buildNumber: "38",
   },
   android: {
-    versionCode: 39,
+    versionCode: 40,
     adaptiveIcon: {
       foregroundImage: sharedPodwaffleIcon,
       backgroundColor: "#0D1B2A",
@@ -94,7 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
-    nativeRuntimeVersion: "0.4-native-29",
+    nativeRuntimeVersion: "0.4-native-30",
     apiMinVersion: 1,
   },
 });

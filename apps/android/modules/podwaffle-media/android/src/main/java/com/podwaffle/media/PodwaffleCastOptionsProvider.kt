@@ -16,13 +16,20 @@ class PodwaffleCastOptionsProvider : OptionsProvider {
             // lock-screen sessions and notifications.
             .setMediaSessionEnabled(false)
             .build()
+        val preferences = appContext.getSharedPreferences(CastSessionPolicy.PREFERENCES, Context.MODE_PRIVATE)
+        val resumeSavedSession = CastSessionPolicy.canResume(
+            preferences.getBoolean("casting", false),
+            preferences.getLong("castLastActivityAt", 0L),
+            preferences.getLong("castRecoveryDeadline", 0L),
+            System.currentTimeMillis(),
+        )
         return CastOptions.Builder()
             .setReceiverApplicationId(
                 CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID
             )
             .setCastMediaOptions(mediaOptions)
             .setEnableReconnectionService(true)
-            .setResumeSavedSession(true)
+            .setResumeSavedSession(resumeSavedSession)
             .setSessionTransferEnabled(true)
             .setRemoteToLocalEnabled(true)
             .setStopReceiverApplicationWhenEndingSession(false)

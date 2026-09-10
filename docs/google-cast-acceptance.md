@@ -24,3 +24,14 @@ to the same Podwaffle profile and two real Cast-capable speakers/displays.
 
 Record the browser version, receiver models/firmware, custom receiver ID (if
 used), and any failed item with server/browser logs.
+
+## Android cancellation and expiry regression checks
+
+- [ ] With local playback running, open Cast and tap outside the chooser. The spinner clears immediately, local playback resumes at the same position, and the chooser can be reopened. Repeat using Android Back.
+- [ ] Repeat with paused playback and with no episode loaded. Cancellation must not start playback or reset the position.
+- [ ] Select a receiver normally; chooser dismissal after selection must not cancel the connection. Test a failed connection and retry.
+- [ ] Pause Cast for 30 minutes, including with the app backgrounded/offline. On return, playback is local and paused; pressing Play must not show a reconnecting error.
+- [ ] Restart the process with an overnight saved Cast session. There must be no SDK resume attempt, spinner, or stale Cast ownership.
+- [ ] Interrupt a playing Cast connection briefly: it may recover within 30 seconds. After that deadline, it returns to paused local playback and late SDK callbacks cannot restore it. Restarting the process must not reset that deadline.
+- [ ] End the receiver session externally; the app clears Cast immediately instead of beginning recovery.
+- [ ] Check the launcher, splash, web/PWA icon and Home Assistant add-on/integration icon use the radio artwork.

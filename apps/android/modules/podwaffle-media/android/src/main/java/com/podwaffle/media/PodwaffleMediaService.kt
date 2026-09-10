@@ -26,6 +26,7 @@ import androidx.media3.session.SessionResult
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.CastSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -119,7 +120,7 @@ class PodwaffleMediaService : MediaSessionService() {
     private var castContext: CastContext? = null
     private var downloadStore: PodwaffleDownloadStore? = null
     private val playbackPreferences by lazy {
-        getSharedPreferences("podwaffle.native.playback.v2", MODE_PRIVATE)
+        getSharedPreferences(CastSessionPolicy.PREFERENCES, MODE_PRIVATE)
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -139,6 +140,7 @@ class PodwaffleMediaService : MediaSessionService() {
     private var castStartupCorrectionScheduled = false
     private var explicitCastStop = false
     private var persistedCastAuthority = false
+    private var castLastActivityAtMs = 0L
     private var castReconnectExpected = false
     private var castReconnectStartedAtMs = 0L
     private var castReconnectDeadlineMs = 0L
@@ -157,7 +159,7 @@ class PodwaffleMediaService : MediaSessionService() {
         private const val DEFAULT_SKIP_FORWARD_MS = 30_000L
         private const val CAST_VOLUME_STEP = 0.05f
         private const val CAST_STARTUP_GUARD_MS = 5_000L
-        private const val CAST_RECONNECT_GRACE_MS = 30_000L
+        private const val CAST_RECONNECT_GRACE_MS = CastSessionPolicy.RECOVERY_TIMEOUT_MS
         private const val CAST_PLAYER_REBUILD_DELAY_MS = 2_500L
         private const val ACTION_SKIP_BACK = "com.podwaffle.media.SKIP_BACK"
         private const val ACTION_SKIP_FORWARD = "com.podwaffle.media.SKIP_FORWARD"
@@ -452,8 +454,63 @@ class PodwaffleMediaService : MediaSessionService() {
             }
         }
 
+    private val castSessionListener = object : SessionManagerListener<CastSession> {
+        override fun onSessionStarting(session: CastSession) {
+            explicitCastStop = false
+            castLastActivityAtMs = System.currentTimeMillis()
+        }
+        override fun onSessionStarted(session: CastSession, sessionId: String) = Unit
+        override fun onSessionStartFailed(session: CastSession, error: Int) {
+            cancelCastPicker()
+        }
+        override fun onSessionEnding(session: CastSession) {
+            explicitCastStop = true
+        }
+        override fun onSessionEnded(session: CastSession, error: Int) {
+            finishCastSession()
+        }
+        override fun onSessionResuming(session: CastSession, sessionId: String) {
+            if (!CastSessionPolicy.canResume(
+                    persistedCastAuthority, castLastActivityAtMs,
+                    castReconnectDeadlineMs, System.currentTimeMillis(),
+                )) {
+                stopCast(false)
+            }
+        }
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) = Unit
+        override fun onSessionResumeFailed(session: CastSession, error: Int) {
+            stopCast(false)
+        }
+        override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
+    }
+
+    private fun finishCastSession() {
+        explicitCastStop = true
+        clearCastPickerTimeout()
+        if (pendingCastEpisodeId != null) {
+            transferToLocal(pendingCastPositionMs, pendingCastAutoplay)
+        } else if (persistedCastAuthority || castReconnectExpected || activePlayer === castPlayer) {
+            transferToLocal(lastCastSnapshot.positionMs, resume = false)
+        } else {
+            clearPendingCast()
+            clearCastRecovery(clearPersistedAuthority = true)
+            notifyCastStateChanged()
+        }
+    }
+
     private val castAvailabilityListener = object : SessionAvailabilityListener {
         override fun onCastSessionAvailable() {
+            if (explicitCastStop) {
+                castContext?.sessionManager?.endCurrentSession(false)
+                return
+            }
+            if (persistedCastAuthority && !CastSessionPolicy.canResume(
+                    persistedCastAuthority, castLastActivityAtMs,
+                    castReconnectDeadlineMs, System.currentTimeMillis(),
+                )) {
+                stopCast(false)
+                return
+            }
             clearCastPickerTimeout()
             if (pendingCastEpisodeId != null) {
                 transferToCast()
@@ -468,9 +525,7 @@ class PodwaffleMediaService : MediaSessionService() {
         override fun onCastSessionUnavailable() {
             clearCastPickerTimeout()
             if (explicitCastStop) {
-                explicitCastStop = false
-                clearCastRecovery(clearPersistedAuthority = true)
-                notifyCastStateChanged()
+                finishCastSession()
                 return
             }
 
@@ -563,6 +618,7 @@ class PodwaffleMediaService : MediaSessionService() {
         try {
             val context = CastContext.getSharedInstance(this)
             castContext = context
+            context.sessionManager.addSessionManagerListener(castSessionListener, CastSession::class.java)
             installCastPlayer(context)
         } catch (error: Exception) {
             emitError(
@@ -832,6 +888,7 @@ class PodwaffleMediaService : MediaSessionService() {
 
     /** Prepare the current episode before opening the system Cast chooser. */
     fun prepareCast(mediaId: String, positionMs: Long, autoplay: Boolean) {
+        explicitCastStop = false
         pendingCastEpisodeId = mediaId
         pendingCastPositionMs = positionMs.coerceAtLeast(0L)
         pendingCastAutoplay = autoplay
@@ -922,7 +979,22 @@ class PodwaffleMediaService : MediaSessionService() {
         return getCastState()
     }
 
+    fun cancelCastPicker() {
+        if (isCasting()) return
+        explicitCastStop = true
+        clearCastPickerTimeout()
+        castConnecting = false
+        if (pendingCastEpisodeId != null) {
+            transferToLocal(pendingCastPositionMs, pendingCastAutoplay)
+        } else {
+            clearPendingCast()
+            notifyCastStateChanged()
+        }
+        castContext?.sessionManager?.endCurrentSession(false)
+    }
+
     fun markCastPickerOpened() {
+        explicitCastStop = false
         castConnecting = !isCasting()
         scheduleCastPickerTimeout()
         notifyCastStateChanged()
@@ -1028,6 +1100,7 @@ class PodwaffleMediaService : MediaSessionService() {
         )
         playbackPreferences.edit()
             .putBoolean("casting", true)
+            .putLong("castRecoveryDeadline", castReconnectDeadlineMs)
             .putBoolean("castPlaying", lastCastSnapshot.playing)
             .apply()
         persistPlayback()
@@ -1041,11 +1114,14 @@ class PodwaffleMediaService : MediaSessionService() {
         castReconnectDeadlineMs = 0L
         castPlayerRebuiltForRecovery = false
         castConnecting = false
+        playbackPreferences.edit().remove("castRecoveryDeadline").apply()
         if (clearPersistedAuthority) {
             persistedCastAuthority = false
+            castLastActivityAtMs = 0L
             playbackPreferences.edit()
                 .putBoolean("casting", false)
                 .putBoolean("castPlaying", false)
+                .remove("castLastActivityAt")
                 .apply()
         }
     }
@@ -1055,6 +1131,23 @@ class PodwaffleMediaService : MediaSessionService() {
         reconcilingCastSession = true
         try {
             val remote = castPlayer
+            val now = System.currentTimeMillis()
+            // Expiry wins over a late SDK availability callback or player rebuild.
+            if (castReconnectExpected && castReconnectDeadlineMs > 0L && now >= castReconnectDeadlineMs) {
+                stopCast(false)
+                return
+            }
+            if (explicitCastStop) return
+            if (remote?.isCastSessionAvailable == true && !castReconnectExpected &&
+                (remote.isPlaying || remote.playbackState == Player.STATE_BUFFERING)) {
+                castLastActivityAtMs = now
+            }
+            if ((persistedCastAuthority || remote?.isCastSessionAvailable == true) && !CastSessionPolicy.canResume(
+                    true, castLastActivityAtMs, castReconnectDeadlineMs, now,
+                )) {
+                stopCast(false)
+                return
+            }
             if (remote?.isCastSessionAvailable == true) {
                 if (pendingCastEpisodeId != null) {
                     transferToCast()
@@ -1089,7 +1182,6 @@ class PodwaffleMediaService : MediaSessionService() {
                 }
             }
 
-            val now = System.currentTimeMillis()
             if (
                 currentCastSession() != null &&
                 !castPlayerRebuiltForRecovery &&
@@ -1107,15 +1199,6 @@ class PodwaffleMediaService : MediaSessionService() {
                     adoptExistingCastSession()
                     return
                 }
-            }
-
-            if (castReconnectDeadlineMs > 0L && now >= castReconnectDeadlineMs) {
-                val position = lastCastSnapshot.positionMs
-                clearCastRecovery(clearPersistedAuthority = true)
-                // A confirmed Cast loss returns to a paused local player. Starting
-                // local audio automatically risks playing over a still-running
-                // receiver when the sender alone has lost connectivity.
-                transferToLocal(position, resume = false)
             }
         } finally {
             reconcilingCastSession = false
@@ -1163,6 +1246,7 @@ class PodwaffleMediaService : MediaSessionService() {
         clearPendingCast()
         clearCastRecovery(clearPersistedAuthority = false)
         persistedCastAuthority = true
+        if (castLastActivityAtMs == 0L) castLastActivityAtMs = System.currentTimeMillis()
 
         val snapshot = currentCastSnapshot().copy(connecting = false)
         lastCastSnapshot = snapshot
@@ -1182,6 +1266,7 @@ class PodwaffleMediaService : MediaSessionService() {
         if (!remote.isCastSessionAvailable) return
         clearCastRecovery(clearPersistedAuthority = false)
         persistedCastAuthority = true
+        castLastActivityAtMs = System.currentTimeMillis()
         val local = localPlayer ?: return
         val mediaId = pendingCastEpisodeId ?: local.currentMediaItem?.mediaId
         val index = remoteItems.indexOfFirst { it.mediaId == mediaId }
@@ -1336,7 +1421,7 @@ class PodwaffleMediaService : MediaSessionService() {
     private fun currentCastSnapshot(): CastPlaybackSnapshot {
         val player = castPlayer
         val session = currentCastSession()
-        if (player == null || session == null || !player.isCastSessionAvailable) {
+        if (explicitCastStop || player == null || session == null || !player.isCastSessionAvailable) {
             return if (
                 lastCastSnapshot.connected &&
                 (activePlayer === castPlayer ||
@@ -1410,7 +1495,7 @@ class PodwaffleMediaService : MediaSessionService() {
     private fun currentCastSession(): CastSession? =
         castContext?.sessionManager?.currentCastSession
 
-    private fun isCasting(): Boolean = castPlayer?.isCastSessionAvailable == true
+    private fun isCasting(): Boolean = !explicitCastStop && castPlayer?.isCastSessionAvailable == true
 
     private fun availableCastRoutes(): List<String> = try {
         MediaRouter.getInstance(this).routes
@@ -1597,6 +1682,7 @@ class PodwaffleMediaService : MediaSessionService() {
                 castSnapshot?.positionMs ?: player.currentPosition.coerceAtLeast(0L),
             )
             .putFloat("rate", player.playbackParameters.speed)
+            .putLong("castLastActivityAt", castLastActivityAtMs)
             .putBoolean("casting", casting)
             .putBoolean("castPlaying", castSnapshot?.playing ?: false)
             .putString("castSessionId", castSnapshot?.sessionId)
@@ -1608,7 +1694,16 @@ class PodwaffleMediaService : MediaSessionService() {
 
     private fun restorePlayback() {
         val raw = playbackPreferences.getString("items", null) ?: return
-        val savedCastAuthority = playbackPreferences.getBoolean("casting", false)
+        castLastActivityAtMs = playbackPreferences.getLong("castLastActivityAt", 0L)
+        val savedRecoveryDeadline = playbackPreferences.getLong("castRecoveryDeadline", 0L)
+        val savedCastAuthority = CastSessionPolicy.canResume(
+            playbackPreferences.getBoolean("casting", false), castLastActivityAtMs,
+            savedRecoveryDeadline, System.currentTimeMillis(),
+        )
+        if (!savedCastAuthority) {
+            explicitCastStop = true
+            clearCastRecovery(clearPersistedAuthority = true)
+        }
         try {
             val array = JSONArray(raw)
             val media = buildList {
@@ -1649,7 +1744,9 @@ class PodwaffleMediaService : MediaSessionService() {
                 val wasPlaying = playbackPreferences.getBoolean("castPlaying", false)
                 castReconnectExpected = true
                 castReconnectStartedAtMs = now
-                castReconnectDeadlineMs = now + CAST_RECONNECT_GRACE_MS
+                castReconnectDeadlineMs = if (savedRecoveryDeadline > 0L) savedRecoveryDeadline
+                    else now + CAST_RECONNECT_GRACE_MS
+                playbackPreferences.edit().putLong("castRecoveryDeadline", castReconnectDeadlineMs).apply()
                 castPlayerRebuiltForRecovery = false
                 castConnecting = true
                 lastCastSnapshot = CastPlaybackSnapshot(
@@ -1685,12 +1782,7 @@ class PodwaffleMediaService : MediaSessionService() {
     private fun scheduleCastPickerTimeout() {
         clearCastPickerTimeout()
         castPickerTimeout = Runnable {
-            if (!isCasting()) {
-                castConnecting = false
-                val position = pendingCastPositionMs
-                val resume = pendingCastAutoplay
-                transferToLocal(position, resume)
-            }
+            cancelCastPicker()
         }.also { handler.postDelayed(it, 30_000L) }
     }
 
@@ -1738,6 +1830,7 @@ class PodwaffleMediaService : MediaSessionService() {
         clearCastPickerTimeout()
         positionNotifier?.let(handler::removeCallbacks)
         downloadStore?.release()
+        castContext?.sessionManager?.removeSessionManagerListener(castSessionListener, CastSession::class.java)
         castPlayer?.setSessionAvailabilityListener(null)
         castPlayer?.removeListener(castPlayerListener)
         castPlayer?.release()

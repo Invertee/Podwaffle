@@ -8,6 +8,8 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.media3.common.util.UnstableApi
+import androidx.mediarouter.app.MediaRouteDialogFactory
+import androidx.mediarouter.app.MediaRouteChooserDialogFragment
 import androidx.mediarouter.app.MediaRouteButton
 import com.google.android.gms.cast.framework.CastButtonFactory
 import expo.modules.kotlin.modules.Module
@@ -324,6 +326,15 @@ class PodwaffleMediaModule : Module() {
     }
 
     private fun openCastPickerOnMain() {
+        try {
+            showCastPickerOnMain()
+        } catch (error: Exception) {
+            PodwaffleMediaService.instance?.cancelCastPicker()
+            throw error
+        }
+    }
+
+    private fun showCastPickerOnMain() {
         val activity = appContext.currentActivity
             ?: throw IllegalStateException("The Cast picker requires an active Android screen")
         val root = activity.findViewById<ViewGroup>(android.R.id.content)
@@ -341,6 +352,10 @@ class PodwaffleMediaModule : Module() {
         root.addView(button, layout)
         try {
             CastButtonFactory.setUpMediaRouteButton(activity.applicationContext, button)
+            button.dialogFactory = object : MediaRouteDialogFactory() {
+                override fun onCreateChooserDialogFragment(): MediaRouteChooserDialogFragment =
+                    PodwaffleCastChooserDialogFragment()
+            }
             if (!button.showDialog()) {
                 throw IllegalStateException("The Cast device picker could not be opened")
             }
