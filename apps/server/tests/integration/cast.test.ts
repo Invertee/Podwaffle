@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import supertest from "supertest";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
+import { CastProgressWatchdog } from "../../src/playback/cast-watchdog.js";
+import { applyCastCommandResult } from "../../src/api/playback.js";
 import type { Runtime } from "../../src/runtime.js";
 import { join, testRuntime } from "../helpers.js";
 
@@ -11,6 +13,125 @@ afterEach(async () => {
 });
 
 describe("cross-client Google Cast control", () => {
+  it("watchdog is opt-in, throttled, and saves only confirmations from the same session", async () => {
+    const created = await testRuntime();
+    const { runtime } = created;
+    runtimes.push(runtime);
+    const owner = supertest.agent(created.baseUrl);
+    const joined = await join(owner);
+    const profileId = joined.body.session.profile.id;
+    const ownerId = joined.body.session.device.id;
+    const episodeId = insertEpisode(runtime, "watchdog");
+    const confirmed = {
+      episodeId,
+      positionMs: 8_000,
+      durationMs: 600_000,
+      state: "playing",
+      playbackRate: 1,
+      castSessionId: "watchdog-session",
+    } as const;
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({ commandId: randomUUID(), confirmed })
+      .expect(200);
+    const stale = () =>
+      runtime.database.db
+        .prepare(
+          "UPDATE playback_state SET updated_at = ? WHERE profile_id = ?",
+        )
+        .run(new Date(Date.now() - 90_000).toISOString(), profileId);
+    stale();
+    expect(await runtime.castWatchdog.sweep()).toBe(0);
+    const commands: Parameters<
+      Runtime["webSockets"]["sendPlaybackCommand"]
+    >[2][] = [];
+    const watchdog = new CastProgressWatchdog(
+      runtime.database,
+      true,
+      async (_profile, _owner, command) => {
+        commands.push(command);
+        return true;
+      },
+    );
+    expect(await watchdog.sweep()).toBe(1);
+    expect(await watchdog.sweep()).toBe(0);
+    expect((await owner.get("/api/v1/playback")).body.playback.positionMs).toBe(
+      8_000,
+    );
+    applyCastCommandResult(runtime.database, runtime.sync, profileId, ownerId, {
+      commandId: commands[0]!.commandId,
+      status: "accepted",
+      confirmed: { ...confirmed, positionMs: 95_000 },
+    });
+    expect(
+      (await owner.get(`/api/v1/episodes/${episodeId}`)).body.episode
+        .positionMs,
+    ).toBe(95_000);
+    stale();
+    runtime.database.db
+      .prepare("UPDATE playback_commands SET created_at = ?")
+      .run(new Date(Date.now() - 120_000).toISOString());
+    expect(await watchdog.sweep()).toBe(1);
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        confirmed: {
+          ...confirmed,
+          positionMs: 95_000,
+          castSessionId: "replacement",
+        },
+      })
+      .expect(200);
+    const result = applyCastCommandResult(
+      runtime.database,
+      runtime.sync,
+      profileId,
+      ownerId,
+      {
+        commandId: commands[1]!.commandId,
+        status: "accepted",
+        confirmed: { ...confirmed, positionMs: 150_000 },
+      },
+    );
+    expect(result.command.status).toBe("rejected");
+    expect(
+      (await owner.get(`/api/v1/episodes/${episodeId}`)).body.episode
+        .positionMs,
+    ).toBe(95_000);
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({ commandId: randomUUID(), background: true, confirmed })
+      .expect(409);
+  });
+
+  it("background episode history never changes the active renderer or rewinds saved progress", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    await join(owner);
+    const episodeId = insertEpisode(created.runtime, "history");
+    const nextId = insertEpisode(created.runtime, "next-history");
+    await owner
+      .post("/api/v1/playback/lease")
+      .send({ episodeId: nextId, positionMs: 0, playbackRate: 1 })
+      .expect(200);
+    for (const positionMs of [12_000, 0]) {
+      await owner
+        .post(`/api/v1/episodes/${episodeId}/progress`)
+        .send({ commandId: randomUUID(), positionMs, durationMs: 600_000 })
+        .expect(200);
+    }
+    expect((await owner.get("/api/v1/playback")).body.playback.episode.id).toBe(
+      nextId,
+    );
+    const resumed = await owner
+      .post("/api/v1/playback/lease")
+      .send({ episodeId, positionMs: 0, playbackRate: 1 })
+      .expect(200);
+    expect(resumed.body.playback.positionMs).toBe(12_000);
+  });
+
   it("relays to the Cast owner and persists only its confirmed result", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);

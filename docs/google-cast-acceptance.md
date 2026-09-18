@@ -1,5 +1,29 @@
 # Google Cast manual acceptance
 
+## Progress recovery
+
+Android reports receiver progress from the native media service every ten seconds,
+including while React Native is suspended. Reports cannot change the active Cast
+session or take ownership from another device.
+
+The optional server setting `cast_progress_watchdog` defaults to `false`. Enable
+it in the Home Assistant add-on configuration (or server options JSON) and restart
+the server. Every thirty seconds it checks for playing Cast sessions without a
+report for forty-five seconds, then requests a fresh status at most once a minute.
+It uses live sync and the existing Firebase wake-up path. The owning phone/browser
+must still be reachable and connected to the receiver; the server does not poll
+speakers directly or guess progress when all senders are offline. Disable the
+setting and restart to stop watchdog requests.
+
+- [ ] Play an episode for a few seconds, switch episodes, then return. Check both local and Cast resume.
+- [ ] Background the phone for several minutes while casting; confirm server progress continues advancing.
+- [ ] Interrupt server access, keep playing, then reconnect. Saved history must not switch playback to an older episode.
+- [ ] Enable the watchdog, stop normal sender reports, and confirm a status request persists the receiver observation.
+- [ ] Switch Cast sessions while a watchdog request is pending. Its delayed reply must not change the replacement session.
+- [ ] With weak mobile data and a long queue, play a downloaded episode. Automatic caching should wait on metered connections; manual downloads remain available.
+
+## Browser checks
+
 Run this checklist in Chrome over HTTPS (or localhost) with two browsers joined
 to the same Podwaffle profile and two real Cast-capable speakers/displays.
 

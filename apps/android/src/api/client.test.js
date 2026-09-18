@@ -49,3 +49,32 @@ describe("Firebase health compatibility", () => {
     );
   });
 });
+
+describe("playback network deadlines", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.useRealTimers();
+  });
+  it("aborts a stalled lease request after three seconds", async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn(
+      (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        }),
+    );
+    const request = api.acquirePlayback("https://example.test", "token", {
+      positionMs: 0,
+      playbackRate: 1,
+    });
+    const assertion = expect(request).rejects.toThrow(
+      "did not respond in time",
+    );
+    await jest.advanceTimersByTimeAsync(3_000);
+    await assertion;
+    expect(global.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+});

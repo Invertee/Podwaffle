@@ -1,4 +1,7 @@
 configuration:
+  cast_progress_watchdog:
+    name: Cast progress watchdog
+    description: Request a fresh receiver observation when Cast progress reports stop. Requires the owning phone or browser to be reachable. Restart the add-on after changing this option.
   profiles:
     name: Profiles
     description: Comma-separated profile names.

@@ -11,12 +11,14 @@ import { PodwaffleWebSocketServer } from "./websocket/server.js";
 import { FeedScheduler } from "./podcasts/scheduler.js";
 import { PushService } from "./push/service.js";
 import { OperationalStatusReporter } from "./operational-status.js";
+import { CastProgressWatchdog } from "./playback/cast-watchdog.js";
 
 export interface Runtime {
   database: PodwaffleDatabase;
   sync: SyncService;
   webSockets: PodwaffleWebSocketServer;
   feedScheduler: FeedScheduler;
+  castWatchdog: CastProgressWatchdog;
   push: PushService;
   operationalStatus: OperationalStatusReporter;
   server: Server;
@@ -52,6 +54,12 @@ export async function createRuntime(
   );
   webSockets.setConnectionObserver(() => operationalStatus.report());
   const feedScheduler = new FeedScheduler(database, sync, config);
+  const castWatchdog = new CastProgressWatchdog(
+    database,
+    config.cast_progress_watchdog,
+    (profileId, ownerId, command) =>
+      webSockets.sendPlaybackCommand(profileId, ownerId, command),
+  );
   const app = createApp({
     config,
     database,
@@ -70,15 +78,18 @@ export async function createRuntime(
   );
   webSockets.attach(server);
   feedScheduler.start();
+  castWatchdog.start();
   return {
     database,
     sync,
     webSockets,
     operationalStatus,
     feedScheduler,
+    castWatchdog,
     push,
     server,
     close: async () => {
+      castWatchdog.stop();
       feedScheduler.stop();
       webSockets.shutdown();
       await push.close();

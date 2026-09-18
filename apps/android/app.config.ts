@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const sharedPodwaffleIcon = "../../podwaffle/icon.png";
+// Adaptive icons are masked differently by each launcher. Keep the artwork in
+// Android's central safe zone so the radio tower remains intact on Google Launcher.
+const androidAdaptiveForegroundIcon = "./assets/adaptive-icon-foreground.png";
 const appDirectory = __dirname;
 const configuredGoogleServicesFile = process.env.PODWAFFLE_GOOGLE_SERVICES_FILE;
 const googleServicesFile = configuredGoogleServicesFile
@@ -35,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     versionCode: 40,
     adaptiveIcon: {
-      foregroundImage: sharedPodwaffleIcon,
+      foregroundImage: androidAdaptiveForegroundIcon,
       backgroundColor: "#0D1B2A",
     },
     package: "com.podwaffle.app",

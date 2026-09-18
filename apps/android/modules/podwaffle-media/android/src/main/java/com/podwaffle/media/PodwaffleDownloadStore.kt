@@ -53,7 +53,11 @@ class PodwaffleDownloadStore(
             ?: throw IllegalArgumentException("enclosureUrl is required")
         entries[key]?.let { existing ->
             val state = mapEntry(existing)
-            if (state["state"] != "failed") return state
+            val promoteToManual = reason != "automatic" && existing.reason == "automatic" &&
+                state["state"] != "completed"
+            val migrateAutomatic = existing.reason == "automatic" && existing.allowedOverMetered &&
+                state["state"] != "completed"
+            if (state["state"] != "failed" && !promoteToManual && !migrateAutomatic) return state
             manager.remove(existing.requestId)
         }
         val extension = extensionFor(
@@ -65,7 +69,9 @@ class PodwaffleDownloadStore(
             .setTitle(input["title"] as? String ?: "Podcast episode")
             .setDescription(input["podcastTitle"] as? String ?: "Podwaffle")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN)
-            .setAllowedOverMetered(true)
+            // Automatic queue caching must not compete with streaming on mobile
+            // data. Explicit downloads still work on metered connections.
+            .setAllowedOverMetered(reason != "automatic")
             .setAllowedOverRoaming(false)
             .setDestinationInExternalFilesDir(
                 context,
@@ -91,6 +97,7 @@ class PodwaffleDownloadStore(
             durationMs = (input["durationMs"] as? Number)?.toLong()?.takeIf { it > 0L },
             localPath = localFile.absolutePath,
             reason = if (reason == "automatic") "automatic" else "manual",
+            allowedOverMetered = reason != "automatic",
             createdAtMs = System.currentTimeMillis(),
         )
         entries[key] = entry
@@ -317,6 +324,7 @@ class PodwaffleDownloadStore(
                     durationMs = item.optLong("durationMs", 0L).takeIf { it > 0L },
                     localPath = item.getString("localPath"),
                     reason = item.optString("reason", "manual"),
+                    allowedOverMetered = item.optBoolean("allowedOverMetered", true),
                     createdAtMs = item.optLong("createdAtMs", System.currentTimeMillis()),
                 )
                 entries[entryKey(entry.profileId, entry.episodeId)] = entry
@@ -343,6 +351,7 @@ class PodwaffleDownloadStore(
                     .put("durationMs", entry.durationMs ?: JSONObject.NULL)
                     .put("localPath", entry.localPath)
                     .put("reason", entry.reason)
+                    .put("allowedOverMetered", entry.allowedOverMetered)
                     .put("createdAtMs", entry.createdAtMs),
             )
         }
@@ -372,6 +381,7 @@ class PodwaffleDownloadStore(
         val durationMs: Long?,
         val localPath: String,
         val reason: String,
+        val allowedOverMetered: Boolean,
         val createdAtMs: Long,
     )
 

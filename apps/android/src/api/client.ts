@@ -19,6 +19,7 @@ import type {
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const FEED_REQUEST_TIMEOUT_MS = 45_000;
+const PLAYBACK_REQUEST_TIMEOUT_MS = 3_000;
 
 export class ApiClientError extends Error {
   constructor(
@@ -286,11 +287,18 @@ export const api = {
       (result) => result.episodes,
     ),
 
-  episode: (serverUrl: string, token: string, episodeId: string) =>
+  episode: (
+    serverUrl: string,
+    token: string,
+    episodeId: string,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ) =>
     request<{ episode: Episode }>(
       serverUrl,
       `/api/v1/episodes/${episodeId}`,
       token,
+      undefined,
+      timeoutMs,
     ).then((result) => result.episode),
 
   setPlayed: (
@@ -309,6 +317,25 @@ export const api = {
         body: commandBody(revision, { played }),
       },
     ),
+
+  saveEpisodeProgress: (
+    serverUrl: string,
+    token: string,
+    update: {
+      episodeId: string;
+      positionMs: number;
+      durationMs: number | null;
+    },
+  ) =>
+    request(serverUrl, `/api/v1/episodes/${update.episodeId}/progress`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        commandId: createCommandId(),
+        positionMs: update.positionMs,
+        durationMs: update.durationMs,
+        completed: false,
+      }),
+    }),
 
   completeEpisode: (
     serverUrl: string,
@@ -436,6 +463,7 @@ export const api = {
       "/api/v1/playback/lease",
       token,
       { method: "POST", body: JSON.stringify(body) },
+      PLAYBACK_REQUEST_TIMEOUT_MS,
     ).then((result) => result.playback),
 
   releasePlayback: (serverUrl: string, token: string) =>

@@ -35,6 +35,7 @@ import {
 } from "./queueReconciliation";
 import {
   pendingProgressIsStale,
+  episodeResumePosition,
   resumePositionMs,
 } from "./progressReconciliation";
 import { isConfirmedPlaybackEnd } from "./completion";
@@ -97,6 +98,7 @@ class AndroidPlaybackController {
   private handlingRemoteCommand = false;
   private castTakeoverRequested = false;
   private clearingPlayback = false;
+  private startingPlayback = false;
 
   public async ensureNotificationPermission(): Promise<boolean> {
     return ensureNotificationPermission();
@@ -115,9 +117,25 @@ class AndroidPlaybackController {
       return;
     }
 
-    const playbackEpisode: Episode = episode.played
+    let playbackEpisode: Episode = episode.played
       ? { ...episode, positionMs: 0, played: false, playedAt: null }
       : episode;
+    const auth = useAuthStore.getState();
+    const profileId = auth.session?.profile.id ?? auth.snapshot?.profile.id;
+    const pending = profileId
+      ? (await pendingPlaybackUpdates(profileId)).find(
+          (item) => item.episodeId === episode.id,
+        )
+      : undefined;
+    const saved =
+      auth.snapshot?.playback?.episode?.id === episode.id
+        ? auth.snapshot.playback.episode
+        : auth.snapshot?.queue.find((item) => item.episode.id === episode.id)
+            ?.episode;
+    playbackEpisode = {
+      ...playbackEpisode,
+      positionMs: episodeResumePosition(episode, pending, saved),
+    };
     const localPath = downloadedPath(playbackEpisode.id);
     if (!playbackEpisode.enclosureUrl && !localPath) {
       throw new Error("This episode does not have a playable audio enclosure.");
@@ -125,8 +143,35 @@ class AndroidPlaybackController {
     await this.ensureNotificationPermission();
     // Native expiry may have happened while JS was suspended overnight.
     this.handleCastState(await PodwaffleMediaModule.refreshCastSession());
+    await this.flushOutgoingEpisode(playbackEpisode.id).catch(() => undefined);
     const cast = useNativeMediaStore.getState().castState;
     if (cast.connected) {
+      if (!episode.played && cast.session?.episodeId === episode.id) {
+        playbackEpisode = {
+          ...playbackEpisode,
+          positionMs: cast.session.positionMs,
+        };
+      }
+      // Cast does not acquire a local playback lease before loading media, so
+      // refresh progress explicitly instead of trusting a possibly stale list
+      // item. A completed episode is an intentional replay from the beginning.
+      if (!episode.played && useAuthStore.getState().connection !== "offline") {
+        const { serverUrl, token } = this.connection();
+        const refreshed = await api
+          .episode(serverUrl, token, playbackEpisode.id, 3_000)
+          .catch(() => null);
+        if (refreshed) {
+          playbackEpisode = {
+            ...playbackEpisode,
+            positionMs: episodeResumePosition(
+              playbackEpisode,
+              pending,
+              refreshed,
+            ),
+            durationMs: refreshed.durationMs ?? playbackEpisode.durationMs,
+          };
+        }
+      }
       this.activeEpisode = playbackEpisode;
       this.completedEpisodeId = null;
       this.resetTelemetry();
@@ -194,7 +239,7 @@ class AndroidPlaybackController {
         this.offlinePlayback = false;
         leaseAcquired = true;
       } catch (error) {
-        if (!localPath) throw error;
+        if (!localPath && error instanceof ApiClientError) throw error;
         this.offlinePlayback = true;
         this.leaseExpiresAt = 0;
       }
@@ -204,11 +249,13 @@ class AndroidPlaybackController {
     this.resetTelemetry();
 
     try {
-      await this.syncNativeQueue(playbackEpisode.id);
+      this.startingPlayback = true;
       await PodwaffleMediaModule.playEpisode(
         episodeMedia(playbackEpisode, this.queueItemId(playbackEpisode.id)),
         startPositionMs,
       );
+      this.startingPlayback = false;
+      void this.syncNativeQueue(playbackEpisode.id).catch(() => undefined);
       const clearedPendingCompletion =
         await this.clearPendingCompletionForReplay(playbackEpisode.id).catch(
           () => false,
@@ -224,6 +271,7 @@ class AndroidPlaybackController {
         playbackRate,
       }).catch(() => undefined);
     } catch (error) {
+      this.startingPlayback = false;
       if (leaseAcquired) {
         await api.releasePlayback(serverUrl, token).catch(() => undefined);
       }
@@ -245,7 +293,7 @@ class AndroidPlaybackController {
           (item) => item.episodeId === download.episodeId,
         )
       : undefined;
-    const cached = await this.resolveEpisode(download.episodeId);
+    const cached = await this.resolveEpisode(download.episodeId, true);
     const pendingPositionMs = pending?.completed
       ? 0
       : (pending?.positionMs ?? 0);
@@ -331,7 +379,8 @@ class AndroidPlaybackController {
           await PodwaffleMediaModule.seekTo(acquired.positionMs);
         }
       } catch (error) {
-        if (!this.hasLocalMedia(state)) throw error;
+        if (!this.hasLocalMedia(state) && error instanceof ApiClientError)
+          throw error;
         this.offlinePlayback = true;
         this.leaseExpiresAt = 0;
       }
@@ -985,7 +1034,10 @@ class AndroidPlaybackController {
     );
   }
 
-  private async resolveEpisode(episodeId: string): Promise<Episode | null> {
+  private async resolveEpisode(
+    episodeId: string,
+    cachedOnly = false,
+  ): Promise<Episode | null> {
     const snapshot = useAuthStore.getState().snapshot;
     const playbackEpisode = snapshot?.playback?.episode;
     const cached =
@@ -994,6 +1046,8 @@ class AndroidPlaybackController {
         : snapshot?.queue.find((item) => item.episode.id === episodeId)
             ?.episode;
     if (cached) return cached;
+    if (cachedOnly || useAuthStore.getState().connection === "offline")
+      return null;
     try {
       const { serverUrl, token } = this.connection();
       return await api.episode(serverUrl, token, episodeId);
@@ -1070,6 +1124,59 @@ class AndroidPlaybackController {
     }
   }
 
+  /**
+   * Persist the position of the episode being replaced while its native/Cast
+   * state is still authoritative. Once new media is loaded, that final position
+   * can no longer be recovered from the player.
+   */
+  private async flushOutgoingEpisode(nextEpisodeId: string): Promise<void> {
+    const media = useNativeMediaStore.getState();
+    const castEpisodeId = media.castState.connected
+      ? media.castState.session?.episodeId
+      : null;
+    const outgoingEpisodeId = castEpisodeId ?? media.state?.episodeId;
+    if (!outgoingEpisodeId || outgoingEpisodeId === nextEpisodeId) return;
+
+    this.sampleListening();
+    const session = media.castState.session;
+    const native = media.state;
+    const outgoing =
+      castEpisodeId && session
+        ? {
+            episodeId: castEpisodeId,
+            positionMs: session.positionMs,
+            durationMs: session.durationMs,
+            state:
+              session.playerState === "playing"
+                ? ("playing" as const)
+                : ("paused" as const),
+            playbackRate: native?.playbackRate ?? 1,
+          }
+        : native?.episodeId
+          ? {
+              episodeId: native.episodeId,
+              positionMs: native.positionMs,
+              durationMs: durationFor(native, this.activeEpisode),
+              state: localPlaybackState(native),
+              playbackRate: native.playbackRate,
+            }
+          : null;
+    if (!outgoing || (await this.completionPending(outgoing.episodeId))) return;
+    const pending = await this.saveOfflinePlayback(outgoing, false);
+    const { serverUrl, token } = this.connection();
+    const profileId = useAuthStore.getState().session?.profile.id;
+    // This endpoint stores episode history without moving playback ownership.
+    // Network failure leaves the durable snapshot for the next sync.
+    void api
+      .saveEpisodeProgress(serverUrl, token, outgoing)
+      .then(async () => {
+        if (pending && profileId)
+          await acknowledgePendingPlayback(profileId, pending);
+      })
+      .catch(() => undefined);
+    void this.flushTelemetry(outgoingEpisodeId).catch(() => undefined);
+  }
+
   private isTakeoverRequired(error: unknown): boolean {
     return (
       error instanceof ApiClientError &&
@@ -1107,6 +1214,7 @@ class AndroidPlaybackController {
       playbackRate: number;
     },
   ): Promise<void> {
+    if (this.startingPlayback) return;
     if (this.remotePlayback()) return;
     if (useNativeMediaStore.getState().castState.connected) return;
     if (
@@ -1136,6 +1244,8 @@ class AndroidPlaybackController {
 
     const perform = async () => {
       if (await this.completionPending(body.episodeId)) return;
+      // Persist before any network wait, including streamed episodes.
+      const pending = await this.saveOfflinePlayback(body, false);
       const { serverUrl, token } = this.connection();
       try {
         if (native) await this.ensureLease(native);
@@ -1148,6 +1258,9 @@ class AndroidPlaybackController {
         const result = await api.updatePlayback(serverUrl, token, body);
         this.setLeaseExpiry(result.playback.leaseExpiresAt);
         this.lastStateReportAt = Date.now();
+        const profileId = useAuthStore.getState().session?.profile.id;
+        if (pending && profileId)
+          await acknowledgePendingPlayback(profileId, pending);
       } catch (error) {
         if (
           error instanceof ApiClientError &&
@@ -1266,13 +1379,10 @@ class AndroidPlaybackController {
       this.activeEpisode = episode;
       const latestCast = useNativeMediaStore.getState().castState;
       const { serverUrl, token } = this.connection();
+      const confirmed = this.confirmedCastState(latestCast, episode);
+      const pending = await this.saveOfflinePlayback(confirmed, false);
       try {
-        await api.startCast(
-          serverUrl,
-          token,
-          this.confirmedCastState(latestCast, episode),
-          takeover,
-        );
+        await api.startCast(serverUrl, token, confirmed, takeover);
       } catch (error) {
         if (this.isTakeoverRequired(error)) {
           await this.yieldToSharedOwner();
@@ -1281,6 +1391,9 @@ class AndroidPlaybackController {
         throw error;
       }
       this.castBackendActive = true;
+      const profileId = useAuthStore.getState().session?.profile.id;
+      if (pending && profileId)
+        await acknowledgePendingPlayback(profileId, pending);
       this.lastCastReportAt = Date.now();
     };
 
@@ -1617,6 +1730,15 @@ class AndroidPlaybackController {
               update.episodeId,
             );
             if (pendingProgressIsStale(update, serverEpisode)) {
+              await acknowledgePendingPlayback(profileId, update);
+              continue;
+            }
+            if (!update.allowRegression) {
+              await api.saveEpisodeProgress(
+                credentials.serverUrl,
+                credentials.token,
+                update,
+              );
               await acknowledgePendingPlayback(profileId, update);
               continue;
             }

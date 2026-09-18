@@ -404,14 +404,19 @@ export function createCatalogRouter(
               );
             }
           }
-          const episode = setEpisodeProgress(
-            db,
-            profileId,
-            episodeId,
-            command.positionMs,
-            command.durationMs,
-            command.completed,
-          );
+          const episode =
+            !command.completed && priorEpisode.played
+              ? priorEpisode
+              : setEpisodeProgress(
+                  db,
+                  profileId,
+                  episodeId,
+                  command.completed
+                    ? command.positionMs
+                    : Math.max(command.positionMs, priorEpisode.positionMs),
+                  command.durationMs,
+                  command.completed,
+                );
           if (!priorEpisode.played && episode.played)
             recordEpisodeCompletion(db, profileId);
           const queue = episode.played

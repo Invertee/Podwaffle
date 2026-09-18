@@ -115,6 +115,7 @@ internal fun shouldGuardCastStartupPosition(
 class PodwaffleMediaService : MediaSessionService() {
     private var localPlayer: ExoPlayer? = null
     private var castPlayer: CastPlayer? = null
+    private val castProgressReporter = CastProgressReporter()
     private var activePlayer: Player? = null
     private var mediaSession: MediaSession? = null
     private var castContext: CastContext? = null
@@ -1018,6 +1019,9 @@ class PodwaffleMediaService : MediaSessionService() {
 
     fun notifyCastStateChanged() {
         val state = getCastState()
+        if (!castStartupGuardActive() && !castReconnectExpected) {
+            castProgressReporter.report(currentCastSnapshot(), castPlayer?.playbackParameters?.speed ?: 1f)
+        }
         eventEmitter?.invoke("cast.state.changed", state)
         @Suppress("UNCHECKED_CAST")
         val session = state["session"] as? Map<String, Any?>
@@ -1826,6 +1830,7 @@ class PodwaffleMediaService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        castProgressReporter.close()
         persistPlayback()
         clearCastPickerTimeout()
         positionNotifier?.let(handler::removeCallbacks)

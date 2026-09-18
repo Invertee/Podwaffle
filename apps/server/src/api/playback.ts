@@ -180,11 +180,14 @@ export function createPlaybackRouter(
               // from rewinding playback.
               positionMs: sameEpisodeOnAnotherDevice
                 ? prior.positionMs
-                : guardedPlaybackPosition(
-                    db,
-                    profile.id,
-                    input.episodeId,
+                : Math.max(
                     input.positionMs,
+                    (() => {
+                      const saved = input.episodeId
+                        ? getEpisode(db, profile.id, input.episodeId)
+                        : null;
+                      return saved?.played ? 0 : (saved?.positionMs ?? 0);
+                    })(),
                   ),
               durationMs:
                 sameEpisodeOnAnotherDevice && prior.durationMs !== null
@@ -324,6 +327,21 @@ export function createPlaybackRouter(
               profile.id,
               input.confirmed.episodeId,
             );
+            // Native background observations supplement an established session;
+            // a delayed request must never switch media or reclaim ownership.
+            if (
+              input.background &&
+              (currentPlayback.mode !== "cast" ||
+                currentPlayback.castOwnerDeviceId !== device.id ||
+                currentPlayback.castSessionId !==
+                  input.confirmed.castSessionId ||
+                currentPlayback.episode?.id !== input.confirmed.episodeId)
+            )
+              throw new ApiError(
+                409,
+                "CAST_SESSION_CHANGED",
+                "The Cast session has changed",
+              );
             const staleCompletedReport = Boolean(
               priorEpisode?.played &&
               currentPlayback.episode?.id !== input.confirmed.episodeId,
@@ -675,6 +693,21 @@ export function applyCastCommandResult(
     };
   }
   const current = playbackState(database.db, profileId, ownerDeviceId);
+  if (
+    existing.command.action === "refresh-status" &&
+    (current.mode !== "cast" ||
+      current.castOwnerDeviceId !== ownerDeviceId ||
+      current.episode?.id !== existing.command.episodeId ||
+      current.castSessionId !== existing.command.castSessionId ||
+      input.confirmed?.episodeId !== existing.command.episodeId ||
+      input.confirmed?.castSessionId !== existing.command.castSessionId)
+  ) {
+    input = {
+      commandId: input.commandId,
+      status: "rejected",
+      message: "The observed Cast session has changed",
+    };
+  }
   if (current.mode !== "cast") {
     const applied = sync.mutate(profileId, "playback.state.updated", (db) => {
       const result = {

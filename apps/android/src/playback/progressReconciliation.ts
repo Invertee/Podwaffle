@@ -4,15 +4,27 @@ import type { PendingPlaybackUpdate } from "./offlineProgress";
 
 export const PROGRESS_RECONCILIATION_TOLERANCE_MS = 5_000;
 
+export function episodeResumePosition(
+  episode: Pick<Episode, "played" | "positionMs">,
+  pending?: PendingPlaybackUpdate,
+  saved?: Pick<Episode, "played" | "positionMs">,
+): number {
+  if (episode.played || pending?.completed) return 0;
+  if (pending?.allowRegression) return pending.positionMs;
+  return Math.max(
+    episode.positionMs,
+    pending?.positionMs ?? 0,
+    saved?.played ? 0 : (saved?.positionMs ?? 0),
+  );
+}
+
 export function resumePositionMs(
   savedPositionMs: number,
   nativePositionMs: number,
 ): number {
   const saved = Math.max(0, savedPositionMs);
   const native = Math.max(0, nativePositionMs);
-  return saved - native > PROGRESS_RECONCILIATION_TOLERANCE_MS
-    ? saved
-    : native;
+  return saved - native > PROGRESS_RECONCILIATION_TOLERANCE_MS ? saved : native;
 }
 
 export function pendingProgressIsStale(

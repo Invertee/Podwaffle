@@ -12,6 +12,7 @@ const rawOptionsSchema = z.object({
   artwork_cache_mb: z.number().int().nonnegative().default(500),
   log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
   cast_receiver_app_id: z.string().default(""),
+  cast_progress_watchdog: z.boolean().default(false),
   firebase_enabled: z.boolean().default(false),
   firebase_project_id: z.string().default(""),
   firebase_service_account_path: z

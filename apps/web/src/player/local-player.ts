@@ -1193,7 +1193,7 @@ export class LocalPlayer {
         if (!command.episodeId)
           throw new Error("The requested episode is missing.");
         await this.load(await api.episode(command.episodeId));
-      } else if (usePlayer.getState().mode === "cast") {
+      } else if (usePlayer.getState().mode === "cast" && command.action !== "refresh-status") {
         await this.castControl(command.action, command);
       } else if (command.action === "play") {
         await this.play();

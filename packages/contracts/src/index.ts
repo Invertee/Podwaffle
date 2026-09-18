@@ -154,6 +154,7 @@ export const playbackStateSchema = z.object({
 });
 
 export const playbackCommandActionSchema = z.enum([
+  "refresh-status",
   "play",
   "pause",
   "seek",
@@ -170,6 +171,7 @@ export const playbackCommandSchema = z.object({
   positionMs: z.number().int().nonnegative().optional(),
   offsetMs: z.number().int().positive().optional(),
   episodeId: z.uuid().optional(),
+  castSessionId: z.string().optional(),
 });
 
 export const castConfirmedStateSchema = z.object({
@@ -186,6 +188,7 @@ export const castConfirmedStateSchema = z.object({
 export const castStartSchema = commandSchema.extend({
   confirmed: castConfirmedStateSchema,
   takeover: z.boolean().optional().default(false),
+  background: z.boolean().optional().default(false),
 });
 
 export const castStopSchema = commandSchema.extend({
