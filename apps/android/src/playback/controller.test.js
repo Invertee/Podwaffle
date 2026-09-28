@@ -136,11 +136,41 @@ it("uses pending progress when Cast refresh fails", async () => {
   );
 });
 
+it("uses freshly saved Cast progress instead of an older list position", async () => {
+  media.castState = { connected: true, session: null };
+  api.episode.mockResolvedValue({ ...episode, positionMs: 25_000 });
+
+  await playbackController.playEpisode({ ...episode, positionMs: 90_000 });
+
+  expect(PodwaffleMediaModule.startCast).toHaveBeenCalledWith(
+    expect.anything(),
+    25_000,
+    true,
+  );
+});
+
 it("starts streaming with saved progress when the server request times out", async () => {
   api.acquirePlayback.mockRejectedValue(new Error("server timeout"));
+  api.episode.mockRejectedValue(new Error("server timeout"));
   await playbackController.playEpisode({ ...episode, positionMs: 27_000 });
   expect(PodwaffleMediaModule.playEpisode).toHaveBeenCalledWith(
     expect.anything(),
     27_000,
+  );
+});
+
+it("uses fresh server progress when a local list item is stale", async () => {
+  api.episode.mockResolvedValue({ ...episode, positionMs: 25_000 });
+  api.acquirePlayback.mockImplementation(async (_server, _token, input) => ({
+    episode,
+    positionMs: input.positionMs,
+    leaseExpiresAt: new Date(Date.now() + 45_000).toISOString(),
+  }));
+
+  await playbackController.playEpisode({ ...episode, positionMs: 90_000 });
+
+  expect(PodwaffleMediaModule.playEpisode).toHaveBeenCalledWith(
+    expect.anything(),
+    25_000,
   );
 });

@@ -472,8 +472,19 @@ export function setEpisodeProgress(
     forceComplete ||
     (effectiveDuration !== null &&
       effectiveDuration > 0 &&
-      positionMs / effectiveDuration >= 0.98 &&
+      positionMs / effectiveDuration >= 0.97 &&
       existing.manualPlayState !== "unplayed");
+  const playbackBefore = complete
+    ? (db
+        .prepare("SELECT episode_id FROM playback_state WHERE profile_id = ?")
+        .get(profileId) as { episode_id: string | null } | undefined)
+    : undefined;
+  // The database advances the queue only at the stored end position. Treat the
+  // final three percent as complete so played state and queue agree.
+  const storedPositionMs =
+    complete && effectiveDuration !== null
+      ? Math.max(positionMs, effectiveDuration)
+      : positionMs;
   db.prepare(
     `INSERT INTO episode_state(
       profile_id, episode_id, position_ms, duration_ms, played, played_at,
@@ -487,14 +498,28 @@ export function setEpisodeProgress(
   ).run(
     profileId,
     episodeId,
-    positionMs,
+    storedPositionMs,
     effectiveDuration,
     complete ? 1 : 0,
     complete ? now : null,
     now,
     now,
   );
-  return getEpisode(db, profileId, episodeId)!;
+  const updated = getEpisode(db, profileId, episodeId)!;
+  if (complete && updated.played && playbackBefore?.episode_id === episodeId) {
+    // The completion trigger selects the next queue item. Its saved progress is
+    // authoritative, including for an episode played on another device.
+    db.prepare(
+      `UPDATE playback_state SET position_ms = COALESCE((
+         SELECT CASE WHEN state.played = 1 THEN 0 ELSE state.position_ms END
+         FROM episode_state AS state
+         WHERE state.profile_id = playback_state.profile_id
+           AND state.episode_id = playback_state.episode_id
+       ), 0)
+       WHERE profile_id = ? AND episode_id IS NOT NULL AND episode_id <> ?`,
+    ).run(profileId, episodeId);
+  }
+  return updated;
 }
 
 export function listInProgress(db: DatabaseSync, profileId: string): Episode[] {
@@ -655,8 +680,11 @@ export function advanceQueueAfterCompletion(
     .prepare("SELECT episode_id FROM playback_state WHERE profile_id = ?")
     .get(profileId) as { episode_id: string | null } | undefined;
   if (playback?.episode_id === episodeId) {
+    const nextPositionMs = nextEpisode?.played
+      ? 0
+      : (nextEpisode?.positionMs ?? 0);
     db.prepare(
-      `UPDATE playback_state SET episode_id = ?, position_ms = 0,
+      `UPDATE playback_state SET episode_id = ?, position_ms = ?,
        duration_ms = ?, state = CASE WHEN ? IS NULL THEN 'stopped' ELSE state END,
        mode = CASE WHEN ? IS NULL THEN 'local' ELSE mode END,
        active_device_id = CASE WHEN ? IS NULL THEN NULL ELSE active_device_id END,
@@ -666,6 +694,7 @@ export function advanceQueueAfterCompletion(
        updated_at = ? WHERE profile_id = ?`,
     ).run(
       nextEpisode?.id ?? null,
+      nextPositionMs,
       nextEpisode?.durationMs ?? null,
       nextEpisode?.id ?? null,
       nextEpisode?.id ?? null,

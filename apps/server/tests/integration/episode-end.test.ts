@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("episode end handling", () => {
-  it("waits for actual media end and becomes idle after the final item", async () => {
+  it("completes at 97%, resumes the next item, and becomes idle after the final item", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);
     const client = supertest.agent(created.baseUrl);
@@ -65,6 +65,15 @@ describe("episode end handling", () => {
       now,
     );
 
+    await client
+      .post(`/api/v1/episodes/${secondEpisodeId}/progress`)
+      .send({
+        commandId: randomUUID(),
+        positionMs: 25_000,
+        durationMs: null,
+      })
+      .expect(200);
+
     for (const episodeId of [firstEpisodeId, secondEpisodeId]) {
       await client
         .post("/api/v1/queue/items")
@@ -90,7 +99,7 @@ describe("episode end handling", () => {
       .post(`/api/v1/episodes/${firstEpisodeId}/progress`)
       .send({
         commandId: randomUUID(),
-        positionMs: 58_800,
+        positionMs: 57_600,
         durationMs: 60_000,
       })
       .expect(200);
@@ -105,23 +114,26 @@ describe("episode end handling", () => {
     ).toMatchObject({ episode: { id: firstEpisodeId } });
 
     const firstEnded = await client
-      .post(`/api/v1/episodes/${firstEpisodeId}/progress`)
+      .post("/api/v1/playback/state")
       .send({
-        commandId: randomUUID(),
-        positionMs: 60_000,
+        episodeId: firstEpisodeId,
+        positionMs: 58_200,
         durationMs: 60_000,
-        completed: true,
+        state: "paused",
+        playbackRate: 1,
       })
       .expect(200);
     expect(firstEnded.body.episode.played).toBe(true);
     expect(
-      (firstEnded.body.queue as Array<{ episode: { id: string } }>).map(
-        (item) => item.episode.id,
-      ),
+      (
+        (await client.get("/api/v1/queue").expect(200)).body.queue as Array<{
+          episode: { id: string };
+        }>
+      ).map((item) => item.episode.id),
     ).toEqual([secondEpisodeId]);
     expect(
       (await client.get("/api/v1/playback").expect(200)).body.playback,
-    ).toMatchObject({ episode: { id: secondEpisodeId }, positionMs: 0 });
+    ).toMatchObject({ episode: { id: secondEpisodeId }, positionMs: 25_000 });
 
     const staleState = await client
       .post("/api/v1/playback/state")
@@ -140,7 +152,7 @@ describe("episode end handling", () => {
     });
     expect(staleState.body.playback).toMatchObject({
       episode: { id: secondEpisodeId },
-      positionMs: 0,
+      positionMs: 25_000,
     });
     expect(
       (

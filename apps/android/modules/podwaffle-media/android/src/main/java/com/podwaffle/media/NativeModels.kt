@@ -74,7 +74,8 @@ data class EpisodeMedia(
     val localDownloadPath: String?,
     val artworkUrl: String?,
     val durationMs: Long?,
-    val queueItemId: String?
+    val queueItemId: String?,
+    val resumePositionMs: Long = 0L
 ) {
     companion object {
         fun fromMap(input: Map<String, Any?>): EpisodeMedia {
@@ -103,7 +104,8 @@ data class EpisodeMedia(
                 durationMs = (input["durationMs"] as? Number)
                     ?.toLong()
                     ?.takeIf { it > 0L },
-                queueItemId = (input["queueItemId"] as? String)?.takeIf { it.isNotBlank() }
+                queueItemId = (input["queueItemId"] as? String)?.takeIf { it.isNotBlank() },
+                resumePositionMs = ((input["resumePositionMs"] as? Number)?.toLong() ?: 0L).coerceAtLeast(0L)
             )
         }
 
@@ -118,7 +120,8 @@ data class EpisodeMedia(
                 localDownloadPath = json.optNullableString("localDownloadPath"),
                 artworkUrl = json.optNullableString("artworkUrl"),
                 durationMs = json.optLong("durationMs", 0L).takeIf { it > 0L },
-                queueItemId = json.optNullableString("queueItemId")
+                queueItemId = json.optNullableString("queueItemId"),
+                resumePositionMs = json.optLong("resumePositionMs", 0L).coerceAtLeast(0L)
             )
         }
 
@@ -139,7 +142,8 @@ data class EpisodeMedia(
                 localDownloadPath = extras?.getString("localDownloadPath"),
                 artworkUrl = metadata.artworkUri?.toString(),
                 durationMs = extras?.getLong("durationMs", 0L)?.takeIf { it > 0L },
-                queueItemId = extras?.getString("queueItemId")
+                queueItemId = extras?.getString("queueItemId"),
+                resumePositionMs = extras?.getLong("resumePositionMs", 0L)?.coerceAtLeast(0L) ?: 0L
             )
         }
     }
@@ -161,6 +165,7 @@ data class EpisodeMedia(
             putString("enclosureType", enclosureType)
             localPath?.let { putString("localDownloadPath", it) }
             durationMs?.let { putLong("durationMs", it) }
+            putLong("resumePositionMs", resumePositionMs)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
@@ -191,7 +196,8 @@ data class EpisodeMedia(
         "localDownloadPath" to localDownloadPath,
         "artworkUrl" to artworkUrl,
         "durationMs" to durationMs,
-        "queueItemId" to queueItemId
+        "queueItemId" to queueItemId,
+        "resumePositionMs" to resumePositionMs
     )
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -205,6 +211,7 @@ data class EpisodeMedia(
         put("artworkUrl", artworkUrl ?: JSONObject.NULL)
         put("durationMs", durationMs ?: JSONObject.NULL)
         put("queueItemId", queueItemId ?: JSONObject.NULL)
+        put("resumePositionMs", resumePositionMs)
     }
 }
 

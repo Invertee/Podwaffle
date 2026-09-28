@@ -15,8 +15,9 @@ export function episodeMedia(
     episode.podcastArtworkUrl ??
     useAuthStore
       .getState()
-      .snapshot?.subscriptions.find((podcast) => podcast.id === episode.podcastId)
-      ?.artworkUrl ??
+      .snapshot?.subscriptions.find(
+        (podcast) => podcast.id === episode.podcastId,
+      )?.artworkUrl ??
     episode.artworkUrl;
   return {
     episodeId: episode.id,
@@ -29,5 +30,6 @@ export function episodeMedia(
     artworkUrl: podcastArtworkUrl,
     durationMs: episode.durationMs,
     queueItemId,
+    resumePositionMs: episode.played ? 0 : episode.positionMs,
   };
 }

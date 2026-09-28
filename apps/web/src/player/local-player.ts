@@ -321,26 +321,34 @@ export class LocalPlayer {
       await this.loadCastEpisode(episode, autoplay);
       return;
     }
+    const latest = await api.episode(episode.id).catch(() => null);
+    const playbackEpisode = {
+      ...(latest ?? episode),
+      enclosureUrl: latest?.enclosureUrl ?? episode.enclosureUrl,
+    };
+    const requestedPositionMs = playbackEpisode.played
+      ? 0
+      : playbackEpisode.positionMs;
     const acquired = await api.acquirePlayback({
-      episodeId: episode.id,
-      positionMs: episode.positionMs,
-      durationMs: episode.durationMs,
+      episodeId: playbackEpisode.id,
+      positionMs: requestedPositionMs,
+      durationMs: playbackEpisode.durationMs,
       playbackRate: this.audio.playbackRate,
       takeover: true,
     });
     const startPositionMs =
-      acquired.episode?.id === episode.id
+      acquired.episode?.id === playbackEpisode.id
         ? acquired.positionMs
-        : episode.positionMs;
-    this.audio.src = episode.enclosureUrl;
+        : requestedPositionMs;
+    this.audio.src = playbackEpisode.enclosureUrl ?? episode.enclosureUrl ?? "";
     this.audio.currentTime = startPositionMs / 1000;
     this.playbackInstanceId = crypto.randomUUID();
     this.sequence = 0;
     this.listenedSinceFlush = 0;
     usePlayer.setState({
-      episode,
+      episode: playbackEpisode,
       positionMs: startPositionMs,
-      durationMs: episode.durationMs ?? 0,
+      durationMs: playbackEpisode.durationMs ?? 0,
       error: null,
       mode: "local",
       remote: false,
@@ -348,7 +356,7 @@ export class LocalPlayer {
       castSessionId: null,
       castStatus: "idle",
     });
-    this.setMetadata(episode);
+    this.setMetadata(playbackEpisode);
     if (autoplay) await this.play();
   }
 
@@ -938,9 +946,21 @@ export class LocalPlayer {
     usePlayer.setState({ castStatus: "loading", error: null });
     try {
       const state = usePlayer.getState();
+      const latest = await api.episode(episode.id).catch(() => null);
+      const replay = latest?.played ?? episode.played;
+      const playbackEpisode = {
+        ...(latest ?? episode),
+        enclosureUrl: latest?.enclosureUrl ?? episode.enclosureUrl,
+        positionMs: replay
+          ? 0
+          : Math.max(
+              latest?.positionMs ?? episode.positionMs,
+              state.episode?.id === episode.id ? state.positionMs : 0,
+            ),
+      };
       const remote = await this.cast.loadMedia({
-        episode,
-        positionMs: episode.positionMs,
+        episode: playbackEpisode,
+        positionMs: playbackEpisode.positionMs,
         autoplay,
         playbackRate: state.rate,
       });
@@ -948,12 +968,12 @@ export class LocalPlayer {
       this.sequence = 0;
       this.listenedSinceFlush = 0;
       usePlayer.setState({
-        episode,
+        episode: playbackEpisode,
         mode: "cast",
         playing: remote.playing,
         buffering: remote.buffering,
         positionMs: remote.positionMs,
-        durationMs: remote.durationMs || episode.durationMs || 0,
+        durationMs: remote.durationMs || playbackEpisode.durationMs || 0,
         volume: remote.volume,
         muted: remote.muted,
         castDeviceName: remote.deviceName,
@@ -961,8 +981,10 @@ export class LocalPlayer {
         castStatus: "connected",
         error: null,
       });
-      this.setMetadata(episode);
-      await api.startCast(confirmedCastState(remote, episode, state.rate));
+      this.setMetadata(playbackEpisode);
+      await api.startCast(
+        confirmedCastState(remote, playbackEpisode, state.rate),
+      );
     } catch (error) {
       usePlayer.setState({
         castStatus: "error",
@@ -1193,7 +1215,10 @@ export class LocalPlayer {
         if (!command.episodeId)
           throw new Error("The requested episode is missing.");
         await this.load(await api.episode(command.episodeId));
-      } else if (usePlayer.getState().mode === "cast" && command.action !== "refresh-status") {
+      } else if (
+        usePlayer.getState().mode === "cast" &&
+        command.action !== "refresh-status"
+      ) {
         await this.castControl(command.action, command);
       } else if (command.action === "play") {
         await this.play();

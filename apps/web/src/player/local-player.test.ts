@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   stopCast: vi.fn(),
   playbackCommand: vi.fn(),
   playback: vi.fn(),
+  episode: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({ api }));
@@ -103,6 +104,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.episode.mockResolvedValue(null);
   api.acquirePlayback.mockResolvedValue({});
   api.telemetry.mockResolvedValue({ recorded: true });
   api.updatePlayback.mockResolvedValue({});
@@ -129,6 +131,21 @@ beforeEach(() => {
 });
 
 describe("local player completion", () => {
+  it("requests the beginning when replaying a completed episode", async () => {
+    api.episode.mockResolvedValue({
+      ...first,
+      played: true,
+      positionMs: 60_000,
+    });
+
+    await playerModule.player.load(first, false);
+
+    expect(api.acquirePlayback).toHaveBeenCalledWith(
+      expect.objectContaining({ episodeId: first.id, positionMs: 0 }),
+    );
+    expect(audio.currentTime).toBe(0);
+  });
+
   it("saves the outgoing episode position before loading another episode", async () => {
     await playerModule.player.load(first, false);
     audio.currentTime = 22;
@@ -399,6 +416,37 @@ describe("local and Cast transitions", () => {
       mode: "cast",
       playing: true,
     });
+  });
+
+  it("loads a queued Cast episode from its latest saved position", async () => {
+    const cast = new FakeCastAdapter();
+    const isolated = new playerModule.LocalPlayer(cast);
+    await isolated.load(first, false);
+    await isolated.startCasting();
+    api.episode.mockResolvedValue({ ...second, positionMs: 45_000 });
+
+    await isolated.load(second);
+
+    expect(cast.state().positionMs).toBe(45_000);
+    expect(api.startCast).toHaveBeenCalledWith(
+      expect.objectContaining({ episodeId: second.id, positionMs: 45_000 }),
+    );
+  });
+
+  it("replays a completed Cast episode from the beginning", async () => {
+    const cast = new FakeCastAdapter();
+    const isolated = new playerModule.LocalPlayer(cast);
+    await isolated.load(first, false);
+    await isolated.startCasting();
+    api.episode.mockResolvedValue({
+      ...second,
+      positionMs: second.durationMs,
+      played: true,
+    });
+
+    await isolated.load(second);
+
+    expect(cast.state().positionMs).toBe(0);
   });
 
   it("advances the shared queue when Cast media ends", async () => {

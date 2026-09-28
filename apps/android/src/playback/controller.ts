@@ -163,11 +163,7 @@ class AndroidPlaybackController {
         if (refreshed) {
           playbackEpisode = {
             ...playbackEpisode,
-            positionMs: episodeResumePosition(
-              playbackEpisode,
-              pending,
-              refreshed,
-            ),
+            positionMs: episodeResumePosition(refreshed, pending),
             durationMs: refreshed.durationMs ?? playbackEpisode.durationMs,
           };
         }
@@ -214,6 +210,23 @@ class AndroidPlaybackController {
         void this.reportCurrentState(true).catch(() => undefined);
       }
       return;
+    }
+
+    if (useAuthStore.getState().connection !== "offline") {
+      const { serverUrl, token } = this.connection();
+      const refreshed = await api
+        .episode(serverUrl, token, playbackEpisode.id, 3_000)
+        .catch(() => null);
+      if (refreshed) {
+        playbackEpisode = {
+          ...playbackEpisode,
+          positionMs:
+            episode.played || refreshed.played
+              ? 0
+              : episodeResumePosition(refreshed, pending),
+          durationMs: refreshed.durationMs ?? playbackEpisode.durationMs,
+        };
+      }
     }
 
     const { serverUrl, token } = this.connection();

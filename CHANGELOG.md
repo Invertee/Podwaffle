@@ -1,5 +1,9 @@
 # Changelog
 
+- Resumed queued episodes from their saved positions across Android, Google Cast,
+  and the web player; completed episodes at 97% and removed newly completed
+  entries from the shared queue. Updated the Home Assistant add-on to 5.0.37.
+
 - Updated Android to 0.4.36 / versionCode 40 / native runtime 0.4-native-30,
   the web package to 0.1.1, and the Home Assistant integration to 0.4.1.
 

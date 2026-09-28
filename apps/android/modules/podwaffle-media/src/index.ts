@@ -71,6 +71,7 @@ export interface NativeEpisodeMedia {
   artworkUrl: string | null;
   durationMs: number | null;
   queueItemId: string | null;
+  resumePositionMs: number;
 }
 
 export interface NativeQueueSnapshot {

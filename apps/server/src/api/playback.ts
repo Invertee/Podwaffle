@@ -173,22 +173,25 @@ export function createPlaybackRouter(
               prior.activeDeviceId &&
               prior.activeDeviceId !== device.id,
             );
+            const savedEpisode = input.episodeId
+              ? getEpisode(db, profile.id, input.episodeId)
+              : null;
             const guardedInput = {
               ...input,
               // An ownership change resumes the last state confirmed by the old
               // renderer. This prevents a stale episode object on the new client
               // from rewinding playback.
-              positionMs: sameEpisodeOnAnotherDevice
-                ? prior.positionMs
-                : Math.max(
-                    input.positionMs,
-                    (() => {
-                      const saved = input.episodeId
-                        ? getEpisode(db, profile.id, input.episodeId)
-                        : null;
-                      return saved?.played ? 0 : (saved?.positionMs ?? 0);
-                    })(),
-                  ),
+              positionMs:
+                savedEpisode?.played && input.positionMs === 0
+                  ? 0
+                  : Math.max(
+                      sameEpisodeOnAnotherDevice
+                        ? prior.positionMs
+                        : input.positionMs,
+                      savedEpisode?.played
+                        ? 0
+                        : (savedEpisode?.positionMs ?? 0),
+                    ),
               durationMs:
                 sameEpisodeOnAnotherDevice && prior.durationMs !== null
                   ? prior.durationMs

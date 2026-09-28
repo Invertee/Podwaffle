@@ -40,11 +40,14 @@ internal fun reconcileQueueSelection(
     currentId: String?,
     currentPositionMs: Long,
     requestedIndex: Int,
+    candidateResumePositionsMs: List<Long> = emptyList(),
 ): QueueSelection {
     val matchingIndex = candidateIds.indexOf(currentId).takeIf { it >= 0 }
+    val index = matchingIndex ?: requestedIndex.coerceIn(0, candidateIds.lastIndex)
     return QueueSelection(
-        index = matchingIndex ?: requestedIndex.coerceIn(0, candidateIds.lastIndex),
-        positionMs = if (matchingIndex != null) currentPositionMs.coerceAtLeast(0L) else 0L,
+        index = index,
+        positionMs = if (matchingIndex != null) currentPositionMs.coerceAtLeast(0L)
+            else (candidateResumePositionsMs.getOrNull(index) ?: 0L).coerceAtLeast(0L),
     )
 }
 
@@ -389,9 +392,20 @@ class PodwaffleMediaService : MediaSessionService() {
                 } else {
                     null
                 }
+                val resumePositionMs = if (
+                    mediaItem != null && lastMediaItem?.mediaId != mediaItem.mediaId &&
+                    (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) &&
+                    player.currentPosition <= 1_000L
+                ) {
+                    EpisodeMedia.fromMediaItem(mediaItem)?.resumePositionMs ?: 0L
+                } else {
+                    0L
+                }
+                if (resumePositionMs > 0L) player.seekTo(resumePositionMs)
                 lastMediaItem = mediaItem
                 lastObservedMediaId = mediaItem?.mediaId
-                lastObservedPositionMs = 0L
+                lastObservedPositionMs = if (resumePositionMs > 0L) resumePositionMs else player.currentPosition.coerceAtLeast(0L)
                 lastObservedDurationMs = null
                 persistPlayback()
                 if (completedItem != null) {
@@ -714,6 +728,7 @@ class PodwaffleMediaService : MediaSessionService() {
             currentId,
             currentPosition,
             requestedIndex,
+            candidates.map { EpisodeMedia.fromMediaItem(it)?.resumePositionMs ?: 0L },
         )
         // A queue refresh may remove the old item and select a different head.
         // Carrying the old (often near-end) position into that new identity can

@@ -34,6 +34,20 @@ class QueueSelectionTest {
     }
 
     @Test
+    fun resumesSavedPositionWhenQueueRefreshSelectsADifferentEpisode() {
+        assertEquals(
+            QueueSelection(index = 0, positionMs = 25_000L),
+            reconcileQueueSelection(
+                candidateIds = listOf("next", "later"),
+                currentId = "completed",
+                currentPositionMs = 58_000L,
+                requestedIndex = 0,
+                candidateResumePositionsMs = listOf(25_000L, 0L),
+            ),
+        )
+    }
+
+    @Test
     fun keepsTheCurrentCastItemLoadedWhenOnlyTheFutureQueueChanges() {
         assertTrue(
             canReconcileActiveCastQueueWithoutReload(
