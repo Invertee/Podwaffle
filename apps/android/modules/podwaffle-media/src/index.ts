@@ -109,6 +109,7 @@ export interface PodwaffleMediaConfig {
   profileId: string;
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  hideGroupSpeakers: boolean;
   downloadRetentionDays?: number;
   maxDownloadStorageBytes?: number;
 }

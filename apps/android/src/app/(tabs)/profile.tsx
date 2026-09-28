@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -66,6 +67,10 @@ export default function ProfileScreen() {
   );
   const skipForwardSeconds = useAuthStore((state) => state.skipForwardSeconds);
   const setSkipDurations = useAuthStore((state) => state.setSkipDurations);
+  const hideGroupSpeakers = useAuthStore((state) => state.hideGroupSpeakers);
+  const setHideGroupSpeakers = useAuthStore(
+    (state) => state.setHideGroupSpeakers,
+  );
   const profile = session?.profile ?? snapshot?.profile;
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [backwardInput, setBackwardInput] = useState(
@@ -300,6 +305,31 @@ export default function ProfileScreen() {
           <Text style={styles.timezone}>
             Timezone · {profile?.timezone ?? "Not configured"}
           </Text>
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <View>
+          <Text style={styles.eyebrow}>GOOGLE CAST</Text>
+          <Text style={styles.cardTitle}>Cast devices</Text>
+        </View>
+        <Text style={styles.cardDescription}>
+          Hide individual speakers that are already part of your Cast groups.
+        </Text>
+        <View style={styles.settingRow}>
+          <View style={styles.settingCopy}>
+            <Text style={styles.settingLabel}>Hide grouped speakers</Text>
+            <Text style={styles.settingDescription}>
+              Dining Room, Kitchen, Office Left, and Office Right
+            </Text>
+          </View>
+          <Switch
+            value={hideGroupSpeakers}
+            onValueChange={(enabled) => void setHideGroupSpeakers(enabled)}
+            trackColor={{ false: colors.border, true: colors.accentDim }}
+            thumbColor={hideGroupSpeakers ? colors.accent : colors.textMuted}
+            accessibilityLabel="Hide grouped Cast speakers"
+          />
         </View>
       </View>
 
@@ -710,6 +740,12 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   settingLabel: { color: colors.textSecondary, fontSize: fontSizes.md },
+  settingCopy: { flex: 1, gap: 3 },
+  settingDescription: {
+    color: colors.textMuted,
+    fontSize: fontSizes.xs,
+    lineHeight: 17,
+  },
   numberField: {
     width: 100,
     height: 42,

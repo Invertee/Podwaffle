@@ -28,6 +28,7 @@ const SNAPSHOT_KEY = "podwaffle.snapshot.v1";
 const PLAYBACK_SETTINGS_KEY_PREFIX = "podwaffle.playback-settings.v1";
 const DEFAULT_SKIP_BACKWARD_SECONDS = 15;
 const DEFAULT_SKIP_FORWARD_SECONDS = 30;
+const DEFAULT_HIDE_GROUP_SPEAKERS = false;
 
 export interface Credentials {
   serverUrl: string;
@@ -37,6 +38,7 @@ export interface Credentials {
 interface PlaybackSettings {
   skipBackwardSeconds: number;
   skipForwardSeconds: number;
+  hideGroupSpeakers: boolean;
 }
 
 type AuthStatus = "restoring" | "signed-out" | "authenticated";
@@ -53,6 +55,7 @@ interface AuthStore {
   liveSyncConnected: boolean;
   skipBackwardSeconds: number;
   skipForwardSeconds: number;
+  hideGroupSpeakers: boolean;
   settingsProfileId: string | null;
   restore: () => Promise<void>;
   validateServer: (value: string) => Promise<{
@@ -72,6 +75,7 @@ interface AuthStore {
     backwardSeconds: number,
     forwardSeconds: number,
   ) => Promise<void>;
+  setHideGroupSpeakers: (enabled: boolean) => Promise<void>;
   setLiveSyncConnected: (connected: boolean) => void;
   logout: () => Promise<void>;
 }
@@ -108,11 +112,16 @@ async function readPlaybackSettings(
         Number(parsed.skipForwardSeconds),
         DEFAULT_SKIP_FORWARD_SECONDS,
       ),
+      hideGroupSpeakers:
+        typeof parsed.hideGroupSpeakers === "boolean"
+          ? parsed.hideGroupSpeakers
+          : DEFAULT_HIDE_GROUP_SPEAKERS,
     };
   } catch {
     return {
       skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
       skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+      hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
     };
   }
 }
@@ -154,6 +163,7 @@ async function configureNative(
       profileId: session.profile.id,
       skipBackSeconds: settings.skipBackwardSeconds,
       skipForwardSeconds: settings.skipForwardSeconds,
+      hideGroupSpeakers: settings.hideGroupSpeakers,
       downloadRetentionDays: 30,
       maxDownloadStorageBytes: 2_000_000_000,
     });
@@ -173,6 +183,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   liveSyncConnected: false,
   skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
   skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+  hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
   settingsProfileId: null,
 
   restore: async () => {
@@ -200,6 +211,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         : {
             skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
             skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+            hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
           };
       set({
         status: "authenticated",
@@ -322,6 +334,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           ? {
               skipBackwardSeconds: current.skipBackwardSeconds,
               skipForwardSeconds: current.skipForwardSeconds,
+              hideGroupSpeakers: current.hideGroupSpeakers,
             }
           : await readPlaybackSettings(session.profile.id);
       await configureNative(credentials, session, settings);
@@ -403,6 +416,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     const settings = {
       skipBackwardSeconds: backward,
       skipForwardSeconds: forward,
+      hideGroupSpeakers: get().hideGroupSpeakers,
     };
     const { credentials, session, snapshot } = get();
     const profileId = session?.profile.id ?? snapshot?.profile.id ?? null;
@@ -410,6 +424,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (profileId) await writePlaybackSettings(profileId, settings);
     if (credentials && session) {
       await configureNative(credentials, session, settings);
+    }
+  },
+
+  setHideGroupSpeakers: async (hideGroupSpeakers) => {
+    const current = get();
+    const settings = {
+      skipBackwardSeconds: current.skipBackwardSeconds,
+      skipForwardSeconds: current.skipForwardSeconds,
+      hideGroupSpeakers,
+    };
+    const profileId =
+      current.session?.profile.id ?? current.snapshot?.profile.id ?? null;
+    set({ hideGroupSpeakers });
+    if (profileId) await writePlaybackSettings(profileId, settings);
+    if (current.credentials && current.session) {
+      await configureNative(current.credentials, current.session, settings);
     }
   },
 
@@ -431,6 +461,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       settingsProfileId: null,
       skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
       skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
+      hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
       error: null,
       liveSyncConnected: false,
     });

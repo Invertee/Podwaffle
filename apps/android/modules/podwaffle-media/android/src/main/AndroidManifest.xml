@@ -40,7 +40,11 @@
             </intent-filter>
         </service>
 
-        <!-- Android Auto binds this service only when the car host browses Podwaffle. -->
+        <!--
+          Android Auto uses the Media3 action. Android's Bluetooth service uses
+          the legacy MediaBrowserService action to expose this same catalogue
+          to AVRCP 1.6 head units.
+        -->
         <service
             android:name=".PodwaffleAutoMediaService"
             android:enabled="true"

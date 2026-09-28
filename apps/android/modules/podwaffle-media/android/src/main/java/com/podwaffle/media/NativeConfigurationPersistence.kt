@@ -23,6 +23,7 @@ object NativeConfigurationPersistence {
             put("profileId", configuration.profileId)
             put("skipBackwardMs", configuration.skipBackwardMs)
             put("skipForwardMs", configuration.skipForwardMs)
+            put("hideGroupSpeakers", configuration.hideGroupSpeakers)
             put("downloadRetentionDays", configuration.downloadRetentionDays)
             put("maxDownloadStorageBytes", configuration.maxDownloadStorageBytes)
             put("revision", configuration.revision)
@@ -53,6 +54,7 @@ object NativeConfigurationPersistence {
                     .coerceIn(1_000L, 120_000L),
                 skipForwardMs = value.optLong("skipForwardMs", 30_000L)
                     .coerceIn(1_000L, 120_000L),
+                hideGroupSpeakers = value.optBoolean("hideGroupSpeakers", false),
                 downloadRetentionDays = value.optInt("downloadRetentionDays", 30)
                     .coerceIn(1, 3650),
                 maxDownloadStorageBytes = value.optLong(

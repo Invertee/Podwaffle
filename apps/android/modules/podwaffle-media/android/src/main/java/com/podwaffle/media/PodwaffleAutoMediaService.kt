@@ -31,12 +31,13 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.Executor
 
 /**
- * Android Auto browse service.
+ * Vehicle browse service for Android Auto and Bluetooth AVRCP clients.
  *
- * Android Auto supplies the driver-safe UI. This service only exposes the
- * Podcasts -> Episodes hierarchy and attaches its library session to the same
+ * The vehicle supplies the driver-safe UI. This service exposes the
+ * Podcasts -> Episodes hierarchy through Media3 and its legacy
+ * MediaBrowserService bridge, then attaches its library session to the same
  * native player owned by PodwaffleMediaService. No Cast chooser, show notes, or
- * phone-only actions are advertised to the car host.
+ * phone-only actions are advertised to the vehicle.
  */
 @UnstableApi
 class PodwaffleAutoMediaService : MediaLibraryService() {

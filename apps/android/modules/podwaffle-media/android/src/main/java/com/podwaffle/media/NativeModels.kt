@@ -15,6 +15,7 @@ data class NativeConfiguration(
     val profileId: String,
     val skipBackwardMs: Long,
     val skipForwardMs: Long,
+    val hideGroupSpeakers: Boolean,
     val downloadRetentionDays: Int,
     val maxDownloadStorageBytes: Long,
     val revision: Long = 0L
@@ -46,6 +47,7 @@ data class NativeConfiguration(
                 profileId = profileId,
                 skipBackwardMs = skipBackSeconds * 1_000L,
                 skipForwardMs = skipForwardSeconds * 1_000L,
+                hideGroupSpeakers = input["hideGroupSpeakers"] as? Boolean ?: false,
                 downloadRetentionDays = ((input["downloadRetentionDays"] as? Number)?.toInt() ?: 30)
                     .coerceIn(1, 3650),
                 maxDownloadStorageBytes =

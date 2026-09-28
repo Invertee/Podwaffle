@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
- * Small, driver-safe catalogue used by Android Auto.
+ * Small, driver-safe catalogue used by Android Auto and Bluetooth AVRCP.
  *
  * The service exposes subscriptions as browsable podcast tiles and episodes as
  * playable leaves. Successful network responses are cached in app-private
@@ -58,6 +58,7 @@ class PodwaffleAutoCatalog(private val context: Context) {
                 MediaMetadata.Builder()
                     .setTitle("Podcasts")
                     .setDisplayTitle("Podcasts")
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setExtras(style)
@@ -339,6 +340,7 @@ private data class AutoPodcast(
                     .setArtist(author)
                     .setSubtitle(author)
                     .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setExtras(style)
@@ -390,6 +392,7 @@ private data class AutoEpisode(
                     .setAlbumTitle(podcastTitle)
                     .setSubtitle(podcastTitle)
                     .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setDurationMs(durationMs)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
