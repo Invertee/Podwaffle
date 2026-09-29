@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PodwaffleDatabase } from "../db/connection.js";
+import { log } from "../logging.js";
 import {
   createCastCommand,
   PLAYBACK_CONTROL_IDLE_MS,
@@ -21,8 +22,16 @@ export class CastProgressWatchdog {
 
   start(): void {
     if (this.enabled && !this.timer) {
+      log("info", "cast.watchdog.started", {
+        message: "Cast progress watchdog started",
+      });
       this.timer = setInterval(() => {
-        void this.sweep().catch(() => undefined);
+        void this.sweep().catch((error: unknown) => {
+          log("warn", "cast.watchdog.sweep_failed", {
+            message: "Cast progress watchdog sweep failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }, 30_000);
       this.timer.unref();
     }
@@ -33,8 +42,8 @@ export class CastProgressWatchdog {
     this.timer = undefined;
   }
 
-  async sweep(now = Date.now()): Promise<number> {
-    if (!this.enabled) return 0;
+  sweep(now = Date.now()): Promise<number> {
+    if (!this.enabled) return Promise.resolve(0);
     const db = this.database.db;
     const rows = db
       .prepare(
@@ -76,13 +85,36 @@ export class CastProgressWatchdog {
         },
       );
       requested++;
+      log("info", "cast.watchdog.refresh_requested", {
+        message: "Cast watchdog requested fresh receiver status",
+        profileId: row.profile_id,
+        ownerDeviceId: stored.ownerDeviceId,
+        episodeId: row.episode_id,
+        castSessionId: row.cast_session_id,
+        commandId: stored.command.commandId,
+      });
       // Dispatch independently: an unavailable owner must not delay other profiles.
-      void this.send(
-        row.profile_id,
-        stored.ownerDeviceId,
-        stored.command,
-      ).catch(() => undefined);
+      void this.send(row.profile_id, stored.ownerDeviceId, stored.command)
+        .then((delivered) => {
+          log(delivered ? "info" : "warn", "cast.watchdog.refresh_dispatched", {
+            message: delivered
+              ? "Cast watchdog delivered its status request"
+              : "Cast watchdog owner was unavailable for its status request",
+            profileId: row.profile_id,
+            ownerDeviceId: stored.ownerDeviceId,
+            commandId: stored.command.commandId,
+          });
+        })
+        .catch((error: unknown) => {
+          log("warn", "cast.watchdog.refresh_dispatch_failed", {
+            message: "Cast watchdog could not dispatch its status request",
+            profileId: row.profile_id,
+            ownerDeviceId: stored.ownerDeviceId,
+            commandId: stored.command.commandId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     }
-    return requested;
+    return Promise.resolve(requested);
   }
 }

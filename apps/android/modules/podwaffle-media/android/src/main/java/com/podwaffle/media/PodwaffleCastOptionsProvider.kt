@@ -20,7 +20,6 @@ class PodwaffleCastOptionsProvider : OptionsProvider {
         val resumeSavedSession = CastSessionPolicy.canResume(
             preferences.getBoolean("casting", false),
             preferences.getLong("castLastActivityAt", 0L),
-            preferences.getLong("castRecoveryDeadline", 0L),
             System.currentTimeMillis(),
         )
         return CastOptions.Builder()

@@ -1,5 +1,14 @@
 # Changelog
 
+- Kept active Google Cast receiver playback authoritative while the Android
+  sender is reconnecting, used the receiver's direct status and controls when
+  Media3 temporarily detaches, continued background progress reporting during
+  recovery, and retained resumable Cast ownership for the full bounded lease
+  window instead of abandoning a still-playing receiver after 30 seconds. Added
+  visible server watchdog request/delivery logging. Updated Android to 0.4.37 /
+  versionCode 41 / native runtime 0.4-native-31 and the Home Assistant add-on to
+  5.0.38.
+
 - Resumed queued episodes from their saved positions across Android, Google Cast,
   and the web player; completed episodes at 97% and removed newly completed
   entries from the shared queue. Updated the Home Assistant add-on to 5.0.37.
