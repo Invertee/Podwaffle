@@ -174,7 +174,12 @@ export class LocalPlayer {
     this.setupMediaSession();
     window.addEventListener("keydown", (event) => {
       const target = event.target as HTMLElement;
-      if (target.matches("input, textarea, select, [contenteditable=true]"))
+      if (
+        target.closest("dialog") ||
+        target.matches(
+          "input, textarea, select, summary, [contenteditable=true]",
+        )
+      )
         return;
       if (
         ![" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(

@@ -1,5 +1,12 @@
 # Podwaffle Home Assistant app
 
+Optional podcast analysis: set `analysis_server_url` to your local analyser's
+base URL (for example `http://192.168.1.50:5000`) and restart. Configure English
+Whisper on that machine, then enable **Chapters & advert analysis** per podcast
+in the web client. Episode **Details & chapters** contains expandable diagnostics
+and an on-demand analysis button. Automatic skipping is disabled. See the
+[setup and testing guide](https://github.com/Invertee/Podwaffle/blob/main/docs/podcast-analysis.md).
+
 Podwaffle serves its web client, API and WebSocket endpoint from internal port 3000. Home Assistant ingress or an existing nginx proxy should terminate TLS and forward the original host, protocol and client address. Forward `/ws` with WebSocket upgrade support.
 
 Configure at least:

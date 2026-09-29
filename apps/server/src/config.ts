@@ -7,6 +7,14 @@ const rawOptionsSchema = z.object({
   join_code: z.string().min(1),
   port: z.number().int().min(1).max(65535).default(3000),
   feed_refresh_minutes: z.number().int().positive().default(30),
+  analysis_server_url: z
+    .union([
+      z.literal(""),
+      z
+        .url()
+        .refine((value) => /^https?:\/\//.test(value), "Use HTTP or HTTPS"),
+    ])
+    .default(""),
   sync_event_retention_days: z.number().int().min(1).default(30),
   history_retention_days: z.number().int().min(1).default(365),
   artwork_cache_mb: z.number().int().nonnegative().default(500),

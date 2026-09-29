@@ -22,6 +22,7 @@ options:
   join_code: "replace-me"
   port: 3000
   feed_refresh_minutes: 22
+  analysis_server_url: ""
   sync_event_retention_days: 30
   history_retention_days: 365
   artwork_cache_mb: 500
@@ -38,6 +39,7 @@ schema:
   join_code: password
   port: port
   feed_refresh_minutes: int(5,1440)
+  analysis_server_url: str?
   sync_event_retention_days: int(1,365)
   history_retention_days: int(1,3650)
   artwork_cache_mb: int(0,10000)

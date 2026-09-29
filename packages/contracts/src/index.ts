@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./analysis.js";
 
 const htmlEntities: Record<string, string> = {
   amp: "&",
@@ -230,6 +231,8 @@ export const syncEventTypeSchema = z.enum([
   "subscription.removed",
   "subscription.order.updated",
   "subscription.download-settings.updated",
+  "subscription.analysis-settings.updated",
+  "episode.analysis.updated",
   "podcast.metadata.updated",
   "podcast.new-indicator.updated",
   "episode.discovered",

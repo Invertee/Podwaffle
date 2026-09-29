@@ -23,6 +23,7 @@ import type { PodwaffleWebSocketServer } from "./websocket/server.js";
 import { log } from "./logging.js";
 import { openApiDocument } from "./api/openapi.js";
 import { createCatalogRouter } from "./api/catalog.js";
+import { createAnalysisRouter } from "./analysis/routes.js";
 import { createPlaybackRouter } from "./api/playback.js";
 import { createProfileRouter } from "./api/profile.js";
 import type { PushService } from "./push/service.js";
@@ -545,6 +546,7 @@ export function createApp(dependencies: AppDependencies): Express {
   );
   authenticated.use(createProfileRouter(database, sync));
   authenticated.use(createCatalogRouter(database, sync, config));
+  authenticated.use(createAnalysisRouter(database, sync, config));
   authenticated.use(createPlaybackRouter(database, sync, webSockets));
   api.use(authenticated);
   app.use("/api/v1", api);

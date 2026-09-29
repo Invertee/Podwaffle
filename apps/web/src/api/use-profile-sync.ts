@@ -26,6 +26,8 @@ export function useProfileSync(authenticated: boolean): void {
       useSyncStore.getState().setSnapshot(snapshot);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["devices"] }),
+        queryClient.invalidateQueries({ queryKey: ["analysis-settings"] }),
+        queryClient.invalidateQueries({ queryKey: ["episode-analysis"] }),
         queryClient.invalidateQueries({ queryKey: ["episodes"] }),
         queryClient.invalidateQueries({ queryKey: ["in-progress"] }),
         queryClient.invalidateQueries({ queryKey: ["history"] }),

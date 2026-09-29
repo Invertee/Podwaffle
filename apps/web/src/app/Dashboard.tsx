@@ -14,6 +14,10 @@ import { useSyncStore } from "../stores/sync";
 import { player } from "../player/local-player";
 import { PlayerBar } from "../player/PlayerBar";
 import { Icon, type IconName } from "./Icon";
+import {
+  EpisodeAnalysisButton,
+  PodcastAnalysisSettings,
+} from "./EpisodeAnalysis";
 
 type Page = "library" | "discover" | "progress" | "history" | "profile";
 
@@ -44,6 +48,7 @@ function EpisodeList({
           <div className="episode-copy">
             <p className="eyebrow">{episode.podcastTitle}</p>
             <h3>{episode.title}</h3>
+            <EpisodeAnalysisButton episode={episode} />
             <p>
               {episode.publishedAt
                 ? new Date(episode.publishedAt).toLocaleDateString()
@@ -473,6 +478,10 @@ export function Dashboard({ session }: { session: Session }) {
                 ) : null}
               </div>
             </div>
+            <PodcastAnalysisSettings
+              key={selected.id}
+              podcastId={selected.id}
+            />
             <EpisodeList
               episodes={episodes.data ?? []}
               revision={revision}

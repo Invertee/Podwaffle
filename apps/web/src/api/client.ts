@@ -13,6 +13,8 @@ import type {
   Snapshot,
   Subscription,
   SyncEvent,
+  AnalysisSettings,
+  EpisodeAnalysis,
 } from "@podwaffle/contracts";
 
 export class ApiClientError extends Error {
@@ -47,6 +49,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  analysisSettings: (podcastId: string) =>
+    request<{ settings: AnalysisSettings; configured: boolean }>(
+      `/subscriptions/${podcastId}/analysis`,
+    ),
+  saveAnalysisSettings: (podcastId: string, settings: AnalysisSettings) =>
+    request<{ settings: AnalysisSettings }>(
+      `/subscriptions/${podcastId}/analysis`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ commandId: crypto.randomUUID(), settings }),
+      },
+    ),
+  episodeAnalysis: (episodeId: string) =>
+    request<EpisodeAnalysis>(`/episodes/${episodeId}/analysis`),
+  analyseEpisode: (episodeId: string) =>
+    request<{ jobId: string }>(`/episodes/${episodeId}/analysis`, {
+      method: "POST",
+      body: JSON.stringify({ commandId: crypto.randomUUID() }),
+    }),
   profiles: () =>
     request<{ profiles: PublicProfile[] }>("/join/profiles").then(
       (result) => result.profiles,

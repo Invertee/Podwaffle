@@ -8,6 +8,7 @@ import type {
   Subscription,
 } from "@podwaffle/contracts";
 import { parseRss, type ParsedFeed } from "./rss.js";
+import { enqueueDiscoveredAnalysis } from "../analysis/service.js";
 
 interface PodcastRow {
   id: string;
@@ -275,14 +276,15 @@ export function upsertPodcastAndEpisodes(
       `INSERT INTO episodes(
         id, podcast_id, guid, enclosure_url, enclosure_type, title,
         description_html, published_at, first_discovered_at, duration_ms,
-        artwork_url, episode_url, explicit, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        artwork_url, episode_url, explicit, created_at, updated_at, chapters_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(podcast_id, guid) WHERE guid IS NOT NULL DO UPDATE SET
         enclosure_url=excluded.enclosure_url, enclosure_type=excluded.enclosure_type,
         title=excluded.title, description_html=excluded.description_html,
         published_at=excluded.published_at, duration_ms=excluded.duration_ms,
         artwork_url=excluded.artwork_url, episode_url=excluded.episode_url,
-        explicit=excluded.explicit, removed_at=NULL, updated_at=excluded.updated_at`,
+        explicit=excluded.explicit, removed_at=NULL, updated_at=excluded.updated_at,
+        chapters_url=excluded.chapters_url`,
     ).run(
       episodeId,
       id,
@@ -299,8 +301,10 @@ export function upsertPodcastAndEpisodes(
       episode.explicit ? 1 : 0,
       now,
       now,
+      episode.chaptersUrl ?? null,
     );
   }
+  enqueueDiscoveredAnalysis(db, id, discoveredEpisodeIds);
   return {
     podcast: mapPodcast(
       db

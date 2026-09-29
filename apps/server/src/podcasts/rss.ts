@@ -8,6 +8,7 @@ export interface ParsedFeed {
 }
 
 export interface ParsedEpisode {
+  chaptersUrl?: string | null;
   guid: string | null;
   title: string;
   descriptionHtml: string | null;
@@ -93,6 +94,7 @@ export function parseRss(xml: string): ParsedFeed {
     const title = tag(item, ["title"]);
     if (!title) continue;
     episodes.push({
+      chaptersUrl: attribute(item, "podcast:chapters", "url"),
       guid: tag(item, ["guid"]),
       title,
       descriptionHtml: tag(item, [
