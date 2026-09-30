@@ -734,8 +734,8 @@ async function analyse(request, config, signal, progress, execute = run) {
 }
 
 class PodcastWorker {
-  constructor(store, config, logger, processor = analyse) {
-    Object.assign(this, { store, config, logger, processor });
+  constructor(store, config, logger, processor = analyse, models = null) {
+    Object.assign(this, { store, config, logger, processor, models });
     this.running = false;
   }
   start() {
@@ -766,6 +766,16 @@ class PodcastWorker {
       };
       try {
         log("info", "Podcast analysis started");
+        if (this.config.classifier === "local" && this.models) {
+          try {
+            await this.models.ensureLocalReady();
+          } catch (error) {
+            log(
+              "warn",
+              `Local classifier could not be loaded; rules fallback remains available: ${error.message}`,
+            );
+          }
+        }
         const result = await this.processor(
           job.request,
           this.config,
@@ -792,6 +802,13 @@ class PodcastWorker {
           log("error", message);
         }
       } finally {
+        if (this.config.classifier === "local" && this.models) {
+          try {
+            await this.models.releaseLocal();
+          } catch (error) {
+            log("error", `Could not unload local classifier: ${error.message}`);
+          }
+        }
         this.running = false;
       }
     })();

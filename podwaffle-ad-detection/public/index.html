@@ -33,7 +33,8 @@
         <p class="muted">
           Download models independently of the active classifier. Verified files
           stay in persistent storage across app updates. Downloading Qwen does
-          not switch the classifier.
+          not switch the classifier. In local mode Qwen loads only while a job
+          is running, then unloads to release RAM.
         </p>
         <button id="prepare">Retry / verify model setup</button>
         <details>

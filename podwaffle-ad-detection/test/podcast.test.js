@@ -171,6 +171,45 @@ test("worker records stages, result and separate job logs; failures remain retry
   assert.equal(store.get(failed.id).error, "Missing model");
 });
 
+test("worker loads the local classifier for a job and unloads it afterwards", async (t) => {
+  const { store } = fixture(t);
+  const job = store.enqueue(validateRequest(request)).job;
+  const lifecycle = [];
+  const models = {
+    async ensureLocalReady() {
+      lifecycle.push("loaded");
+    },
+    async releaseLocal() {
+      lifecycle.push("unloaded");
+    },
+  };
+  const worker = new PodcastWorker(
+    store,
+    { classifier: "local", podcastJobTimeoutMs: 10000 },
+    { info() {}, warn() {}, error() {} },
+    async () => {
+      lifecycle.push("analysed");
+      return { segments: [], fragments: [] };
+    },
+    models,
+  );
+  await worker.tick();
+  assert.equal(store.get(job.id).status, "completed");
+  assert.deepEqual(lifecycle, ["loaded", "analysed", "unloaded"]);
+
+  const failed = store.enqueue(
+    validateRequest({ ...request, requestKey: "lifecycle-failure" }),
+  ).job;
+  lifecycle.length = 0;
+  worker.processor = async () => {
+    lifecycle.push("failed");
+    throw new Error("analysis failed");
+  };
+  await worker.tick();
+  assert.equal(store.get(failed.id).status, "failed");
+  assert.deepEqual(lifecycle, ["loaded", "failed", "unloaded"]);
+});
+
 test("seven-day transcript purge preserves markers and removes old logs", (t) => {
   const { store, filename } = fixture(t);
   const job = store.enqueue(validateRequest(request)).job;

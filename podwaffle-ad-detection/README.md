@@ -51,7 +51,9 @@ Original local API retained:
 Model preparation accepts optional JSON `{"target":"configured"}` (the default),
 `{"target":"whisper"}` or `{"target":"qwen"}`. Explicit targets download/verify
 independently of classifier selection. Qwen starts only when local mode is selected.
-Concurrent requests for a different target return 409; unknown targets return 400.
+In local mode its runtime starts for each analysis job and stops afterwards, while
+the verified weights remain cached on disk. Concurrent requests for a different
+target return 409; unknown targets return 400.
 
 Job body: `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?,
 llmPrompt?, sensitivity?, edgeFocusMinutes?, podcastTitle?, podcastDescription?,

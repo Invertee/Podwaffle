@@ -30,9 +30,10 @@ Home Assistant; direct API access has no credentials.
 The app UI has independent **Download / verify Whisper** and **Download / verify
 Qwen** buttons. You can download Qwen while using rules mode; this does not switch
 the classifier or start the LLM. To use it, select `classifier: local` in the
-add-on configuration and restart. When local mode is already selected, downloading
-Qwen also retries loading the runtime. Separate readiness messages distinguish
-verified model files from a running local classifier.
+add-on configuration and restart. The Qwen runtime loads on demand immediately
+before a local-classifier job and stops after that job, releasing its model RAM
+while the queue is idle. Separate readiness messages distinguish verified model
+files from a currently running local classifier.
 
 The existing **Retry / verify model setup** button prepares the currently
 configured models together. Downloads are serialized; progress and errors remain
@@ -46,14 +47,16 @@ does not require downloading verified weights again.
 | `whisper_model: tiny.en` | Default, quickest/smallest English Whisper option                                                                |
 | `whisper_model: base.en` | Larger English model for quality comparisons                                                                     |
 | `classifier: rules`      | Default; literal sponsor/phrase hints, no LLM download                                                           |
-| `classifier: local`      | Automatically downloads Qwen2.5 1.5B Instruct Q4_K_M (~1.12 GB), runs it using bundled llama.cpp on CPU          |
+| `classifier: local`      | Downloads Qwen2.5 1.5B Instruct Q4_K_M (~1.12 GB) and runs bundled llama.cpp on CPU only during analysis jobs    |
 | `classifier: gemini`     | Requires `gemini_api_key`; sends sampled transcripts, phrase hints and bounded episode/podcast context to Gemini |
 | `llm_timeout_seconds`    | Per-excerpt local-classifier timeout, default 60 seconds (10–300)                                                |
 
 Qwen is optional because its weights, runtime memory and processing time are
 significant on smaller Home Assistant hosts. Allow several GB of free RAM plus
 audio cache/model storage and measure on your hardware; model file size is not a
-RAM estimate. Native tools build with two compilation workers. Whisper and LLM
+RAM estimate. The LLM's memory is released after each job, although the container
+and operating-system filesystem cache may not report an immediate return to its
+pre-job figure. Native tools build with two compilation workers. Whisper and LLM
 threads are configurable. The LLM listens only on container loopback; no LLM port
 is exposed. This is a constrained classifier, not a general-purpose agent.
 

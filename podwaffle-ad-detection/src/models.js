@@ -117,6 +117,7 @@ class Models {
       operation: null,
     };
     this.controller = new AbortController();
+    this.stoppingChild = null;
   }
   prepare(target = "configured") {
     if (!["configured", "whisper", "qwen"].includes(target))
@@ -189,16 +190,46 @@ class Models {
         report("Qwen"),
         this.fetcher,
       );
-      if (c.classifier === "local" && !this.child) {
-        await this.startLlm(signal);
-        this.status.llmReady = true;
-      }
     }
     this.status.stage =
-      target === "qwen" && c.classifier !== "local"
-        ? "Qwen downloaded and verified; select local in Configuration to use it"
+      target === "qwen"
+        ? c.classifier === "local"
+          ? "Qwen downloaded and verified; it will load when a job starts"
+          : "Qwen downloaded and verified; select local in Configuration to use it"
         : "ready";
     this.logger.info("Models ready", { classifier: c.classifier });
+  }
+  async ensureLocalReady() {
+    if (this.config.classifier !== "local") return false;
+    if (this.status.llmReady && this.child) return true;
+    if (this.llmStarting) return this.llmStarting;
+    if (this.pending) await this.pending;
+    if (!this.status.llm) {
+      await this.prepare("qwen");
+      if (!this.status.llm)
+        throw new Error(this.status.error || "Qwen model is unavailable");
+    }
+    this.status.error = null;
+    this.llmStarting = this.startLlm(this.controller.signal)
+      .then(() => {
+        this.status.llmReady = true;
+        this.status.stage = "local classifier ready";
+        this.logger.info("Local classifier loaded for podcast analysis");
+        return true;
+      })
+      .finally(() => {
+        this.llmStarting = null;
+      });
+    return this.llmStarting;
+  }
+  async releaseLocal() {
+    if (this.llmStarting) await this.llmStarting.catch(() => {});
+    const loaded = Boolean(this.child);
+    await this.stopChild();
+    if (loaded && !this.controller.signal.aborted) {
+      this.status.stage = "ready";
+      this.logger.info("Local classifier unloaded while idle");
+    }
   }
   async startLlm(signal) {
     const c = this.config;
@@ -234,11 +265,13 @@ class Models {
     });
     child.on("exit", () => {
       this.status.llmReady = false;
-      failure = new Error(
-        "Local classifier exited; check available RAM and model, then retry setup",
-      );
+      const intentional = this.stoppingChild === child || signal.aborted;
+      if (!intentional)
+        failure = new Error(
+          "Local classifier exited; check available RAM and model, then retry setup",
+        );
       if (this.child === child) this.child = null;
-      if (!signal.aborted) {
+      if (!intentional) {
         this.status.error = failure.message;
         this.status.stage = "local classifier unavailable";
       }
@@ -273,6 +306,7 @@ class Models {
     this.status.llmReady = false;
     const child = this.child;
     if (!child) return;
+    this.stoppingChild = child;
     child.kill();
     const force = setTimeout(() => child.kill("SIGKILL"), 5000);
     try {
@@ -280,11 +314,13 @@ class Models {
     } finally {
       clearTimeout(force);
       if (this.child === child) this.child = null;
+      if (this.stoppingChild === child) this.stoppingChild = null;
     }
   }
   async stop() {
     this.controller.abort();
     await this.pending;
+    await this.llmStarting?.catch(() => {});
     await this.stopChild();
   }
 }

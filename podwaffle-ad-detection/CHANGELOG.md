@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Load the local Qwen classifier only while an analysis job is running and stop
+  its llama.cpp process afterwards so model RAM is released while idle.
+
 ## 0.1.4
 
 - Classify transcript excerpts independently so one slow or invalid local response does not discard the remaining analysis.

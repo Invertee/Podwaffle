@@ -1,5 +1,5 @@
 name: Podwaffle Ad Detection
-version: "0.1.4"
+version: "0.1.5"
 slug: podwaffle_ad_detection
 description: Experimental local English podcast chapter and advert analysis
 url: https://github.com/Invertee/Podwaffle

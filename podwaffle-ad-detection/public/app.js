@@ -42,11 +42,10 @@
       $("qwenStatus").textContent = models.llmReady
         ? "Qwen: loaded and ready for local classification"
         : models.llm
-          ? "Qwen: downloaded and verified, not loaded"
+          ? status.provider === "local"
+            ? "Qwen: downloaded and verified — loads only while a job is running"
+            : "Qwen: downloaded and verified, not loaded"
           : "Qwen: not yet downloaded / verified";
-      if (status.provider === "local" && !models.llmReady)
-        $("qwenStatus").textContent +=
-          " — local classification unavailable; jobs fall back to rules.";
       $("models").textContent = JSON.stringify(models, null, 2);
       $("download").hidden = !models.busy;
       $("download").value = models.total

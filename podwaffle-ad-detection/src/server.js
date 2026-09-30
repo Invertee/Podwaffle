@@ -60,7 +60,7 @@ async function main() {
   });
   const store = createPodcastStore(config.databasePath),
     models = new Models(config, logger);
-  const worker = new PodcastWorker(store, config, logger, analyse);
+  const worker = new PodcastWorker(store, config, logger, analyse, models);
   // Jobs remain queued while first-install downloads are visible in the UI.
   const timer = setInterval(() => {
     if (models.status.ready && !models.status.busy)
