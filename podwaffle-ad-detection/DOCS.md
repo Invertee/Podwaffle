@@ -60,6 +60,10 @@ The small model is an initial candidate, **not** a validated advert detector.
 Off-topic speech alone is not an advert, and descriptions may contain sponsor
 links. Prompts require evidence of commercial intent. Descriptions and transcripts
 are treated as untrusted data; generated ranges cannot bridge transcript gaps.
+Podwaffle can attach bounded per-podcast local-LLM guidance to each queued job.
+Low/Balanced/High sensitivity changes acoustic silence detection and accepted
+classifier confidence, while a configurable edge-focus window prioritises the
+first and last few minutes without increasing the configured sample budget.
 
 First installation resolves the current upstream model revision and records its
 checksum. Verified cached models survive upgrades and can start offline; routine

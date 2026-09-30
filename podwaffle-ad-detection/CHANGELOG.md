@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Accept per-podcast local-LLM detection guidance and Low/Balanced/High sensitivity.
+- Prioritise configurable opening and closing minutes within the existing sample budget.
+
 ## 0.1.1
 
 - Fix misplaced llama.cpp alias arguments that caused Qwen download setup to fail with an AbortSignal error.

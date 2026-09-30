@@ -20,14 +20,16 @@ manual. Android is unchanged.
    mapped LAN URL. Restart Podwaffle. Use a URL reachable from the Podwaffle server,
    not an ingress URL. No service-to-service credentials are used.
 5. Open a podcast in the web client, expand **Chapters & advert analysis**, enable
-   new-episode analysis and optionally save sponsor/phrase hints, one per line.
-   Settings belong to the current profile's subscription.
+   new-episode analysis and optionally save sponsor/phrase hints, local-LLM
+   guidance, detection sensitivity and first/last-minute focus. Settings belong
+   to the current profile's subscription.
 
 ## Test an existing episode
 
 Open **Details & chapters**, expand **Analysis diagnostics & testing tools** and
 choose **Analyse this episode**. This works independently of the new-episode
-toggle. Reanalysis uses saved phrases; queued jobs retain their captured settings.
+toggle. Reanalysis uses the saved detection settings; queued jobs retain their
+captured settings.
 An existing active job is reused instead of creating duplicates.
 
 The modal polls progress and displays markers. Start playback with the normal
@@ -48,10 +50,13 @@ its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
 - Downloads once, hashing the bytes. Source media is never rewritten.
 - Imports linked `podcast:chapters` JSON or embedded chapters during analysis;
   publisher chapters take precedence. Timings may differ with dynamic ads.
-- Scans silence boundaries with FFmpeg. Tonal/speaker-change models are outside
-  this first detector.
+- Scans silence boundaries with FFmpeg. Low/Balanced/High sensitivity adjusts
+  silence-boundary detection and the confidence accepted from classifiers.
+  Tonal/speaker-change models are outside this detector.
 - Samples 30-second windows near boundaries and at regular intervals, including
-  episode ends. Default initial budget: 900 seconds spread across the episode.
+  episode ends. The configurable edge focus reserves more of that budget for the
+  first and last 0–15 minutes (five by default). Default initial budget: 900
+  seconds, with the remainder spread across the episode.
   Up to eight additional 30-second context windows follow phrase hits. Short
   episodes may be transcribed in full.
 - Runs Whisper with English explicitly selected. Local phrase detection marks
@@ -61,6 +66,9 @@ its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
   untrusted context, not instructions. Off-topic discussion alone is not an advert.
   Ranges are validated and cannot span large transcript gaps. Classifier failure
   falls back to phrase detection with a warning, never to another provider.
+- Per-podcast local-LLM guidance can describe show-specific advert patterns. It is
+  bounded to 2,000 characters; structured-output, transcript-support and timestamp
+  constraints remain enforced. Gemini does not receive this custom guidance.
 - Confidence is an uncalibrated suggestion, not measured probability. Generated
   boundaries are approximate, and sparse sampling can miss adverts and topics.
 
@@ -93,20 +101,20 @@ record stages/errors without transcript text.
 
 Client endpoints use Podwaffle's existing profile authentication:
 
-| Method    | Path                                        | Purpose                                                                    |
-| --------- | ------------------------------------------- | -------------------------------------------------------------------------- |
-| GET / PUT | `/api/v1/subscriptions/:podcastId/analysis` | Get/save `{settings: {enabled, phrases}}`; writes also require `commandId` |
-| GET       | `/api/v1/episodes/:episodeId/analysis`      | Latest status, result and diagnostics                                      |
-| POST      | `/api/v1/episodes/:episodeId/analysis`      | Analyse/reanalyse with `{commandId}`                                       |
+| Method    | Path                                        | Purpose                                                                                                              |
+| --------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| GET / PUT | `/api/v1/subscriptions/:podcastId/analysis` | Get/save `{settings: {enabled, phrases, llmPrompt, sensitivity, edgeFocusMinutes}}`; writes also require `commandId` |
+| GET       | `/api/v1/episodes/:episodeId/analysis`      | Latest status, result and diagnostics                                                                                |
+| POST      | `/api/v1/episodes/:episodeId/analysis`      | Analyse/reanalyse with `{commandId}`                                                                                 |
 
 The analyser's local endpoints are unauthenticated:
 
-| Method | Path                     | Purpose                                                                                                                                 |
-| ------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/podcasts/status`   | Configuration summary and latest 200 jobs                                                                                               |
-| POST   | `/api/podcasts/jobs`     | Enqueue `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?, podcastTitle?, podcastDescription?, episodeDescription?}` |
-| GET    | `/api/podcasts/jobs/:id` | Job, result and latest 300 job log entries                                                                                              |
-| GET    | `/api/podcasts/logs`     | Latest dedicated log lines                                                                                                              |
+| Method | Path                     | Purpose                                                                                                                                                                              |
+| ------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/podcasts/status`   | Configuration summary and latest 200 jobs                                                                                                                                            |
+| POST   | `/api/podcasts/jobs`     | Enqueue `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?, llmPrompt?, sensitivity?, edgeFocusMinutes?, podcastTitle?, podcastDescription?, episodeDescription?}` |
+| GET    | `/api/podcasts/jobs/:id` | Job, result and latest 300 job log entries                                                                                                                                           |
+| GET    | `/api/podcasts/logs`     | Latest dedicated log lines                                                                                                                                                           |
 
 ## Validation
 

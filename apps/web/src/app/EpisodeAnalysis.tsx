@@ -32,6 +32,15 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
               .map((p) => p.trim())
               .filter(Boolean)
           : (settings.data?.settings.phrases ?? []),
+        llmPrompt: draft?.llmPrompt ?? settings.data?.settings.llmPrompt ?? "",
+        sensitivity:
+          draft?.sensitivity ??
+          settings.data?.settings.sensitivity ??
+          "balanced",
+        edgeFocusMinutes:
+          draft?.edgeFocusMinutes ??
+          settings.data?.settings.edgeFocusMinutes ??
+          5,
       }),
     onSuccess: async () => {
       setDraft(null);
@@ -41,6 +50,11 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
     },
   });
   const value = draft ?? settings.data?.settings;
+  function editSettings(changes: Partial<AnalysisSettings>) {
+    if (!value) return;
+    if (!draft) setPhrases(value.phrases.join("\n"));
+    setDraft({ ...value, ...changes });
+  }
   return (
     <details className="analysis-settings">
       <summary>
@@ -69,10 +83,9 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
                 type="checkbox"
                 checked={value.enabled}
                 disabled={save.isPending}
-                onChange={(event) => {
-                  setDraft({ ...value, enabled: event.target.checked });
-                  if (!draft) setPhrases(value.phrases.join("\n"));
-                }}
+                onChange={(event) =>
+                  editSettings({ enabled: event.target.checked })
+                }
               />{" "}
               Analyse new episodes
             </label>
@@ -89,10 +102,67 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
                 }}
               />
             </label>
+            <label className="analysis-field">
+              Local LLM detection guidance (optional)
+              <textarea
+                value={value.llmPrompt}
+                rows={4}
+                maxLength={2000}
+                disabled={save.isPending}
+                placeholder="For example: Treat host-read promotions for the host's own paid products as adverts."
+                onChange={(event) =>
+                  editSettings({ llmPrompt: event.target.value })
+                }
+              />
+              <small>
+                Used only by the local classifier. Describe show-specific advert
+                patterns; structured output and timestamp checks still apply.
+              </small>
+            </label>
+            <label className="analysis-field">
+              Detection sensitivity
+              <select
+                value={value.sensitivity}
+                disabled={save.isPending}
+                onChange={(event) =>
+                  editSettings({
+                    sensitivity: event.target
+                      .value as AnalysisSettings["sensitivity"],
+                  })
+                }
+              >
+                <option value="low">Low — fewer, stronger suggestions</option>
+                <option value="balanced">Balanced</option>
+                <option value="high">High — more possible suggestions</option>
+              </select>
+            </label>
+            <label className="analysis-field">
+              Focus on the first and last minutes
+              <input
+                type="number"
+                min={0}
+                max={15}
+                step={1}
+                value={value.edgeFocusMinutes}
+                disabled={save.isPending}
+                onChange={(event) =>
+                  editSettings({
+                    edgeFocusMinutes: Math.max(
+                      0,
+                      Math.min(15, Math.round(Number(event.target.value))),
+                    ),
+                  })
+                }
+              />
+              <small>
+                Prioritises sampling in both edge regions within the existing
+                audio budget. Set to 0 for normal whole-episode sampling.
+              </small>
+            </label>
             <p>
-              Phrases flag matching speech for review. Saving does not reprocess
-              older episodes; use the episode diagnostics to run analysis on
-              demand.
+              Phrases flag matching speech for review. These settings are
+              captured when a job is queued. Saving does not reprocess older
+              episodes; use the episode diagnostics to run analysis on demand.
             </p>
             <button
               disabled={!draft || save.isPending}
@@ -278,9 +348,10 @@ function EpisodeAnalysisModal({
       <details className="analysis-diagnostics">
         <summary>Analysis diagnostics & testing tools</summary>
         <p>
-          Run an analysis using the saved podcast phrases. This downloads audio
-          on your local analyser; Gemini receives transcript excerpts only when
-          configured there.
+          Run an analysis using the saved podcast detection settings. This
+          downloads audio on your local analyser; Gemini receives transcript
+          excerpts only when configured there. Custom LLM guidance is used only
+          by the local classifier.
         </p>
         <button
           disabled={

@@ -54,12 +54,13 @@ independently of classifier selection. Qwen starts only when local mode is selec
 Concurrent requests for a different target return 409; unknown targets return 400.
 
 Job body: `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?,
-podcastTitle?, podcastDescription?, episodeDescription?}`. Context is optional;
-legacy callers work unchanged. Descriptions are limited to 8,000 characters each,
-podcast title to 500. Metadata is snapshotted on submission. Local prompts use
-shorter context and bounded batches to fit the small model. Model output is
-validated, with unsupported time ranges discarded. No tools or autonomous agent
-actions are given to the classifier.
+llmPrompt?, sensitivity?, edgeFocusMinutes?, podcastTitle?, podcastDescription?,
+episodeDescription?}`. Context and detection settings are optional; legacy callers
+work unchanged. Descriptions are limited to 8,000 characters each, podcast title
+to 500, and local-LLM guidance to 2,000. Metadata and detection settings are
+snapshotted on submission. Local prompts use shorter context and bounded batches
+to fit the small model. Model output is validated, with unsupported time ranges
+discarded. No tools or autonomous agent actions are given to the classifier.
 
 The server imports publisher/embedded chapters, scans silence and samples audio
 for Whisper. It does not yet perform tonal/speaker-change detection. Phrase-only

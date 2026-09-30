@@ -70,13 +70,24 @@ export function createAnalysisRouter(
             current.revision,
           );
         db.prepare(
-          `INSERT INTO subscription_analysis_settings(profile_id,podcast_id,enabled,phrases_json,updated_at) VALUES(?,?,?,?,?)
-        ON CONFLICT(profile_id,podcast_id) DO UPDATE SET enabled=excluded.enabled,phrases_json=excluded.phrases_json,updated_at=excluded.updated_at`,
+          `INSERT INTO subscription_analysis_settings(
+            profile_id,podcast_id,enabled,phrases_json,llm_prompt,sensitivity,edge_focus_minutes,updated_at
+          ) VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(profile_id,podcast_id) DO UPDATE SET
+            enabled=excluded.enabled,
+            phrases_json=excluded.phrases_json,
+            llm_prompt=excluded.llm_prompt,
+            sensitivity=excluded.sensitivity,
+            edge_focus_minutes=excluded.edge_focus_minutes,
+            updated_at=excluded.updated_at`,
         ).run(
           profileId,
           podcastId,
           command.settings.enabled ? 1 : 0,
           JSON.stringify(command.settings.phrases),
+          command.settings.llmPrompt,
+          command.settings.sensitivity,
+          command.settings.edgeFocusMinutes,
           new Date().toISOString(),
         );
         if (!command.settings.enabled)

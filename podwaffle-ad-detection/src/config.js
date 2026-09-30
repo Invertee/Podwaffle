@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { validateSchedule } = require("./schedule");
 
 function loadConfig(env = process.env, options) {
   if (!options) {
@@ -32,7 +33,17 @@ function loadConfig(env = process.env, options) {
   const geminiKey = value("gemini_api_key", "PODCAST_GEMINI_API_KEY", "");
   if (classifier === "gemini" && !geminiKey)
     throw new Error("Gemini classifier requires gemini_api_key");
+  const scheduleEnabled = value("schedule_enabled", "SCHEDULE_ENABLED", true);
+  if (![true, false, "true", "false"].includes(scheduleEnabled))
+    throw new Error("schedule_enabled must be true or false");
+  const schedule = validateSchedule({
+    enabled: scheduleEnabled === true || scheduleEnabled === "true",
+    start: value("schedule_start", "SCHEDULE_START", "23:00"),
+    end: value("schedule_end", "SCHEDULE_END", "07:00"),
+    timeZone: value("schedule_timezone", "SCHEDULE_TIMEZONE", "Europe/London"),
+  });
   return {
+    schedule,
     dataDir,
     modelDir,
     host: env.HOST || "0.0.0.0",

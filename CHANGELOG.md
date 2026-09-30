@@ -1,5 +1,8 @@
 # Changelog
 
+- Added per-podcast local-LLM advert guidance, detection sensitivity, and
+  configurable first/last-minute sampling focus to chapter and advert analysis.
+
 - Kept active Google Cast receiver playback authoritative while the Android
   sender is reconnecting, used the receiver's direct status and controls when
   Media3 temporarily detaches, continued background progress reporting during

@@ -1,5 +1,5 @@
 name: Podwaffle Ad Detection
-version: "0.1.1"
+version: "0.1.2"
 slug: podwaffle_ad_detection
 description: Experimental local English podcast chapter and advert analysis
 url: https://github.com/Invertee/Podwaffle
@@ -26,6 +26,10 @@ options:
   job_timeout_minutes: 60
   classifier: rules
   llm_threads: 2
+  schedule_enabled: true
+  schedule_start: "23:00"
+  schedule_end: "07:00"
+  schedule_timezone: Europe/London
   gemini_api_key: ""
   gemini_model: gemini-2.5-flash
 schema:
@@ -36,5 +40,9 @@ schema:
   job_timeout_minutes: int(1,1440)
   classifier: list(rules|local|gemini)
   llm_threads: int(1,64)
+  schedule_enabled: bool
+  schedule_start: str
+  schedule_end: str
+  schedule_timezone: str
   gemini_api_key: password?
   gemini_model: str

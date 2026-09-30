@@ -10,6 +10,7 @@ const {
   sampleWindows,
   parseWhisper,
   classifyRules,
+  applySensitivity,
   validateSegments,
   PodcastWorker,
 } = require("../src/podcast-analysis");
@@ -33,7 +34,11 @@ function fixture(t) {
 }
 
 test("validates HTTP audio input and bounded literal phrase hints", () => {
-  assert.equal(validateRequest(request).chaptersUrl, null);
+  const validated = validateRequest(request);
+  assert.equal(validated.chaptersUrl, null);
+  assert.equal(validated.llmPrompt, "");
+  assert.equal(validated.sensitivity, "balanced");
+  assert.equal(validated.edgeFocusMinutes, 5);
   assert.throws(
     () => validateRequest({ ...request, enclosureUrl: "file:///etc/passwd" }),
     /HTTP/,
@@ -45,6 +50,18 @@ test("validates HTTP audio input and bounded literal phrase hints", () => {
   assert.throws(
     () => validateRequest({ ...request, phrases: [""] }),
     /nonempty/,
+  );
+  assert.throws(
+    () => validateRequest({ ...request, llmPrompt: "x".repeat(2001) }),
+    /llmPrompt/,
+  );
+  assert.throws(
+    () => validateRequest({ ...request, sensitivity: "maximum" }),
+    /sensitivity/,
+  );
+  assert.throws(
+    () => validateRequest({ ...request, edgeFocusMinutes: 16 }),
+    /edgeFocusMinutes/,
   );
 });
 
@@ -74,6 +91,10 @@ test("sampling stays within duration, respects budget and covers the episode end
   assert.equal(windows[0].startMs, 0);
   assert.equal(windows.at(-1).endMs, 3600000);
   assert.ok(windows.every((w) => w.startMs >= 0 && w.endMs <= 3600000));
+  assert.ok(
+    windows.filter((w) => w.startMs < 300000 || w.endMs > 3600000 - 300000)
+      .length >= 20,
+  );
   assert.deepEqual(sampleWindows(5000, [], 900), [{ startMs: 0, endMs: 5000 }]);
 });
 
@@ -93,6 +114,13 @@ test("Whisper offsets use original media time and phrase detection is literal", 
   assert.equal(fragments[0].endMs, 94000);
   assert.equal(classifyRules(fragments, ["Waffle sponsor"])[0].confidence, 0.6);
   assert.equal(classifyRules(fragments, [".*"]).length, 0);
+  const candidates = [
+    { kind: "advertisement", confidence: 0.5 },
+    { kind: "advertisement", confidence: 0.8 },
+    { kind: "chapter", confidence: 0.2 },
+  ];
+  assert.equal(applySensitivity(candidates, "low").length, 2);
+  assert.equal(applySensitivity(candidates, "high").length, 3);
   assert.throws(
     () =>
       validateSegments(

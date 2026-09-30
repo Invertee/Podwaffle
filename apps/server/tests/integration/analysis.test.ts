@@ -55,8 +55,19 @@ async function setup() {
 it("opt-in queues only newly discovered episodes and isolates subscription settings", async () => {
   const { agent, profileId, podcastId, runtime: rt } = await setup();
   const url = `/api/v1/subscriptions/${podcastId}/analysis`;
-  expect((await agent.get(url)).body.settings.enabled).toBe(false);
-  const settings = { enabled: true, phrases: ["waffle sponsor"] };
+  expect((await agent.get(url)).body.settings).toMatchObject({
+    enabled: false,
+    llmPrompt: "",
+    sensitivity: "balanced",
+    edgeFocusMinutes: 5,
+  });
+  const settings = {
+    enabled: true,
+    phrases: ["waffle sponsor"],
+    llmPrompt: "Membership pitches are adverts.",
+    sensitivity: "high" as const,
+    edgeFocusMinutes: 7,
+  };
   const request = { ...command(), settings };
   await agent.put(url).send(request).expect(200);
   expect((await agent.put(url).send(request)).body.replayed).toBe(true);
@@ -84,9 +95,12 @@ it("opt-in queues only newly discovered episodes and isolates subscription setti
     .all();
   expect(jobs).toHaveLength(1);
   expect(jobs[0]?.profile_id).toBe(profileId);
-  expect(JSON.parse(String(jobs[0]?.request_json)).chaptersUrl).toBe(
-    "https://example.com/1.json",
-  );
+  expect(JSON.parse(String(jobs[0]?.request_json))).toMatchObject({
+    chaptersUrl: "https://example.com/1.json",
+    llmPrompt: settings.llmPrompt,
+    sensitivity: "high",
+    edgeFocusMinutes: 7,
+  });
   await agent
     .put(url)
     .send({ ...command(), settings: { enabled: false, phrases: [] } })

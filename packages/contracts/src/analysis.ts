@@ -3,6 +3,9 @@ import { z } from "zod";
 export const analysisSettingsSchema = z.object({
   enabled: z.boolean(),
   phrases: z.array(z.string().trim().min(1).max(160)).max(50).default([]),
+  llmPrompt: z.string().trim().max(2000).default(""),
+  sensitivity: z.enum(["low", "balanced", "high"]).default("balanced"),
+  edgeFocusMinutes: z.number().int().min(0).max(15).default(5),
 });
 export type AnalysisSettings = z.infer<typeof analysisSettingsSchema>;
 

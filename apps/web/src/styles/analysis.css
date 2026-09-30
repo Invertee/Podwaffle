@@ -21,7 +21,9 @@
   gap: 8px;
   margin: 16px 0;
 }
-.analysis-field textarea {
+.analysis-field textarea,
+.analysis-field select,
+.analysis-field input[type="number"] {
   width: 100%;
   box-sizing: border-box;
   padding: 10px;
@@ -30,6 +32,9 @@
   border: 1px solid #80808088;
   border-radius: 8px;
   font: inherit;
+}
+.analysis-field small {
+  opacity: 0.75;
 }
 .analysis-settings input[type="checkbox"] {
   width: auto;

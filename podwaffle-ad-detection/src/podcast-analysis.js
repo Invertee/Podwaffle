@@ -37,6 +37,9 @@ function validateRequest(body) {
       fail(`${name} must use HTTP(S) without credentials`);
   }
   const phrases = body.phrases ?? [];
+  const llmPrompt = body.llmPrompt ?? "";
+  const sensitivity = body.sensitivity ?? "balanced";
+  const edgeFocusMinutes = body.edgeFocusMinutes ?? 5;
   const metadata = {};
   for (const [name, limit] of Object.entries({
     podcastTitle: 500,
@@ -59,6 +62,16 @@ function validateRequest(body) {
     fail(
       "phrases must contain at most 50 nonempty phrases of up to 160 characters",
     );
+  if (typeof llmPrompt !== "string" || llmPrompt.length > 2000)
+    fail("llmPrompt must contain at most 2000 characters");
+  if (!["low", "balanced", "high"].includes(sensitivity))
+    fail("sensitivity must be low, balanced or high");
+  if (
+    !Number.isSafeInteger(edgeFocusMinutes) ||
+    edgeFocusMinutes < 0 ||
+    edgeFocusMinutes > 15
+  )
+    fail("edgeFocusMinutes must be an integer from 0 to 15");
   return {
     requestKey: body.requestKey,
     episodeId: body.episodeId,
@@ -66,6 +79,9 @@ function validateRequest(body) {
     enclosureUrl: body.enclosureUrl,
     chaptersUrl: body.chaptersUrl || null,
     phrases: [...new Set(phrases.map((p) => p.trim()))],
+    llmPrompt: llmPrompt.trim(),
+    sensitivity,
+    edgeFocusMinutes,
     ...metadata,
   };
 }
@@ -131,7 +147,12 @@ async function download(url, file, maxBytes, signal) {
   };
 }
 
-function sampleWindows(durationMs, boundaries, budgetSeconds) {
+function sampleWindows(
+  durationMs,
+  boundaries,
+  budgetSeconds,
+  edgeFocusMinutes = 5,
+) {
   const windows = new Map();
   const add = (start) => {
     start = Math.max(
@@ -148,24 +169,61 @@ function sampleWindows(durationMs, boundaries, budgetSeconds) {
     )
       windows.set(start, { startMs: start, endMs: end });
   };
-  add(0);
-  add(30000);
-  add(durationMs - 60000);
-  add(durationMs - 30000);
+  const focusMs = edgeFocusMinutes * 60000;
+  const edgeSpanMs = focusMs || 60000;
+  for (let start = 0; start < Math.min(durationMs, edgeSpanMs); start += 30000)
+    add(start);
+  for (
+    let start = Math.max(0, durationMs - edgeSpanMs);
+    start < durationMs;
+    start += 30000
+  )
+    add(start);
   for (const boundary of boundaries) add(boundary - 15000);
   for (let start = 60000; start < durationMs; start += 120000) add(start);
-  // Distribute a bounded sample budget across the whole episode.
   const sorted = [...windows.values()].sort((a, b) => a.startMs - b.startMs);
   const limit = Math.max(1, Math.floor(budgetSeconds / 30));
-  return sorted.length <= limit
-    ? sorted
-    : Array.from(
-        { length: limit },
-        (_, i) =>
-          sorted[
-            Math.round((i * (sorted.length - 1)) / Math.max(1, limit - 1))
-          ],
-      );
+  if (sorted.length <= limit) return sorted;
+  const edge = sorted.filter(
+    (window) =>
+      window.startMs < edgeSpanMs || window.endMs > durationMs - edgeSpanMs,
+  );
+  const spread = (items, count) =>
+    count >= items.length
+      ? items
+      : Array.from(
+          { length: count },
+          (_, index) =>
+            items[
+              Math.round((index * (items.length - 1)) / Math.max(1, count - 1))
+            ],
+        );
+  // With edge focus enabled, reserve about two thirds of the fixed budget for
+  // the beginning/end and distribute the remainder over the full episode.
+  const edgeLimit = Math.min(
+    edge.length,
+    limit,
+    edgeFocusMinutes > 0 ? Math.max(2, Math.ceil((limit * 2) / 3)) : 2,
+  );
+  const selected = spread(edge, edgeLimit);
+  const selectedStarts = new Set(selected.map((window) => window.startMs));
+  selected.push(
+    ...spread(
+      sorted.filter((window) => !selectedStarts.has(window.startMs)),
+      limit - selected.length,
+    ),
+  );
+  return selected.sort((a, b) => a.startMs - b.startMs);
+}
+
+function applySensitivity(segments, sensitivity) {
+  const threshold =
+    { low: 0.75, balanced: 0.55, high: 0.35 }[sensitivity] ?? 0.55;
+  return segments.filter(
+    (segment) =>
+      !["advertisement", "promotion"].includes(segment.kind) ||
+      segment.confidence >= threshold,
+  );
 }
 
 function parseWhisper(json, window) {
@@ -394,6 +452,11 @@ async function analyse(request, config, signal, progress, execute = run) {
     )
       throw new Error("Unsupported audio duration (maximum 8 hours)");
     progress("acoustic scan", 20);
+    const acoustic = {
+      low: { noise: "-40dB", duration: "0.8" },
+      balanced: { noise: "-35dB", duration: "0.6" },
+      high: { noise: "-30dB", duration: "0.35" },
+    }[request.sensitivity];
     const scan = await execute(
       config.ffmpegPath,
       [
@@ -403,7 +466,7 @@ async function analyse(request, config, signal, progress, execute = run) {
         input,
         "-vn",
         "-af",
-        "silencedetect=n=-35dB:d=0.6",
+        `silencedetect=n=${acoustic.noise}:d=${acoustic.duration}`,
         "-f",
         "null",
         "-",
@@ -481,6 +544,7 @@ async function analyse(request, config, signal, progress, execute = run) {
       durationMs,
       boundaries,
       config.podcastSampleSeconds,
+      request.edgeFocusMinutes,
     );
     const fragments = [];
     const transcribe = async (window, index, total) => {
@@ -566,14 +630,17 @@ async function analyse(request, config, signal, progress, execute = run) {
     if (config.classifier === "local") {
       try {
         segments.push(
-          ...(await classifyLocal(
-            fragments,
-            request,
-            durationMs,
-            config,
-            signal,
-            validateSegments,
-          )),
+          ...applySensitivity(
+            await classifyLocal(
+              fragments,
+              request,
+              durationMs,
+              config,
+              signal,
+              validateSegments,
+            ),
+            request.sensitivity,
+          ),
         );
         provider = "local";
       } catch (error) {
@@ -585,13 +652,16 @@ async function analyse(request, config, signal, progress, execute = run) {
     } else if (config.classifier === "gemini" && config.podcastGeminiKey) {
       try {
         segments.push(
-          ...(await classifyGemini(
-            fragments,
-            request,
-            durationMs,
-            config,
-            signal,
-          )),
+          ...applySensitivity(
+            await classifyGemini(
+              fragments,
+              request,
+              durationMs,
+              config,
+              signal,
+            ),
+            request.sensitivity,
+          ),
         );
         provider = "gemini";
       } catch (error) {
@@ -712,6 +782,7 @@ module.exports = {
   sampleWindows,
   parseWhisper,
   classifyRules,
+  applySensitivity,
   validateSegments,
   analyse,
   PodcastWorker,

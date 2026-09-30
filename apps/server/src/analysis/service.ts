@@ -39,13 +39,24 @@ export function analysisSettings(
 ): AnalysisSettings {
   const row = db
     .prepare(
-      "SELECT enabled,phrases_json FROM subscription_analysis_settings WHERE profile_id=? AND podcast_id=?",
+      `SELECT enabled,phrases_json,llm_prompt,sensitivity,edge_focus_minutes
+       FROM subscription_analysis_settings WHERE profile_id=? AND podcast_id=?`,
     )
     .get(profileId, podcastId) as
-    { enabled: number; phrases_json: string } | undefined;
+    | {
+        enabled: number;
+        phrases_json: string;
+        llm_prompt: string;
+        sensitivity: AnalysisSettings["sensitivity"];
+        edge_focus_minutes: number;
+      }
+    | undefined;
   return {
     enabled: row?.enabled === 1,
     phrases: row ? (JSON.parse(row.phrases_json) as string[]) : [],
+    llmPrompt: row?.llm_prompt ?? "",
+    sensitivity: row?.sensitivity ?? "balanced",
+    edgeFocusMinutes: row?.edge_focus_minutes ?? 5,
   };
 }
 
@@ -77,6 +88,7 @@ export function enqueueAnalysis(
     | undefined;
   if (!episode?.enclosure_url)
     throw new Error("Subscribed episode with playable audio required");
+  const settings = analysisSettings(db, profileId, episode.podcast_id);
   const id = randomUUID(),
     now = new Date().toISOString();
   const request = {
@@ -88,7 +100,10 @@ export function enqueueAnalysis(
     episodeDescription: analysisContext(episode.description_html),
     enclosureUrl: episode.enclosure_url,
     chaptersUrl: episode.chapters_url,
-    phrases: analysisSettings(db, profileId, episode.podcast_id).phrases,
+    phrases: settings.phrases,
+    llmPrompt: settings.llmPrompt,
+    sensitivity: settings.sensitivity,
+    edgeFocusMinutes: settings.edgeFocusMinutes,
   };
   db.prepare(
     "INSERT INTO episode_analysis_jobs(id,profile_id,episode_id,request_json,created_at,next_attempt_at) VALUES(?,?,?,?,?,?)",

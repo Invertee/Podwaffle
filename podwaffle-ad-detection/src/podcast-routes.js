@@ -1,6 +1,7 @@
 "use strict";
 const express = require("express");
 const { validateRequest } = require("./podcast-analysis");
+const { scheduleStatus } = require("./schedule");
 
 function podcastRouter(store, config, logger) {
   const router = express.Router();
@@ -14,6 +15,7 @@ function podcastRouter(store, config, logger) {
       whisperConfigured: Boolean(config.podcastWhisperModel),
       provider: config.classifier || "rules",
       sampleBudgetSeconds: config.podcastSampleSeconds,
+      schedule: scheduleStatus(config.schedule),
       jobs: store.list(),
     }),
   );

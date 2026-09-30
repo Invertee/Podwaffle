@@ -250,7 +250,11 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
   };
   const result = await classifyLocal(
     fragments,
-    request,
+    {
+      ...request,
+      llmPrompt: "Host-read membership pitches count as promotions.",
+      sensitivity: "high",
+    },
     90000,
     { llmUrl: "http://127.0.0.1:8081" },
     signal(),
@@ -259,6 +263,8 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
       assert.equal(url, "http://127.0.0.1:8081/v1/chat/completions");
       const payload = JSON.parse(options.body);
       assert.match(payload.messages[0].content, /off-topic discussion is NOT/);
+      assert.match(payload.messages[0].content, /High sensitivity/);
+      assert.match(payload.messages[0].content, /membership pitches/);
       assert.equal(
         JSON.parse(payload.messages[1].content).context.episodeDescription,
         request.episodeDescription,
