@@ -316,7 +316,7 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   assert.equal(fallback.provider, "rules");
   assert.ok(
     fallback.diagnostics.warnings.some((warning) =>
-      warning.includes("Local classifier unavailable"),
+      warning.includes("Local classification failed for every excerpt"),
     ),
   );
   assert.ok(

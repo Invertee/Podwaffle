@@ -138,12 +138,14 @@ test("defaults need no environment variables; local LLM and cloud are explicit c
   assert.equal(config.whisperModelName, "tiny.en");
   assert.equal(config.podcastGeminiKey, "");
   assert.equal(config.port, 5000);
+  assert.equal(config.llmRequestTimeoutMs, 60000);
   assert.throws(() => loadConfig({}, { classifier: "gemini" }), /requires/);
   assert.throws(
     () => loadConfig({}, { whisper_model: "../bad" }),
     /whisper_model/,
   );
   assert.throws(() => loadConfig({}, { whisper_threads: -1 }), /Invalid/);
+  assert.throws(() => loadConfig({}, { llm_timeout_seconds: 5 }), /Invalid/);
   assert.equal(loadConfig({}, { classifier: "local" }).classifier, "local");
 });
 
@@ -248,6 +250,7 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
     confidence: 0.7,
     evidence: "Commercial pitch",
   };
+  let calls = 0;
   const result = await classifyLocal(
     fragments,
     {
@@ -270,27 +273,26 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
         request.episodeDescription,
       );
       assert.equal(payload.response_format.type, "json_schema");
+      assert.equal(payload.max_tokens, 500);
+      const excerpt = JSON.parse(payload.messages[1].content).fragments[0];
+      calls++;
+      const advertisement = excerpt.startMs === 0;
       return Response.json({
         choices: [
           {
             finish_reason: "stop",
             message: {
               content: JSON.stringify({
-                segments: [segment, { ...segment, endMs: 64000 }],
+                segments: advertisement ? [segment] : [],
                 assessments: [
                   {
-                    startMs: 0,
-                    endMs: 4000,
-                    verdict: "advertisement",
-                    confidence: 0.7,
-                    reason: "Contains a sponsor and promo-code cue.",
-                  },
-                  {
-                    startMs: 60000,
-                    endMs: 64000,
-                    verdict: "not_ad",
-                    confidence: 0.9,
-                    reason: "Returns to the editorial topic.",
+                    startMs: excerpt.startMs,
+                    endMs: excerpt.endMs,
+                    verdict: advertisement ? "advertisement" : "not_ad",
+                    confidence: advertisement ? 0.7 : 0.9,
+                    reason: advertisement
+                      ? "Contains a sponsor and promo-code cue."
+                      : "Returns to the editorial topic.",
                   },
                 ],
               }),
@@ -300,6 +302,9 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
       });
     },
   );
+  assert.equal(calls, 2);
+  assert.equal(result.successfulCount, 2);
+  assert.equal(result.failedFragments.length, 0);
   assert.equal(result.segments.length, 1);
   assert.equal(result.segments[0].source, "local");
   assert.equal(result.assessments.length, 2);
@@ -308,21 +313,79 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
     supported([{ ...segment, startMs: 20000, endMs: 24000 }], fragments),
     [],
   );
-  await assert.rejects(
-    classifyLocal(
-      fragments,
-      request,
-      90000,
-      { llmUrl: "local" },
-      signal(),
-      validateSegments,
-      async () =>
-        Response.json({
-          choices: [{ finish_reason: "length", message: { content: "{}" } }],
-        }),
-    ),
-    /incomplete/,
+  const failed = await classifyLocal(
+    fragments,
+    request,
+    90000,
+    { llmUrl: "local" },
+    signal(),
+    validateSegments,
+    async () =>
+      Response.json({
+        choices: [{ finish_reason: "length", message: { content: "{}" } }],
+      }),
   );
+  assert.equal(failed.successfulCount, 0);
+  assert.equal(failed.failedFragments.length, 2);
+  assert.match(failed.assessments[0].reason, /incomplete/);
+});
+
+test("local classifier preserves successful excerpts around an individual failure", async () => {
+  const fragments = [
+    { startMs: 0, endMs: 1000, text: "Editorial opening." },
+    { startMs: 1000, endMs: 2000, text: "Slow malformed response." },
+    { startMs: 2000, endMs: 3000, text: "Visit sponsor.example today." },
+  ];
+  let calls = 0;
+  const progress = [];
+  const result = await classifyLocal(
+    fragments,
+    request,
+    3000,
+    { llmUrl: "local", llmRequestTimeoutMs: 10000 },
+    signal(),
+    validateSegments,
+    async (_url, options) => {
+      const excerpt = JSON.parse(JSON.parse(options.body).messages[1].content)
+        .fragments[0];
+      calls++;
+      if (excerpt.startMs === 1000)
+        return Response.json({
+          choices: [{ finish_reason: "length", message: { content: "{}" } }],
+        });
+      return Response.json({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: JSON.stringify({
+                segments: [],
+                assessments: [
+                  {
+                    startMs: excerpt.startMs,
+                    endMs: excerpt.endMs,
+                    verdict: "not_ad",
+                    confidence: 0.8,
+                    reason: "No commercial request is present.",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    },
+    (complete, total) => progress.push([complete, total]),
+  );
+  assert.equal(calls, 3);
+  assert.equal(result.successfulCount, 2);
+  assert.deepEqual(result.failedFragments, [fragments[1]]);
+  assert.match(result.assessments[1].reason, /incomplete/);
+  assert.deepEqual(progress, [
+    [1, 3],
+    [2, 3],
+    [3, 3],
+  ]);
 });
 
 test("standalone management UI and unchanged API work while models are downloading", async (t) => {

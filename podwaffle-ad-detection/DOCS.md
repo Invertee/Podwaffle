@@ -48,6 +48,7 @@ does not require downloading verified weights again.
 | `classifier: rules`      | Default; literal sponsor/phrase hints, no LLM download                                                           |
 | `classifier: local`      | Automatically downloads Qwen2.5 1.5B Instruct Q4_K_M (~1.12 GB), runs it using bundled llama.cpp on CPU          |
 | `classifier: gemini`     | Requires `gemini_api_key`; sends sampled transcripts, phrase hints and bounded episode/podcast context to Gemini |
+| `llm_timeout_seconds`    | Per-excerpt local-classifier timeout, default 60 seconds (10–300)                                                |
 
 Qwen is optional because its weights, runtime memory and processing time are
 significant on smaller Home Assistant hosts. Allow several GB of free RAM plus
@@ -64,6 +65,10 @@ Podwaffle can attach bounded per-podcast local-LLM guidance to each queued job.
 Low/Balanced/High sensitivity changes acoustic silence detection and accepted
 classifier confidence, while a configurable edge-focus window prioritises the
 first and last few minutes without increasing the configured sample budget.
+Local classification runs once per transcript excerpt, so one slow or malformed
+response is recorded as uncertain without discarding successful decisions for the
+other excerpts. Phrase rules cover failed excerpts and remain the full fallback
+when no local request succeeds.
 
 First installation resolves the current upstream model revision and records its
 checksum. Verified cached models survive upgrades and can start offline; routine

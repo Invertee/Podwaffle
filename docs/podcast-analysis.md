@@ -73,6 +73,9 @@ its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
 - Per-podcast local-LLM guidance can describe show-specific advert patterns. It is
   bounded to 2,000 characters; structured-output, transcript-support and timestamp
   constraints remain enforced. Gemini does not receive this custom guidance.
+- Local classification runs independently for each transcript excerpt. A timeout
+  or malformed response is shown as uncertain and phrase rules cover that excerpt;
+  other successful local decisions are retained.
 - Confidence is an uncalibrated suggestion, not measured probability. Generated
   boundaries are approximate, and sparse sampling can miss adverts and topics.
 
@@ -91,8 +94,9 @@ persistent problem. Submitted jobs retain their original analyser base URL even
 if the configured URL changes.
 
 One job runs at a time in the sidecar. The add-on's `whisper_threads` and
-`llm_threads` control CPU use. Default download cap: 512 MiB; maximum duration:
-eight hours; job deadline: one hour. Change `max_audio_mb` and
+`llm_threads` control CPU use. `llm_timeout_seconds` is the per-excerpt local
+classification limit (60 seconds by default). Default download cap: 512 MiB;
+maximum duration: eight hours; job deadline: one hour. Change `max_audio_mb` and
 `job_timeout_minutes` in the sidecar options.
 
 Temporary audio, PCM samples and Whisper output are deleted on normal completion

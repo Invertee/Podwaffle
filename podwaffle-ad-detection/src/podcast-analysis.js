@@ -640,14 +640,37 @@ async function analyse(request, config, signal, progress, execute = run) {
           config,
           signal,
           validateSegments,
+          fetch,
+          (complete, total) =>
+            progress(
+              `classifying excerpt ${complete}/${total}`,
+              Math.round(85 + (13 * complete) / Math.max(1, total)),
+            ),
         );
         classifierAssessments = local.assessments;
-        segments.push(...applySensitivity(local.segments, request.sensitivity));
-        provider = "local";
+        const failureSummary = local.failureReasons.slice(0, 3).join(" ");
+        if (local.successfulCount > 0 || fragments.length === 0) {
+          segments.push(
+            ...applySensitivity(local.segments, request.sensitivity),
+          );
+          if (local.failedFragments.length) {
+            segments.push(
+              ...classifyRules(local.failedFragments, request.phrases),
+            );
+            warnings.push(
+              `Local classification failed for ${local.failedFragments.length} of ${fragments.length} excerpts (${failureSummary}); phrase detection was used for those excerpts.`,
+            );
+          }
+          provider = "local";
+        } else {
+          warnings.push(
+            `Local classification failed for every excerpt (${failureSummary}); phrase detector used instead.`,
+          );
+        }
       } catch (error) {
         if (signal.aborted) throw error;
         warnings.push(
-          "Local classifier unavailable or returned invalid output; phrase detector used instead. Check model status and available memory.",
+          `${error instanceof Error ? error.message : "Local classifier unavailable"}; phrase detector used instead. Check model status and available memory.`,
         );
       }
     } else if (config.classifier === "gemini" && config.podcastGeminiKey) {

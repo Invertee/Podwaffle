@@ -46,7 +46,7 @@ const schema = {
   properties: {
     segments: {
       type: "array",
-      maxItems: 30,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
@@ -80,7 +80,7 @@ const schema = {
     },
     assessments: {
       type: "array",
-      maxItems: 100,
+      maxItems: 1,
       items: {
         type: "object",
         additionalProperties: false,
@@ -101,7 +101,7 @@ const schema = {
 };
 
 function validateAssessments(value, excerpts) {
-  const validated = (Array.isArray(value) ? value.slice(0, 100) : []).flatMap(
+  const validated = (Array.isArray(value) ? value.slice(0, 1) : []).flatMap(
     (assessment) => {
       if (
         !Number.isSafeInteger(assessment.startMs) ||
@@ -154,70 +154,90 @@ async function classifyLocal(
   signal,
   validate,
   fetcher = fetch,
+  onProgress = () => {},
 ) {
-  const batches = [];
-  let batch = [],
-    length = 0;
-  for (const f of fragments) {
-    const size = JSON.stringify(f).length;
-    if (batch.length && (length + size > 6000 || batch.length >= 40)) {
-      batches.push(batch);
-      batch = [];
-      length = 0;
-    }
-    batch.push(f);
-    length += size;
-  }
-  if (batch.length) batches.push(batch);
   const segments = [],
-    assessments = [];
-  for (const excerpts of batches) {
-    const response = await fetcher(`${config.llmUrl}/v1/chat/completions`, {
-      method: "POST",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(180000)]),
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "local",
-        stream: false,
-        temperature: 0,
-        max_tokens: 2400,
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: "podcast_segments", strict: true, schema },
-        },
-        messages: [
-          { role: "system", content: localInstructions(request) },
-          {
-            role: "user",
-            content: JSON.stringify({
-              context: context(request),
-              phrases: request.phrases.join("; ").slice(0, 1500),
-              durationMs,
-              fragments: excerpts,
-            }),
+    assessments = [],
+    failedFragments = [],
+    failureReasons = [];
+  const timeoutMs = config.llmRequestTimeoutMs ?? 60000;
+  for (let index = 0; index < fragments.length; index++) {
+    const excerpt = fragments[index],
+      excerpts = [excerpt];
+    try {
+      const response = await fetcher(`${config.llmUrl}/v1/chat/completions`, {
+        method: "POST",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "local",
+          stream: false,
+          temperature: 0,
+          max_tokens: 500,
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "podcast_segments", strict: true, schema },
           },
-        ],
-      }),
-    });
-    if (!response.ok)
-      throw new Error(`Local classifier returned HTTP ${response.status}`);
-    const text = await response.text();
-    if (text.length > 1024 * 1024)
-      throw new Error("Local classifier response too large");
-    const completion = JSON.parse(text).choices?.[0];
-    if (completion?.finish_reason !== "stop")
-      throw new Error("Local classifier response incomplete");
-    const parsed = JSON.parse(completion.message.content);
-    const validated = validate(parsed.segments, durationMs).map((s) => ({
-      ...s,
-      source: "local",
-    }));
-    segments.push(...supported(validated, excerpts));
-    assessments.push(...validateAssessments(parsed.assessments, excerpts));
-    if (segments.length > 2000)
-      throw new Error("Too many local classifier markers");
-    if (assessments.length > 2000) assessments.length = 2000;
+          messages: [
+            { role: "system", content: localInstructions(request) },
+            {
+              role: "user",
+              content: JSON.stringify({
+                context: context(request),
+                phrases: request.phrases.join("; ").slice(0, 1500),
+                durationMs,
+                fragments: excerpts,
+              }),
+            },
+          ],
+        }),
+      });
+      if (!response.ok)
+        throw new Error(`Local classifier returned HTTP ${response.status}`);
+      const text = await response.text();
+      if (text.length > 256 * 1024)
+        throw new Error("Local classifier response too large");
+      const completion = JSON.parse(text).choices?.[0];
+      if (completion?.finish_reason !== "stop")
+        throw new Error("Local classifier response incomplete");
+      const parsed = JSON.parse(completion.message.content);
+      const validated = validate(parsed.segments, durationMs).map((s) => ({
+        ...s,
+        source: "local",
+      }));
+      segments.push(...supported(validated, excerpts));
+      assessments.push(...validateAssessments(parsed.assessments, excerpts));
+      if (segments.length > 2000)
+        throw new Error("Too many local classifier markers");
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const reason =
+        error?.name === "TimeoutError"
+          ? `Timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+          : error instanceof SyntaxError
+            ? "The local classifier returned invalid JSON."
+            : String(
+                error?.message || "Local classifier request failed.",
+              ).slice(0, 200);
+      failedFragments.push(excerpt);
+      failureReasons.push(reason);
+      assessments.push({
+        startMs: excerpt.startMs,
+        endMs: excerpt.endMs,
+        verdict: "uncertain",
+        confidence: 0,
+        reason,
+      });
+    } finally {
+      onProgress(index + 1, fragments.length);
+    }
   }
-  return { segments, assessments };
+  return {
+    segments,
+    assessments: assessments.slice(0, 2000),
+    failedFragments,
+    failureReasons: [...new Set(failureReasons)],
+    successfulCount: fragments.length - failedFragments.length,
+  };
 }
 module.exports = { instructions, context, supported, classifyLocal };

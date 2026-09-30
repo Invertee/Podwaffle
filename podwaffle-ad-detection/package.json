@@ -1,6 +1,6 @@
 {
   "name": "@podwaffle/ad-detection",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Standalone English podcast chapter and advert analysis sidecar",
   "type": "commonjs",

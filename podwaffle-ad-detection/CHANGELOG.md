@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Classify transcript excerpts independently so one slow or invalid local response does not discard the remaining analysis.
+- Add a configurable per-excerpt local-LLM timeout and report individual failures in diagnostics.
+
 ## 0.1.3
 
 - Retain concise per-excerpt local-classifier decisions for no-hit diagnostics.

@@ -86,6 +86,8 @@ function loadConfig(env = process.env, options) {
     llmUrl: "http://127.0.0.1:8081",
     llmModel: path.join(modelDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf"),
     llmThreads: number("llm_threads", "LLM_THREADS", 2, 1, 64),
+    llmRequestTimeoutMs:
+      number("llm_timeout_seconds", "LLM_TIMEOUT_SECONDS", 60, 10, 300) * 1000,
   };
 }
 module.exports = { loadConfig };

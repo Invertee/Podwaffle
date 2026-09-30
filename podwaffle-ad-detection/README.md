@@ -64,6 +64,9 @@ discarded. No tools or autonomous agent actions are given to the classifier.
 Local results retain a concise verdict, confidence and evidence-based rationale
 for each transcript excerpt so empty detections can be diagnosed. These summaries
 are not chain-of-thought and expire with transcript excerpts after seven days.
+Excerpts are classified independently; a timeout or invalid response affects only
+that excerpt. `llm_timeout_seconds` controls the per-excerpt limit (60 seconds by
+default, 10–300 seconds). If every excerpt fails, phrase rules remain the fallback.
 
 The server imports publisher/embedded chapters, scans silence and samples audio
 for Whisper. It does not yet perform tonal/speaker-change detection. Phrase-only
