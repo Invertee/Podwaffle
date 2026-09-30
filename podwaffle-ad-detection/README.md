@@ -61,6 +61,9 @@ to 500, and local-LLM guidance to 2,000. Metadata and detection settings are
 snapshotted on submission. Local prompts use shorter context and bounded batches
 to fit the small model. Model output is validated, with unsupported time ranges
 discarded. No tools or autonomous agent actions are given to the classifier.
+Local results retain a concise verdict, confidence and evidence-based rationale
+for each transcript excerpt so empty detections can be diagnosed. These summaries
+are not chain-of-thought and expire with transcript excerpts after seven days.
 
 The server imports publisher/embedded chapters, scans silence and samples audio
 for Whisper. It does not yet perform tonal/speaker-change detection. Phrase-only

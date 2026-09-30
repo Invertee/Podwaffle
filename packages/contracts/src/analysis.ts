@@ -29,6 +29,16 @@ export const analysisSegmentSchema = z
   })
   .refine((s) => s.endMs > s.startMs, "Invalid segment range");
 
+const classifierAssessmentSchema = z
+  .object({
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    verdict: z.enum(["advertisement", "promotion", "not_ad", "uncertain"]),
+    confidence: z.number().min(0).max(1),
+    reason: z.string().max(300),
+  })
+  .refine((assessment) => assessment.endMs > assessment.startMs);
+
 export const analysisResultSchema = z
   .object({
     version: z.literal(1),
@@ -69,6 +79,12 @@ export const analysisResultSchema = z
         .max(200),
       acousticBoundariesMs: z.array(z.number().nonnegative()).max(2000),
       warnings: z.array(z.string().max(2000)).max(100),
+      sensitivity: z.enum(["low", "balanced", "high"]).default("balanced"),
+      minimumAdvertConfidence: z.number().min(0).max(1).default(0.55),
+      classifierAssessments: z
+        .array(classifierAssessmentSchema)
+        .max(2000)
+        .default([]),
     }),
     transcriptExpired: z.boolean(),
   })
@@ -77,6 +93,7 @@ export const analysisResultSchema = z
       ...value.segments,
       ...value.fragments,
       ...value.diagnostics.sampleWindows,
+      ...value.diagnostics.classifierAssessments,
     ]) {
       if (range.endMs <= range.startMs || range.endMs > value.durationMs)
         ctx.addIssue({

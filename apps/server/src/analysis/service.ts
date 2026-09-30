@@ -156,6 +156,7 @@ export function pruneTranscripts(db: DatabaseSync): void {
   for (const row of rows) {
     const result = JSON.parse(row.result_json) as AnalysisResult;
     result.fragments = [];
+    result.diagnostics.classifierAssessments = [];
     result.transcriptExpired = true;
     db.prepare(
       "UPDATE episode_analysis_jobs SET result_json=?,transcript_expires_at=NULL WHERE id=?",

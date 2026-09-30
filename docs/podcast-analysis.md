@@ -41,6 +41,10 @@ at the same URL. A changed enclosure URL is flagged as stale.
 Diagnostics include job IDs, retry state, model/classifier, sampled intervals,
 silence boundaries, warnings, transcript excerpts and job logs. Empty results
 mean no markers were detected in sampled portions, not that the episode is ad-free.
+Local-classifier jobs also show a concise verdict, confidence and evidence-based
+rationale beside every retained transcript excerpt. This is a decision summary,
+not hidden chain-of-thought, and it identifies candidates rejected by the selected
+sensitivity threshold. These assessments expire with transcripts after seven days.
 
 Open the sidecar's web interface for model-download status, job inspection and
 its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).

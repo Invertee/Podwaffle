@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Retain concise per-excerpt local-classifier decisions for no-hit diagnostics.
+
 ## 0.1.2
 
 - Accept per-podcast local-LLM detection guidance and Low/Balanced/High sensitivity.

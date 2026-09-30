@@ -154,6 +154,17 @@ it("retries with a stable request key, imports results, expires snippets and det
       sampleWindows: [{ startMs: 0, endMs: 30000 }],
       acousticBoundariesMs: [],
       warnings: [],
+      sensitivity: "balanced",
+      minimumAdvertConfidence: 0.55,
+      classifierAssessments: [
+        {
+          startMs: 10000,
+          endMs: 12000,
+          verdict: "advertisement",
+          confidence: 0.6,
+          reason: "Contains a direct sponsor cue.",
+        },
+      ],
     },
     transcriptExpired: false,
   };
@@ -206,6 +217,7 @@ it("retries with a stable request key, imports results, expires snippets and det
     episodeId,
   ).job?.result;
   expect(expired?.fragments).toEqual([]);
+  expect(expired?.diagnostics.classifierAssessments).toEqual([]);
   expect(expired?.segments).toHaveLength(1);
   expect(expired?.transcriptExpired).toBe(true);
   rt.database.db

@@ -147,6 +147,7 @@ function createPodcastStore(filename) {
         .all(now)) {
         const result = JSON.parse(row.result_json);
         result.fragments = [];
+        if (result.diagnostics) result.diagnostics.classifierAssessments = [];
         result.transcriptExpired = true;
         db.prepare(
           "UPDATE podcast_jobs SET result_json=?,expires_at=NULL WHERE id=?",

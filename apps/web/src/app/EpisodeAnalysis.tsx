@@ -227,6 +227,10 @@ function EpisodeAnalysisModal({
   const [seeking, setSeeking] = useState(false);
   const job = analysis.data?.job,
     result = job?.result;
+  const classifierAssessments = result?.diagnostics.classifierAssessments ?? [],
+    diagnosticSensitivity = result?.diagnostics.sensitivity ?? "balanced",
+    minimumAdvertConfidence =
+      result?.diagnostics.minimumAdvertConfidence ?? 0.55;
   const active = job && ["queued", "processing"].includes(job.status);
   useEffect(() => {
     const node = dialog.current;
@@ -429,18 +433,57 @@ function EpisodeAnalysisModal({
                 .map(timestamp)
                 .join(", ") || "None detected"}
             </p>
+            {result.provider === "local" && (
+              <>
+                <h4>Local classifier decisions</h4>
+                <p>
+                  {diagnosticSensitivity} sensitivity requires at least{" "}
+                  {Math.round(minimumAdvertConfidence * 100)}% confidence for
+                  advert and promotion markers. The notes below are concise
+                  decision rationales, not hidden model reasoning.
+                </p>
+                {classifierAssessments.length === 0 && (
+                  <p>
+                    No per-excerpt decisions were retained. Reanalyse with the
+                    updated sidecar to generate them.
+                  </p>
+                )}
+              </>
+            )}
             <h4>Transcript excerpts</h4>
             {result.transcriptExpired ? (
               <p>Transcript excerpts were purged after seven days.</p>
             ) : (
-              result.fragments.map((fragment, i) => (
-                <p key={i}>
-                  <strong>
-                    {timestamp(fragment.startMs)}–{timestamp(fragment.endMs)}
-                  </strong>{" "}
-                  {fragment.text}
-                </p>
-              ))
+              result.fragments.map((fragment, i) => {
+                const assessment = classifierAssessments.find(
+                  (candidate) =>
+                    candidate.startMs === fragment.startMs &&
+                    candidate.endMs === fragment.endMs,
+                );
+                const belowThreshold =
+                  assessment &&
+                  ["advertisement", "promotion"].includes(assessment.verdict) &&
+                  assessment.confidence < minimumAdvertConfidence;
+                return (
+                  <div className="analysis-transcript" key={i}>
+                    <p>
+                      <strong>
+                        {timestamp(fragment.startMs)}–
+                        {timestamp(fragment.endMs)}
+                      </strong>{" "}
+                      {fragment.text}
+                    </p>
+                    {assessment && (
+                      <p className="analysis-assessment">
+                        Local decision: {assessment.verdict.replace("_", " ")} ·{" "}
+                        {Math.round(assessment.confidence * 100)}% —{" "}
+                        {assessment.reason}
+                        {belowThreshold && " (below the sensitivity threshold)"}
+                      </p>
+                    )}
+                  </div>
+                );
+              })
             )}
           </>
         )}

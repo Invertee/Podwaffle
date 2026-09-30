@@ -129,6 +129,17 @@
   opacity: 0.7;
   font-size: 0.85em;
 }
+.analysis-transcript {
+  border-top: 1px solid #80808033;
+  padding: 8px 0;
+}
+.analysis-transcript p {
+  margin: 4px 0;
+}
+.analysis-assessment {
+  color: #b9c8dc;
+  font-size: 0.9em;
+}
 @media (max-width: 600px) {
   .analysis-modal {
     padding: 16px;

@@ -277,6 +277,22 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
             message: {
               content: JSON.stringify({
                 segments: [segment, { ...segment, endMs: 64000 }],
+                assessments: [
+                  {
+                    startMs: 0,
+                    endMs: 4000,
+                    verdict: "advertisement",
+                    confidence: 0.7,
+                    reason: "Contains a sponsor and promo-code cue.",
+                  },
+                  {
+                    startMs: 60000,
+                    endMs: 64000,
+                    verdict: "not_ad",
+                    confidence: 0.9,
+                    reason: "Returns to the editorial topic.",
+                  },
+                ],
               }),
             },
           },
@@ -284,8 +300,10 @@ test("local classifier keeps metadata in data messages and rejects unsupported t
       });
     },
   );
-  assert.equal(result.length, 1);
-  assert.equal(result[0].source, "local");
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].source, "local");
+  assert.equal(result.assessments.length, 2);
+  assert.equal(result.assessments[1].verdict, "not_ad");
   assert.deepEqual(
     supported([{ ...segment, startMs: 20000, endMs: 24000 }], fragments),
     [],

@@ -216,9 +216,12 @@ function sampleWindows(
   return selected.sort((a, b) => a.startMs - b.startMs);
 }
 
+function sensitivityThreshold(sensitivity) {
+  return { low: 0.75, balanced: 0.55, high: 0.35 }[sensitivity] ?? 0.55;
+}
+
 function applySensitivity(segments, sensitivity) {
-  const threshold =
-    { low: 0.75, balanced: 0.55, high: 0.35 }[sensitivity] ?? 0.55;
+  const threshold = sensitivityThreshold(sensitivity);
   return segments.filter(
     (segment) =>
       !["advertisement", "promotion"].includes(segment.kind) ||
@@ -626,22 +629,20 @@ async function analyse(request, config, signal, progress, execute = run) {
     windows.push(...extra);
     fragments.sort((a, b) => a.startMs - b.startMs);
     progress("classifying", 85);
-    let provider = "rules";
+    let provider = "rules",
+      classifierAssessments = [];
     if (config.classifier === "local") {
       try {
-        segments.push(
-          ...applySensitivity(
-            await classifyLocal(
-              fragments,
-              request,
-              durationMs,
-              config,
-              signal,
-              validateSegments,
-            ),
-            request.sensitivity,
-          ),
+        const local = await classifyLocal(
+          fragments,
+          request,
+          durationMs,
+          config,
+          signal,
+          validateSegments,
         );
+        classifierAssessments = local.assessments;
+        segments.push(...applySensitivity(local.segments, request.sensitivity));
         provider = "local";
       } catch (error) {
         if (signal.aborted) throw error;
@@ -697,6 +698,9 @@ async function analyse(request, config, signal, progress, execute = run) {
         sampleWindows: windows,
         acousticBoundariesMs: boundaries.slice(0, 2000),
         warnings,
+        sensitivity: request.sensitivity,
+        minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
+        classifierAssessments,
       },
       transcriptExpired: false,
     };
@@ -783,6 +787,7 @@ module.exports = {
   parseWhisper,
   classifyRules,
   applySensitivity,
+  sensitivityThreshold,
   validateSegments,
   analyse,
   PodcastWorker,

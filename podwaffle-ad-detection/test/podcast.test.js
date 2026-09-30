@@ -177,6 +177,9 @@ test("seven-day transcript purge preserves markers and removes old logs", (t) =>
   store.finish(job.id, {
     segments: [{ title: "Chapter" }],
     fragments: [{ text: "expire me" }],
+    diagnostics: {
+      classifierAssessments: [{ reason: "expire this too" }],
+    },
   });
   const { DatabaseSync } = require("node:sqlite");
   const db = new DatabaseSync(filename);
@@ -186,6 +189,10 @@ test("seven-day transcript purge preserves markers and removes old logs", (t) =>
   db.close();
   store.prune();
   assert.deepEqual(store.get(job.id).result.fragments, []);
+  assert.deepEqual(
+    store.get(job.id).result.diagnostics.classifierAssessments,
+    [],
+  );
   assert.equal(store.get(job.id).result.segments.length, 1);
   assert.equal(store.get(job.id).result.transcriptExpired, true);
 });

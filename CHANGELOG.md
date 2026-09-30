@@ -1,7 +1,10 @@
 # Changelog
 
 - Added per-podcast local-LLM advert guidance, detection sensitivity, and
-  configurable first/last-minute sampling focus to chapter and advert analysis.
+  configurable first/last-minute sampling focus to chapter and advert analysis,
+  with concise local-classifier decisions beside sampled transcript excerpts.
+  Updated the web package to 0.1.2, Podwaffle to 5.0.41, and the advert-detection
+  sidecar to 0.1.3.
 
 - Kept active Google Cast receiver playback authoritative while the Android
   sender is reconnecting, used the receiver's direct status and controls when
