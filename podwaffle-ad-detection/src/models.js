@@ -101,9 +101,11 @@ async function ensureModel(
 }
 
 class Models {
-  constructor(config, logger) {
+  constructor(config, logger, { fetcher = fetch, spawnProcess = spawn } = {}) {
     this.config = config;
     this.logger = logger;
+    this.fetcher = fetcher;
+    this.spawnProcess = spawnProcess;
     this.status = {
       ready: false,
       busy: false,
@@ -111,14 +113,31 @@ class Models {
       error: null,
       whisper: null,
       llm: null,
+      llmReady: false,
+      operation: null,
     };
     this.controller = new AbortController();
   }
-  prepare() {
-    if (this.pending) return this.pending;
+  prepare(target = "configured") {
+    if (!["configured", "whisper", "qwen"].includes(target))
+      throw Object.assign(new Error("Unknown model target"), {
+        statusCode: 400,
+      });
+    if (this.pending) {
+      if (this.status.operation !== target)
+        throw Object.assign(
+          new Error("Another model operation is in progress"),
+          { statusCode: 409 },
+        );
+      return this.pending;
+    }
+    this.controller.signal.throwIfAborted();
     this.status.busy = true;
+    this.status.operation = target;
     this.status.error = null;
-    this.pending = this.setup()
+    this.status.received = 0;
+    this.status.total = 0;
+    this.pending = this.setup(target)
       .catch((error) => {
         this.status.error = error.message;
         this.status.stage = "error";
@@ -129,14 +148,14 @@ class Models {
       })
       .finally(() => {
         this.status.busy = false;
+        this.status.operation = null;
         this.pending = null;
       });
     return this.pending;
   }
-  async setup() {
+  async setup(target) {
     const c = this.config,
       signal = this.controller.signal;
-    this.status.ready = false;
     const report = (name) => (stage, received, total) => {
       Object.assign(this.status, {
         stage: `${name}: ${stage}`,
@@ -144,39 +163,53 @@ class Models {
         total,
       });
     };
-    this.status.whisper = await ensureModel(
-      "ggerganov/whisper.cpp",
-      path.basename(c.podcastWhisperModel),
-      c.podcastWhisperModel,
-      signal,
-      report("Whisper"),
-    );
-    // Whisper readiness is independent of the optional classifier. Failed local
-    // setup does not prevent jobs using the documented rules fallback.
-    this.status.ready = true;
-    if (c.classifier === "local") {
+    if (target === "configured" || target === "whisper") {
+      this.status.ready = false;
+      this.status.whisper = await ensureModel(
+        "ggerganov/whisper.cpp",
+        path.basename(c.podcastWhisperModel),
+        c.podcastWhisperModel,
+        signal,
+        report("Whisper"),
+        this.fetcher,
+      );
+      // Whisper readiness is independent of the optional classifier. Failed local
+      // setup does not prevent jobs using the documented rules fallback.
+      this.status.ready = true;
+    }
+    if (
+      target === "qwen" ||
+      (target === "configured" && c.classifier === "local")
+    ) {
       this.status.llm = await ensureModel(
         "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
         path.basename(c.llmModel),
         c.llmModel,
-        "--alias",
-        "local",
         signal,
         report("Qwen"),
+        this.fetcher,
       );
-      if (!this.child) await this.startLlm(signal);
+      if (c.classifier === "local" && !this.child) {
+        await this.startLlm(signal);
+        this.status.llmReady = true;
+      }
     }
-    this.status.stage = "ready";
+    this.status.stage =
+      target === "qwen" && c.classifier !== "local"
+        ? "Qwen downloaded and verified; select local in Configuration to use it"
+        : "ready";
     this.logger.info("Models ready", { classifier: c.classifier });
   }
   async startLlm(signal) {
     const c = this.config;
     this.status.stage = "loading local classifier";
-    const child = spawn(
+    const child = this.spawnProcess(
       c.llmPath,
       [
         "-m",
         c.llmModel,
+        "--alias",
+        "local",
         "--host",
         "127.0.0.1",
         "--port",
@@ -200,6 +233,7 @@ class Models {
       failure = error;
     });
     child.on("exit", () => {
+      this.status.llmReady = false;
       failure = new Error(
         "Local classifier exited; check available RAM and model, then retry setup",
       );
@@ -216,7 +250,7 @@ class Models {
         try {
           if (
             (
-              await fetch(`${c.llmUrl}/health`, {
+              await this.fetcher(`${c.llmUrl}/health`, {
                 signal: AbortSignal.any([signal, AbortSignal.timeout(1000)]),
               })
             ).ok
@@ -236,6 +270,7 @@ class Models {
     }
   }
   async stopChild() {
+    this.status.llmReady = false;
     const child = this.child;
     if (!child) return;
     child.kill();

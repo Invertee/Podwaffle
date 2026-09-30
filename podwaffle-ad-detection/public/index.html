@@ -26,6 +26,15 @@
         <p id="health" role="status">Connecting…</p>
         <progress id="download" max="100" value="0" hidden></progress>
         <p id="modelStatus">Loading model status…</p>
+        <p id="whisperStatus">Whisper: checking…</p>
+        <button id="downloadWhisper">Download / verify Whisper</button>
+        <p id="qwenStatus">Qwen: checking…</p>
+        <button id="downloadQwen">Download / verify Qwen (1.12 GB)</button>
+        <p class="muted">
+          Download models independently of the active classifier. Verified files
+          stay in persistent storage across app updates. Downloading Qwen does
+          not switch the classifier.
+        </p>
         <button id="prepare">Retry / verify model setup</button>
         <details>
           <summary>Model revisions & checksums</summary>

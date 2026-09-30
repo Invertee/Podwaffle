@@ -36,12 +36,25 @@
       $("health").textContent =
         `Classifier: ${status.provider} · Sample budget: ${status.sampleBudgetSeconds}s · ${models.ready ? "Whisper ready" : "Waiting for Whisper"}`;
       $("modelStatus").textContent = models.error || models.stage;
+      $("whisperStatus").textContent = models.ready
+        ? `Whisper: verified — ${models.whisper?.filename || "configured model"}`
+        : "Whisper: not ready";
+      $("qwenStatus").textContent = models.llmReady
+        ? "Qwen: loaded and ready for local classification"
+        : models.llm
+          ? "Qwen: downloaded and verified, not loaded"
+          : "Qwen: not yet downloaded / verified";
+      if (status.provider === "local" && !models.llmReady)
+        $("qwenStatus").textContent +=
+          " — local classification unavailable; jobs fall back to rules.";
       $("models").textContent = JSON.stringify(models, null, 2);
       $("download").hidden = !models.busy;
       $("download").value = models.total
         ? (100 * models.received) / models.total
         : 0;
       $("prepare").disabled = models.busy;
+      $("downloadWhisper").disabled = models.busy;
+      $("downloadQwen").disabled = models.busy;
       $("jobs").replaceChildren();
       for (const job of status.jobs) {
         const row = document.createElement("tr");
@@ -101,6 +114,19 @@
     await api("models/prepare", { method: "POST" });
     await refresh();
   });
+  for (const [id, target] of [
+    ["downloadWhisper", "whisper"],
+    ["downloadQwen", "qwen"],
+  ]) {
+    $(id).onclick = action(async () => {
+      await api("models/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target }),
+      });
+      await refresh();
+    });
+  }
   void refresh();
   setInterval(() => {
     if (!document.hidden) void refresh();

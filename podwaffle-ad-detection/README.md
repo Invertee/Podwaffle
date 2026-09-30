@@ -48,6 +48,11 @@ Original local API retained:
 | POST   | `/api/podcasts/jobs/:id/retry` | Retry a failed job locally                   |
 | GET    | `/health`                      | HTTP service health, including model state   |
 
+Model preparation accepts optional JSON `{"target":"configured"}` (the default),
+`{"target":"whisper"}` or `{"target":"qwen"}`. Explicit targets download/verify
+independently of classifier selection. Qwen starts only when local mode is selected.
+Concurrent requests for a different target return 409; unknown targets return 400.
+
 Job body: `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?,
 podcastTitle?, podcastDescription?, episodeDescription?}`. Context is optional;
 legacy callers work unchanged. Descriptions are limited to 8,000 characters each,

@@ -26,22 +26,25 @@ function createApp(store, config, logger, models) {
     res.json({ status: "ok", models: models.status }),
   );
   app.get("/api/podcasts/models", (_req, res) => res.json(models.status));
-  app.post("/api/podcasts/models/prepare", (_req, res) => {
-    void models.prepare();
+  app.post("/api/podcasts/models/prepare", (req, res) => {
+    const target = req.body?.target ?? "configured";
+    if (!["configured", "whisper", "qwen"].includes(target))
+      return res
+        .status(400)
+        .json({ error: "target must be configured, whisper or qwen" });
+    void models.prepare(target);
     res.status(202).json(models.status);
   });
   app.use("/api/podcasts", podcastRouter(store, config, logger));
   app.use(express.static(path.join(__dirname, "..", "public")));
   app.use((error, _req, res, _next) => {
     const status = error.statusCode || error.status || 500;
-    res
-      .status(status)
-      .json({
-        error:
-          status < 500
-            ? error.message
-            : "Internal analyser error; check service logs",
-      });
+    res.status(status).json({
+      error:
+        status < 500
+          ? error.message
+          : "Internal analyser error; check service logs",
+    });
     if (status >= 500)
       logger.error("API request failed", { error: error.message });
   });

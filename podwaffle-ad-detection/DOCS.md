@@ -12,7 +12,11 @@
 3. Set Podwaffle's `analysis_server_url` to `http://<sidecar-hostname>:5000`, using
    the hostname shown on the sidecar's Home Assistant Info page. Do not use an
    ingress URL. Alternatively map its optional network port to an unused host
-   port and use that LAN address. The port is unmapped by default.
+   port and use that LAN address. Port 5000 is mapped by default in version 0.1.1.
+   Existing installations may retain the old disabled mapping: in the add-on's
+   **Configuration → Network**, set **5000/tcp** to **5000**, save and restart.
+   If that host port is already used, choose another free port and use it in the
+   URL. Ingress and direct LAN port access are separate settings.
 4. Restart Podwaffle. Enable analysis per podcast or test an existing episode
    through **Details & chapters → Analysis diagnostics & testing tools**.
 
@@ -22,6 +26,20 @@ work, so it must not be internet-accessible. Ingress provides access to the UI v
 Home Assistant; direct API access has no credentials.
 
 ## Models and resource use
+
+The app UI has independent **Download / verify Whisper** and **Download / verify
+Qwen** buttons. You can download Qwen while using rules mode; this does not switch
+the classifier or start the LLM. To use it, select `classifier: local` in the
+add-on configuration and restart. When local mode is already selected, downloading
+Qwen also retries loading the runtime. Separate readiness messages distinguish
+verified model files from a running local classifier.
+
+The existing **Retry / verify model setup** button prepares the currently
+configured models together. Downloads are serialized; progress and errors remain
+visible while the UI/API stays available. A failed local setup leaves phrase
+fallback available and is explicitly shown as local classification unavailable.
+Models live outside the app image in persistent `/data/models`; updating the app
+does not require downloading verified weights again.
 
 | Option                   | Behaviour                                                                                                        |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
