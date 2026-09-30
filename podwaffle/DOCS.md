@@ -1,8 +1,8 @@
 # Podwaffle Home Assistant app
 
 Optional podcast analysis: set `analysis_server_url` to your local analyser's
-base URL (for example `http://192.168.1.50:5000`) and restart. Configure English
-Whisper on that machine, then enable **Chapters & advert analysis** per podcast
+base URL (for example `http://192.168.1.50:5000`) and restart. Install
+the separate **Podwaffle Ad Detection** add-on (which downloads English Whisper automatically), then enable **Chapters & advert analysis** per podcast
 in the web client. Episode **Details & chapters** contains expandable diagnostics
 and an on-demand analysis button. Automatic skipping is disabled. See the
 [setup and testing guide](https://github.com/Invertee/Podwaffle/blob/main/docs/podcast-analysis.md).

@@ -62,7 +62,7 @@ export function enqueueAnalysis(
   if (active) return active.id;
   const episode = db
     .prepare(
-      "SELECT e.* FROM episodes e JOIN subscriptions s ON s.podcast_id=e.podcast_id WHERE e.id=? AND s.profile_id=? AND e.removed_at IS NULL",
+      "SELECT e.*,p.title AS podcast_title,p.description AS podcast_description FROM episodes e JOIN podcasts p ON p.id=e.podcast_id JOIN subscriptions s ON s.podcast_id=e.podcast_id WHERE e.id=? AND s.profile_id=? AND e.removed_at IS NULL",
     )
     .get(episodeId, profileId) as
     | {
@@ -70,6 +70,9 @@ export function enqueueAnalysis(
         chapters_url: string | null;
         title: string;
         podcast_id: string;
+        description_html: string | null;
+        podcast_title: string;
+        podcast_description: string | null;
       }
     | undefined;
   if (!episode?.enclosure_url)
@@ -80,6 +83,9 @@ export function enqueueAnalysis(
     requestKey: id,
     episodeId,
     title: episode.title,
+    podcastTitle: episode.podcast_title.slice(0, 500),
+    podcastDescription: analysisContext(episode.podcast_description),
+    episodeDescription: analysisContext(episode.description_html),
     enclosureUrl: episode.enclosure_url,
     chaptersUrl: episode.chapters_url,
     phrases: analysisSettings(db, profileId, episode.podcast_id).phrases,
@@ -88,6 +94,18 @@ export function enqueueAnalysis(
     "INSERT INTO episode_analysis_jobs(id,profile_id,episode_id,request_json,created_at,next_attempt_at) VALUES(?,?,?,?,?,?)",
   ).run(id, profileId, episodeId, JSON.stringify(request), now, now);
   return id;
+}
+
+// Feed metadata is contextual evidence, never instructions for the classifier.
+export function analysisContext(html: string | null): string {
+  return (html ?? "")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 8000);
 }
 
 // Called inside the same feed transaction as episode discovery, for scheduled and manual refreshes.

@@ -20,7 +20,7 @@ export const analysisSegmentSchema = z
     ]),
     title: z.string().max(200),
     confidence: z.number().min(0).max(1),
-    source: z.enum(["publisher", "embedded", "rules", "gemini"]),
+    source: z.enum(["publisher", "embedded", "rules", "gemini", "local"]),
     evidence: z.string().max(500),
     boundaryStatus: z.literal("approximate"),
   })
@@ -42,7 +42,8 @@ export const analysisResultSchema = z
       etag: z.string().nullable(),
     }),
     model: z.string().max(200),
-    provider: z.enum(["rules", "gemini"]),
+    provider: z.enum(["rules", "gemini", "local"]),
+    classifierModel: z.string().max(200).optional(),
     generatedAt: z.iso.datetime(),
     segments: z.array(analysisSegmentSchema).max(2000),
     fragments: z

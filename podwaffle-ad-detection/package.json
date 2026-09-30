@@ -1,0 +1,17 @@
+{
+  "name": "@podwaffle/ad-detection",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone English podcast chapter and advert analysis sidecar",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "5.2.1"
+  }
+}

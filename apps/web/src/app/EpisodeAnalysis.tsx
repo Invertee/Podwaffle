@@ -219,8 +219,11 @@ function EpisodeAnalysisModal({
           <p>
             {result.provider === "rules"
               ? "Local phrase detector"
-              : "Gemini classification"}{" "}
+              : result.provider === "local"
+                ? "Local Qwen classification"
+                : "Gemini classification"}{" "}
             · {result.model} · {result.segments.length} markers
+            {result.classifierModel && ` · ${result.classifierModel}`}
           </p>
           {result.segments.length === 0 && (
             <p>

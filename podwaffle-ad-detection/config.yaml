@@ -1,0 +1,40 @@
+name: Podwaffle Ad Detection
+version: "0.1.0"
+slug: podwaffle_ad_detection
+description: Experimental local English podcast chapter and advert analysis
+url: https://github.com/Invertee/Podwaffle
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 5000
+panel_icon: mdi:waveform
+panel_title: Podwaffle Analysis
+webui: http://[HOST]:[PORT:5000]
+ports:
+  5000/tcp: null
+ports_description:
+  5000/tcp: Unauthenticated analyser API and management UI (trusted LAN only)
+options:
+  whisper_model: tiny.en
+  whisper_threads: 2
+  sample_seconds: 900
+  max_audio_mb: 512
+  job_timeout_minutes: 60
+  classifier: rules
+  llm_threads: 2
+  gemini_api_key: ""
+  gemini_model: gemini-2.5-flash
+schema:
+  whisper_model: list(tiny.en|base.en)
+  whisper_threads: int(1,64)
+  sample_seconds: int(30,3600)
+  max_audio_mb: int(1,2048)
+  job_timeout_minutes: int(1,1440)
+  classifier: list(rules|local|gemini)
+  llm_threads: int(1,64)
+  gemini_api_key: password?
+  gemini_model: str

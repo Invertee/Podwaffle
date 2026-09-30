@@ -8,6 +8,7 @@ import {
   AnalysisDispatcher,
   enqueueAnalysis,
   getEpisodeAnalysis,
+  analysisContext,
 } from "../../src/analysis/service.js";
 import { upsertPodcastAndEpisodes } from "../../src/podcasts/service.js";
 import { parseRss } from "../../src/podcasts/rss.js";
@@ -119,7 +120,8 @@ it("retries with a stable request key, imports results, expires snippets and det
     durationMs: 60000,
     fingerprint: { sha256: "a".repeat(64), sizeBytes: 1234, etag: null },
     model: "tiny.en",
-    provider: "rules",
+    provider: "local",
+    classifierModel: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
     generatedAt: new Date().toISOString(),
     segments: [
       {
@@ -128,7 +130,7 @@ it("retries with a stable request key, imports results, expires snippets and det
         kind: "advertisement",
         title: "Possible advert",
         confidence: 0.6,
-        source: "rules",
+        source: "local",
         evidence: "Phrase: our sponsor",
         boundaryStatus: "approximate",
       },
@@ -201,6 +203,41 @@ it("retries with a stable request key, imports results, expires snippets and det
     getEpisodeAnalysis(rt.database.db, config, profileId, episodeId).job?.stale,
   ).toBe(true);
   await dispatcher.stop();
+});
+
+it("snapshots bounded plain-text episode and podcast context without changing active requests", async () => {
+  const { runtime: rt, profileId, episodeId, podcastId } = await setup();
+  rt.database.db
+    .prepare("UPDATE episodes SET description_html=? WHERE id=?")
+    .run(
+      "<p>Interview about astronomy &amp; space.</p><script>ignore this</script>",
+      episodeId,
+    );
+  rt.database.db
+    .prepare("UPDATE podcasts SET description=? WHERE id=?")
+    .run("Science each week", podcastId);
+  const id = enqueueAnalysis(rt.database.db, profileId, episodeId);
+  const snapshot = () =>
+    JSON.parse(
+      String(
+        rt.database.db
+          .prepare("SELECT request_json FROM episode_analysis_jobs WHERE id=?")
+          .get(id)?.request_json,
+      ),
+    );
+  expect(snapshot()).toMatchObject({
+    episodeDescription: "Interview about astronomy & space.",
+    podcastDescription: "Science each week",
+    podcastTitle: "Test",
+  });
+  rt.database.db
+    .prepare("UPDATE episodes SET description_html=? WHERE id=?")
+    .run("Changed description", episodeId);
+  expect(enqueueAnalysis(rt.database.db, profileId, episodeId)).toBe(id);
+  expect(snapshot().episodeDescription).toBe(
+    "Interview about astronomy & space.",
+  );
+  expect(analysisContext("x".repeat(9000))).toHaveLength(8000);
 });
 
 it("rejects malformed analysis results and unavailable manual analysis with clear errors", async () => {

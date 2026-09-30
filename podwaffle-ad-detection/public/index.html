@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Podwaffle Ad Detection</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">PODWAFFLE / ANALYSIS SIDECAR</p>
+          <h1>Chapter & advert detection</h1>
+          <p>
+            English audio analysis · Local processing · Suggestions only — no
+            automatic skipping
+          </p>
+        </div>
+        <button id="refresh">Refresh</button>
+      </header>
+      <p id="error" role="alert"></p>
+      <section>
+        <h2>Model setup</h2>
+        <p id="health" role="status">Connecting…</p>
+        <progress id="download" max="100" value="0" hidden></progress>
+        <p id="modelStatus">Loading model status…</p>
+        <button id="prepare">Retry / verify model setup</button>
+        <details>
+          <summary>Model revisions & checksums</summary>
+          <pre id="models"></pre>
+        </details>
+        <p class="muted">
+          Choose rules, local Qwen or Gemini in the add-on Configuration tab,
+          then restart. Only explicitly selecting Gemini sends excerpts and
+          episode context outside this service.
+        </p>
+      </section>
+      <section>
+        <h2>Analysis jobs</h2>
+        <p class="muted">
+          Submitted by Podwaffle. Latest 200 jobs; one job runs at a time.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Queued</th>
+                <th>Episode</th>
+                <th>Status</th>
+                <th>Stage</th>
+                <th>Progress</th>
+                <th>Markers</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobs"></tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <h2 id="detailTitle">Job inspector</h2>
+        <p class="muted">
+          Requests, transcript excerpts, markers and logs. Snippets expire after
+          seven days.
+        </p>
+        <pre id="details">Select Inspect on a job.</pre>
+      </section>
+      <section>
+        <h2>Service log</h2>
+        <pre id="logs">Loading…</pre>
+      </section>
+      <footer>
+        No authentication. Keep this service on a trusted network; do not expose
+        its port to the internet.
+      </footer>
+    </main>
+  </body>
+</html>
