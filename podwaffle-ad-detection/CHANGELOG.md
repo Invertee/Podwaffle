@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Replace local Qwen/llama.cpp and Gemini inference with DigitalOcean Jev's System One API.
+- Keep local Whisper, silence sampling, publisher chapters, phrase fallback and manual marker review.
+- Add dashboard forms for audio URL jobs and direct transcript classification tests.
+- Display Jev confidence, label probabilities, request counts, returned models and token usage.
+- Accept Jev results in Podwaffle and reuse saved detection guidance.
+- Migrate old classifier selections to rules with a warning; remove known obsolete Qwen cache files during model preparation.
+
 ## 0.1.5
 
 - Load the local Qwen classifier only while an analysis job is running and stop

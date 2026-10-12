@@ -9,7 +9,7 @@ const { PodcastWorker, analyse } = require("./podcast-analysis");
 const { podcastRouter } = require("./podcast-routes");
 const { Models } = require("./models");
 
-function createApp(store, config, logger, models) {
+function createApp(store, config, logger, models, dependencies) {
   const app = express();
   app.disable("x-powered-by");
   app.use((_req, res, next) => {
@@ -28,14 +28,14 @@ function createApp(store, config, logger, models) {
   app.get("/api/podcasts/models", (_req, res) => res.json(models.status));
   app.post("/api/podcasts/models/prepare", (req, res) => {
     const target = req.body?.target ?? "configured";
-    if (!["configured", "whisper", "qwen"].includes(target))
+    if (!["configured", "whisper"].includes(target))
       return res
         .status(400)
-        .json({ error: "target must be configured, whisper or qwen" });
+        .json({ error: "target must be configured or whisper" });
     void models.prepare(target);
     res.status(202).json(models.status);
   });
-  app.use("/api/podcasts", podcastRouter(store, config, logger));
+  app.use("/api/podcasts", podcastRouter(store, config, logger, dependencies));
   app.use(express.static(path.join(__dirname, "..", "public")));
   app.use((error, _req, res, _next) => {
     const status = error.statusCode || error.status || 500;
@@ -60,7 +60,7 @@ async function main() {
   });
   const store = createPodcastStore(config.databasePath),
     models = new Models(config, logger);
-  const worker = new PodcastWorker(store, config, logger, analyse, models);
+  const worker = new PodcastWorker(store, config, logger, analyse);
   // Jobs remain queued while first-install downloads are visible in the UI.
   const timer = setInterval(() => {
     if (models.status.ready && !models.status.busy)

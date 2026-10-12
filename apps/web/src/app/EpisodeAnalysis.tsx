@@ -103,7 +103,7 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
               />
             </label>
             <label className="analysis-field">
-              Local LLM detection guidance (optional)
+              Jev detection guidance (optional)
               <textarea
                 value={value.llmPrompt}
                 rows={4}
@@ -115,8 +115,9 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
                 }
               />
               <small>
-                Used only by the local classifier. Describe show-specific advert
-                patterns; structured output and timestamp checks still apply.
+                Used by Jev when configured on the analyser. Describe
+                show-specific advert patterns. Times stay within transcript
+                excerpts.
               </small>
             </label>
             <label className="analysis-field">
@@ -227,6 +228,8 @@ function EpisodeAnalysisModal({
   const [seeking, setSeeking] = useState(false);
   const job = analysis.data?.job,
     result = job?.result;
+  const isJevAnalysis =
+    result?.provider === "jev" || Boolean(result?.diagnostics.classifierUsage);
   const classifierAssessments = result?.diagnostics.classifierAssessments ?? [],
     diagnosticSensitivity = result?.diagnostics.sensitivity ?? "balanced",
     minimumAdvertConfidence =
@@ -295,7 +298,9 @@ function EpisodeAnalysisModal({
               ? "Local phrase detector"
               : result.provider === "local"
                 ? "Local Qwen classification"
-                : "Gemini classification"}{" "}
+                : result.provider === "jev"
+                  ? "Jev classification via DigitalOcean"
+                  : "Gemini classification"}{" "}
             · {result.model} · {result.segments.length} markers
             {result.classifierModel && ` · ${result.classifierModel}`}
           </p>
@@ -353,9 +358,9 @@ function EpisodeAnalysisModal({
         <summary>Analysis diagnostics & testing tools</summary>
         <p>
           Run an analysis using the saved podcast detection settings. This
-          downloads audio on your local analyser; Gemini receives transcript
-          excerpts only when configured there. Custom LLM guidance is used only
-          by the local classifier.
+          downloads and transcribes audio on your local analyser. When Jev is
+          selected there, transcript excerpts, episode context and detection
+          guidance are sent to DigitalOcean for classification.
         </p>
         <button
           disabled={
@@ -433,14 +438,16 @@ function EpisodeAnalysisModal({
                 .map(timestamp)
                 .join(", ") || "None detected"}
             </p>
-            {result.provider === "local" && (
+            {(result.provider === "local" || isJevAnalysis) && (
               <>
-                <h4>Local classifier decisions</h4>
+                <h4>{isJevAnalysis ? "Jev" : "Local classifier"} decisions</h4>
                 <p>
                   {diagnosticSensitivity} sensitivity requires at least{" "}
                   {Math.round(minimumAdvertConfidence * 100)}% confidence for
-                  advert and promotion markers. The notes below are concise
-                  decision rationales, not hidden model reasoning.
+                  advert and promotion markers.{" "}
+                  {isJevAnalysis
+                    ? "The notes summarise Jev's selected labels. Jev does not generate explanations."
+                    : "The notes are concise decision rationales."}
                 </p>
                 {classifierAssessments.length === 0 && (
                   <p>
@@ -449,6 +456,15 @@ function EpisodeAnalysisModal({
                   </p>
                 )}
               </>
+            )}
+            {result.diagnostics.classifierUsage && (
+              <p>
+                Jev requests: {result.diagnostics.classifierUsage.requests} ·
+                Input tokens:{" "}
+                {result.diagnostics.classifierUsage.inputTokens ?? "unknown"}
+                {Boolean(result.diagnostics.classifierReturnedModels?.length) &&
+                  ` · Returned model: ${result.diagnostics.classifierReturnedModels?.join(", ")}`}
+              </p>
             )}
             <h4>Transcript excerpts</h4>
             {result.transcriptExpired ? (
@@ -475,10 +491,23 @@ function EpisodeAnalysisModal({
                     </p>
                     {assessment && (
                       <p className="analysis-assessment">
-                        Local decision: {assessment.verdict.replace("_", " ")} ·{" "}
+                        {isJevAnalysis ? "Jev" : "Classifier"} decision:{" "}
+                        {assessment.verdict.replace("_", " ")} ·{" "}
                         {Math.round(assessment.confidence * 100)}% —{" "}
                         {assessment.reason}
                         {belowThreshold && " (below the sensitivity threshold)"}
+                        {assessment.probabilities && (
+                          <>
+                            <br />
+                            Label probabilities:{" "}
+                            {Object.entries(assessment.probabilities)
+                              .map(
+                                ([label, probability]) =>
+                                  `${label.replace("_", " ")} ${Math.round(probability * 100)}%`,
+                              )
+                              .join(" · ")}
+                          </>
+                        )}
                       </p>
                     )}
                   </div>

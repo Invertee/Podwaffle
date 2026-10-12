@@ -68,6 +68,9 @@ button:disabled {
   cursor: wait;
 }
 button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
 summary:focus-visible {
   outline: 2px solid #eebb6b;
   outline-offset: 3px;
@@ -124,7 +127,50 @@ footer {
   font-size: 0.8rem;
   margin-top: 28px;
 }
+.test-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.test-form label {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.test-form .full-width {
+  grid-column: 1 / -1;
+}
+input,
+textarea,
+select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: #0e1821;
+  border: 1px solid #607689;
+  border-radius: 6px;
+  padding: 10px;
+}
+textarea {
+  resize: vertical;
+}
+.test-form button {
+  align-self: end;
+  justify-self: start;
+}
+.decision {
+  padding: 16px;
+  margin-top: 16px;
+  border: 1px solid #607689;
+  border-radius: 6px;
+}
+.decision p {
+  margin-bottom: 0;
+}
 @media (max-width: 600px) {
+  .test-form {
+    grid-template-columns: 1fr;
+  }
   main {
     padding: 16px 12px;
   }

@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { instructions, context, classifyLocal } = require("./classifier");
+const { classifyJev } = require("./classifier");
 
 function validateRequest(body) {
   const fail = (message) => {
@@ -307,106 +307,10 @@ function validateSegments(segments, durationMs) {
       kind: s.kind,
       title: s.title.slice(0, 200),
       confidence: s.confidence,
-      source: s.source ?? "gemini",
+      source: s.source ?? "jev",
       evidence: String(s.evidence ?? "").slice(0, 500),
       boundaryStatus: "approximate",
     };
-  });
-}
-
-async function classifyGemini(fragments, request, durationMs, config, signal) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.podcastGeminiModel)}:generateContent`,
-    {
-      method: "POST",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": config.podcastGeminiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text:
-                  instructions +
-                  "\n" +
-                  JSON.stringify({
-                    durationMs,
-                    context: context(request),
-                    phrases: request.phrases,
-                    fragments,
-                  }),
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              segments: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: {
-                    startMs: { type: "INTEGER" },
-                    endMs: { type: "INTEGER" },
-                    kind: {
-                      type: "STRING",
-                      enum: [
-                        "advertisement",
-                        "promotion",
-                        "chapter",
-                        "intro",
-                        "outro",
-                        "unknown",
-                      ],
-                    },
-                    title: { type: "STRING" },
-                    confidence: { type: "NUMBER" },
-                    evidence: { type: "STRING" },
-                  },
-                  required: [
-                    "startMs",
-                    "endMs",
-                    "kind",
-                    "title",
-                    "confidence",
-                    "evidence",
-                  ],
-                },
-              },
-            },
-            required: ["segments"],
-          },
-        },
-      }),
-    },
-  );
-  if (!response.ok) throw new Error(`Gemini returned HTTP ${response.status}`);
-  const body = await response.json();
-  const text = body.candidates?.[0]?.content?.parts
-    ?.map((p) => p.text || "")
-    .join("");
-  const result = validateSegments(JSON.parse(text).segments, durationMs).map(
-    (segment) => ({ ...segment, source: "gemini" }),
-  );
-  // Require every range to be supported by neighbouring transcript spans. Small
-  // speech pauses are allowed, but no range may cross an unsampled gap.
-  return result.filter((s) => {
-    let coveredUntil = s.startMs;
-    for (const f of fragments) {
-      if (f.endMs <= coveredUntil) continue;
-      if (f.startMs > coveredUntil + 2000) break;
-      coveredUntil = Math.max(coveredUntil, f.endMs);
-      if (coveredUntil >= s.endMs) return true;
-    }
-    return false;
   });
 }
 
@@ -543,6 +447,7 @@ async function analyse(request, config, signal, progress, execute = run) {
       segments.filter((s) => s.endMs > s.startMs),
       durationMs,
     );
+    if (config.classifierWarning) warnings.push(config.classifierWarning);
     const windows = sampleWindows(
       durationMs,
       boundaries,
@@ -630,10 +535,12 @@ async function analyse(request, config, signal, progress, execute = run) {
     fragments.sort((a, b) => a.startMs - b.startMs);
     progress("classifying", 85);
     let provider = "rules",
-      classifierAssessments = [];
-    if (config.classifier === "local") {
+      classifierAssessments = [],
+      classifierUsage,
+      classifierReturnedModels;
+    if (config.classifier === "jev") {
       try {
-        const local = await classifyLocal(
+        const jev = await classifyJev(
           fragments,
           request,
           durationMs,
@@ -647,58 +554,37 @@ async function analyse(request, config, signal, progress, execute = run) {
               Math.round(85 + (13 * complete) / Math.max(1, total)),
             ),
         );
-        classifierAssessments = local.assessments;
-        const failureSummary = local.failureReasons.slice(0, 3).join(" ");
-        if (local.successfulCount > 0 || fragments.length === 0) {
-          segments.push(
-            ...applySensitivity(local.segments, request.sensitivity),
-          );
-          if (local.failedFragments.length) {
+        classifierAssessments = jev.assessments;
+        classifierUsage = jev.usage;
+        classifierReturnedModels = jev.returnedModels;
+        const failureSummary = jev.failureReasons.slice(0, 3).join(" ");
+        if (jev.successfulCount > 0 || fragments.length === 0) {
+          segments.push(...applySensitivity(jev.segments, request.sensitivity));
+          if (jev.failedFragments.length) {
             segments.push(
-              ...classifyRules(local.failedFragments, request.phrases),
+              ...classifyRules(jev.failedFragments, request.phrases),
             );
             warnings.push(
-              `Local classification failed for ${local.failedFragments.length} of ${fragments.length} excerpts (${failureSummary}); phrase detection was used for those excerpts.`,
+              `Jev classification failed for ${jev.failedFragments.length} of ${fragments.length} excerpts (${failureSummary}); phrase detection was used for those excerpts.`,
             );
           }
-          provider = "local";
+          provider = "jev";
         } else {
           warnings.push(
-            `Local classification failed for every excerpt (${failureSummary}); phrase detector used instead.`,
+            `Jev classification failed for every excerpt (${failureSummary}); phrase detector used instead.`,
           );
         }
       } catch (error) {
         if (signal.aborted) throw error;
         warnings.push(
-          `${error instanceof Error ? error.message : "Local classifier unavailable"}; phrase detector used instead. Check model status and available memory.`,
-        );
-      }
-    } else if (config.classifier === "gemini" && config.podcastGeminiKey) {
-      try {
-        segments.push(
-          ...applySensitivity(
-            await classifyGemini(
-              fragments,
-              request,
-              durationMs,
-              config,
-              signal,
-            ),
-            request.sensitivity,
-          ),
-        );
-        provider = "gemini";
-      } catch (error) {
-        if (signal.aborted) throw error;
-        warnings.push(
-          `${error instanceof SyntaxError ? "Invalid Gemini JSON" : error.message}; phrase detector used instead.`,
+          `${error instanceof Error ? error.message : "Jev classifier unavailable"}; phrase detector used instead. Check the DigitalOcean model access key and connection.`,
         );
       }
     }
     if (provider === "rules") {
       segments.push(...classifyRules(fragments, request.phrases));
       warnings.push(
-        "Phrase-only detection: ranges mark matched speech, not complete advert breaks. Topic chapters require publisher metadata or an enabled classifier.",
+        "Phrase-only detection: ranges mark matched speech, not complete advert breaks. Topic chapters require publisher metadata. Jev classifies adverts and promotions only.",
       );
     }
     return {
@@ -710,11 +596,9 @@ async function analyse(request, config, signal, progress, execute = run) {
       model: path.basename(config.podcastWhisperModel),
       provider,
       generatedAt: new Date().toISOString(),
-      ...(provider === "local"
-        ? { classifierModel: path.basename(config.llmModel) }
-        : provider === "gemini"
-          ? { classifierModel: config.podcastGeminiModel }
-          : {}),
+      ...(config.classifier === "jev"
+        ? { classifierModel: config.podcastJevModel }
+        : {}),
       segments: segments.sort((a, b) => a.startMs - b.startMs),
       fragments,
       diagnostics: {
@@ -724,6 +608,9 @@ async function analyse(request, config, signal, progress, execute = run) {
         sensitivity: request.sensitivity,
         minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
         classifierAssessments,
+        ...(classifierUsage
+          ? { classifierUsage, classifierReturnedModels }
+          : {}),
       },
       transcriptExpired: false,
     };
@@ -734,8 +621,8 @@ async function analyse(request, config, signal, progress, execute = run) {
 }
 
 class PodcastWorker {
-  constructor(store, config, logger, processor = analyse, models = null) {
-    Object.assign(this, { store, config, logger, processor, models });
+  constructor(store, config, logger, processor = analyse) {
+    Object.assign(this, { store, config, logger, processor });
     this.running = false;
   }
   start() {
@@ -766,16 +653,6 @@ class PodcastWorker {
       };
       try {
         log("info", "Podcast analysis started");
-        if (this.config.classifier === "local" && this.models) {
-          try {
-            await this.models.ensureLocalReady();
-          } catch (error) {
-            log(
-              "warn",
-              `Local classifier could not be loaded; rules fallback remains available: ${error.message}`,
-            );
-          }
-        }
         const result = await this.processor(
           job.request,
           this.config,
@@ -802,13 +679,6 @@ class PodcastWorker {
           log("error", message);
         }
       } finally {
-        if (this.config.classifier === "local" && this.models) {
-          try {
-            await this.models.releaseLocal();
-          } catch (error) {
-            log("error", `Could not unload local classifier: ${error.message}`);
-          }
-        }
         this.running = false;
       }
     })();

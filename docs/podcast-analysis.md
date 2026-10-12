@@ -11,16 +11,17 @@ manual. Android is unchanged.
    transcoder, with its own Node.js service, SQLite database and management UI.
 2. Open its UI and wait for first-start Whisper model setup. No environment
    variables or manual model installation are required for the add-on.
-3. Leave `classifier: rules` for phrase detection, or choose `local` to download
-   and run Qwen2.5 1.5B locally. Gemini is an explicit opt-in with its own key.
+3. Leave `classifier: rules` for phrase detection, or choose `jev` and set
+   `jev_api_key` to a DigitalOcean Serverless Inference model access key.
+   Whisper remains local; no local LLM is downloaded or run.
    See the [sidecar installation and migration guide](../podwaffle-ad-detection/DOCS.md)
-   for resource requirements, model lifecycle and the old-service cutover.
+   for DigitalOcean setup, resource requirements and migration.
 4. Set `analysis_server_url` in Podwaffle's add-on options or server options JSON
    to `http://<sidecar-hostname>:5000` (hostname from its HA Info page), or its
    mapped LAN URL. Restart Podwaffle. Use a URL reachable from the Podwaffle server,
    not an ingress URL. No service-to-service credentials are used.
 5. Open a podcast in the web client, expand **Chapters & advert analysis**, enable
-   new-episode analysis and optionally save sponsor/phrase hints, local-LLM
+   new-episode analysis and optionally save sponsor/phrase hints, Jev
    guidance, detection sensitivity and first/last-minute focus. Settings belong
    to the current profile's subscription.
 
@@ -41,13 +42,15 @@ at the same URL. A changed enclosure URL is flagged as stale.
 Diagnostics include job IDs, retry state, model/classifier, sampled intervals,
 silence boundaries, warnings, transcript excerpts and job logs. Empty results
 mean no markers were detected in sampled portions, not that the episode is ad-free.
-Local-classifier jobs also show a concise verdict, confidence and evidence-based
-rationale beside every retained transcript excerpt. This is a decision summary,
-not hidden chain-of-thought, and it identifies candidates rejected by the selected
-sensitivity threshold. These assessments expire with transcripts after seven days.
+Jev jobs show a verdict, classification confidence and label probabilities beside
+each retained excerpt, including candidates below the sensitivity threshold.
+Displayed notes are application summaries, since Jev does not generate explanations.
+Assessments expire with transcripts after seven days. Historical local/Gemini
+results remain readable.
 
-Open the sidecar's web interface for model-download status, job inspection and
-its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
+The sidecar dashboard also offers full episode tests from audio URLs and direct
+transcript tests for Jev, including latency and token usage. It shows Whisper setup,
+job inspection and its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
 
 ## Detection behaviour
 
@@ -65,19 +68,18 @@ its dedicated rotating `/data/logs/podcast-analysis.log` (plus `.1`).
   episodes may be transcribed in full.
 - Runs Whisper with English explicitly selected. Local phrase detection marks
   matching speech, not an entire advert break.
-- Optionally requests structured local Qwen or Gemini classifications and explicit
-  topic transitions. Bounded episode/podcast descriptions accompany new jobs as
-  untrusted context, not instructions. Off-topic discussion alone is not an advert.
-  Ranges are validated and cannot span large transcript gaps. Classifier failure
-  falls back to phrase detection with a warning, never to another provider.
-- Per-podcast local-LLM guidance can describe show-specific advert patterns. It is
-  bounded to 2,000 characters; structured-output, transcript-support and timestamp
-  constraints remain enforced. Gemini does not receive this custom guidance.
-- Local classification runs independently for each transcript excerpt. A timeout
-  or malformed response is shown as uncertain and phrase rules cover that excerpt;
-  other successful local decisions are retained.
-- Confidence is an uncalibrated suggestion, not measured probability. Generated
-  boundaries are approximate, and sparse sampling can miss adverts and topics.
+- Optionally sends each timestamped transcript excerpt to Jev through DigitalOcean
+  for a fixed advert/promotion/editorial/uncertain classification. Bounded episode
+  and podcast context accompanies excerpts as data. Off-topic discussion alone
+  is not an advert. Markers use excerpt boundaries and cannot bridge gaps.
+- Per-podcast Jev guidance uses the existing `llmPrompt` field, bounded to 2,000
+  characters. It can describe show-specific advert patterns.
+- Failed excerpts are uncertain and use phrase rules; successful Jev decisions
+  remain. If every request fails the provider is rules, with Jev failure warnings.
+  A failure never switches to another cloud provider.
+- Jev does not generate chapter titles or explanatory prose; chapters still come
+  from publisher/embedded metadata. Scores are model outputs, not a measured
+  detection accuracy. Boundaries are approximate and sparse sampling misses ads.
 
 ## Reliability and retention
 
@@ -93,9 +95,9 @@ minutes; ten consecutive failures mark a job failed. Reanalyse after fixing a
 persistent problem. Submitted jobs retain their original analyser base URL even
 if the configured URL changes.
 
-One job runs at a time in the sidecar. The add-on's `whisper_threads` and
-`llm_threads` control CPU use. `llm_timeout_seconds` is the per-excerpt local
-classification limit (60 seconds by default). Default download cap: 512 MiB;
+One job runs at a time in the sidecar. `whisper_threads` controls local
+transcription CPU use. `jev_timeout_seconds` bounds each remote excerpt request
+(30 seconds by default, including at most one retry on HTTP 429 / 5xx). Default download cap: 512 MiB;
 maximum duration: eight hours; job deadline: one hour. Change `max_audio_mb` and
 `job_timeout_minutes` in the sidecar options.
 
@@ -122,6 +124,7 @@ The analyser's local endpoints are unauthenticated:
 | GET    | `/api/podcasts/status`   | Configuration summary and latest 200 jobs                                                                                                                                            |
 | POST   | `/api/podcasts/jobs`     | Enqueue `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?, llmPrompt?, sensitivity?, edgeFocusMinutes?, podcastTitle?, podcastDescription?, episodeDescription?}` |
 | GET    | `/api/podcasts/jobs/:id` | Job, result and latest 300 job log entries                                                                                                                                           |
+| POST   | `/api/podcasts/classify` | Test timestamped transcripts with Jev, without audio or persisted results |
 | GET    | `/api/podcasts/logs`     | Latest dedicated log lines                                                                                                                                                           |
 
 ## Validation

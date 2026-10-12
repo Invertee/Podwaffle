@@ -1,88 +1,74 @@
 # Podwaffle Ad Detection
 
 Independent Node.js / SQLite sidecar for English podcast chapter and advert
-suggestions. Install separately from Podwaffle using the same Home Assistant
-add-on repository. No Sonarr, Radarr, video worker or authentication dependencies.
+suggestions. Boundary detection and Whisper speech-to-text run locally; optional
+advert classification uses **Jev through DigitalOcean Serverless Inference**.
+No local LLM, Qwen weights, llama.cpp runtime or generative classifier is included.
+Automatic advert skipping is not enabled.
 
-See [DOCS.md](DOCS.md) for installation, model choices and migration from the
-former transcoder-hosted service. Automatic advert skipping is **not** enabled.
-
-The entire Docker build context is this folder. Unlike the main Podwaffle add-on,
-this Dockerfile does not fetch application code from another branch during build.
-Native Whisper and llama.cpp releases are pinned in the Dockerfile. Models are
-downloaded on first start into persistent `/data/models`, not baked into the image.
+See [DOCS.md](DOCS.md) for DigitalOcean setup, Home Assistant installation,
+resource use and migration. The Docker build context is this folder.
 
 ```sh
 npm ci
 npm test
 # Requires Node >=24.15, FFmpeg, ffprobe and whisper-cli on PATH:
 npm start
-# Or build with the bundled native tools:
+# Or build the sidecar with its bundled native transcription tools:
 docker build -t podwaffle-ad-detection .
 docker run --rm -p 5000:5000 -v podwaffle-analysis:/data podwaffle-ad-detection
 ```
 
-Standalone defaults need no environment file. Data goes to `./data` unless
-`DATA_DIR` is set. `PORT=5000`, `HOST=0.0.0.0`, `CLASSIFIER=rules`,
-`WHISPER_MODEL=tiny.en`, `PODCAST_WHISPER_THREADS=2`,
-`PODCAST_SAMPLE_SECONDS=900`, `MAX_AUDIO_MB=512`, `JOB_TIMEOUT_MINUTES=60`.
-Optional local classification: `CLASSIFIER=local`, `LLM_THREADS=2`; requires
-`llama-server` on PATH (included in Docker). Binary paths can be overridden with
-`FFMPEG_PATH`, `FFPROBE_PATH`, `PODCAST_WHISPER_PATH`, `LLAMA_SERVER_PATH`.
-For cloud use, explicitly select `CLASSIFIER=gemini` and provide
-`PODCAST_GEMINI_API_KEY`; `PODCAST_GEMINI_MODEL` defaults to `gemini-2.5-flash`.
-Home Assistant options are read from `/data/options.json`; standalone can use
-`PODWAFFLE_ANALYSIS_OPTIONS` to choose a different JSON file. Environment takes
-precedence over options. No environment variables are required in Home Assistant.
+Defaults: `CLASSIFIER=rules`, `WHISPER_MODEL=tiny.en`,
+`PODCAST_WHISPER_THREADS=2`, `PODCAST_SAMPLE_SECONDS=900`,
+`MAX_AUDIO_MB=512`, `JOB_TIMEOUT_MINUTES=60`, `PORT=5000`.
+Standalone data goes to `./data` unless `DATA_DIR` is set.
 
-Original local API retained:
+For Jev select `CLASSIFIER=jev` and provide `PODCAST_JEV_API_KEY`,
+a DigitalOcean **model access key**. `PODCAST_JEV_MODEL` defaults to
+`typesafe-jev-1.13.0`; `JEV_TIMEOUT_SECONDS=30` sets the per-excerpt deadline.
+The endpoint is `https://inference.do-ai.run/v1/systemone`.
+No DigitalOcean GPU server or local classifier model is required.
 
-| Method | Path                           | Purpose                                      |
-| ------ | ------------------------------ | -------------------------------------------- |
-| GET    | `/api/podcasts/status`         | Latest 200 jobs and selected classifier      |
-| POST   | `/api/podcasts/jobs`           | Submit a job, same request key deduplicates  |
-| GET    | `/api/podcasts/jobs/:id`       | Full result, request and job logs            |
-| GET    | `/api/podcasts/logs`           | Dedicated rotating service log               |
-| GET    | `/api/podcasts/models`         | Setup state, download progress and checksums |
-| POST   | `/api/podcasts/models/prepare` | Retry setup / verify cached models           |
-| POST   | `/api/podcasts/jobs/:id/retry` | Retry a failed job locally                   |
-| GET    | `/health`                      | HTTP service health, including model state   |
+Home Assistant reads options from `/data/options.json`; standalone can override
+that location with `PODWAFFLE_ANALYSIS_OPTIONS`. Environment takes precedence.
+Binary paths: `FFMPEG_PATH`, `FFPROBE_PATH`, `PODCAST_WHISPER_PATH`.
 
-Model preparation accepts optional JSON `{"target":"configured"}` (the default),
-`{"target":"whisper"}` or `{"target":"qwen"}`. Explicit targets download/verify
-independently of classifier selection. Qwen starts only when local mode is selected.
-In local mode its runtime starts for each analysis job and stops afterwards, while
-the verified weights remain cached on disk. Concurrent requests for a different
-target return 409; unknown targets return 400.
+The dashboard at `/` supports full episode tests by audio URL and direct
+transcript tests with label probabilities, confidence, elapsed time and token usage.
+Transcript tests work before Whisper downloads and are not stored by the sidecar.
+Keep the unauthenticated dashboard/API on a trusted network.
+
+| Method | Path                           | Purpose                                               |
+| ------ | ------------------------------ | ----------------------------------------------------- |
+| GET    | `/api/podcasts/status`         | Latest 200 jobs and classifier configuration (no key) |
+| POST   | `/api/podcasts/jobs`           | Queue audio analysis; request key deduplicates        |
+| GET    | `/api/podcasts/jobs/:id`       | Result, request and job logs                          |
+| POST   | `/api/podcasts/classify`       | Ad hoc Jev test from timestamped transcript excerpts  |
+| POST   | `/api/podcasts/jobs/:id/retry` | Retry a failed job                                    |
+| GET    | `/api/podcasts/logs`           | Rotating service log                                  |
+| GET    | `/api/podcasts/models`         | Whisper setup, progress and checksums                 |
+| POST   | `/api/podcasts/models/prepare` | Prepare configured Whisper; optional target `whisper` |
+| GET    | `/health`                      | Service health and model state                        |
 
 Job body: `{requestKey, episodeId, title, enclosureUrl, chaptersUrl?, phrases?,
 llmPrompt?, sensitivity?, edgeFocusMinutes?, podcastTitle?, podcastDescription?,
-episodeDescription?}`. Context and detection settings are optional; legacy callers
-work unchanged. Descriptions are limited to 8,000 characters each, podcast title
-to 500, and local-LLM guidance to 2,000. Metadata and detection settings are
-snapshotted on submission. Local prompts use shorter context and bounded batches
-to fit the small model. Model output is validated, with unsupported time ranges
-discarded. No tools or autonomous agent actions are given to the classifier.
-Local results retain a concise verdict, confidence and evidence-based rationale
-for each transcript excerpt so empty detections can be diagnosed. These summaries
-are not chain-of-thought and expire with transcript excerpts after seven days.
-Excerpts are classified independently; a timeout or invalid response affects only
-that excerpt. `llm_timeout_seconds` controls the per-excerpt limit (60 seconds by
-default, 10–300 seconds). If every excerpt fails, phrase rules remain the fallback.
+episodeDescription?}`. The legacy `llmPrompt` field now contains Jev detection
+guidance. Existing callers and saved settings remain compatible.
 
-The server imports publisher/embedded chapters, scans silence and samples audio
-for Whisper. It does not yet perform tonal/speaker-change detection. Phrase-only
-results identify matching speech, not complete ad breaks. Classifier failure falls
-back to rules and reports a warning. A local failure never switches to a cloud
-provider. No remote model inference occurs unless Gemini is selected.
+Jev selects advertisement, promotion, not_ad or uncertain for each excerpt.
+Application code owns timestamps: markers use only that excerpt's boundaries.
+Publisher/embedded chapters and silence sampling are retained; Jev does not
+generate chapter titles or explanations. Failed excerpts use phrase rules with a
+warning; successful Jev decisions are retained. A failed cloud request never
+switches to a different provider. Sparse sampling can miss adverts.
 
-Queue and logs use `podwaffle-analysis.sqlite`; rotating log files live in
-`logs/podcast-analysis.log`. Transcript excerpts and database log entries expire
-after seven days; compact jobs, markers and input metadata remain. Audio and PCM
-samples are removed on normal success/error. Abruptly killed containers can leave
-temporary cache files, which should only be removed with the add-on stopped.
+Queue/logs use `podwaffle-analysis.sqlite`. Transcript excerpts and assessments
+expire after seven days; markers and compact input metadata remain. Temporary
+audio/PCM files are removed on normal success/error. Abrupt termination can leave
+cache files; remove those only with the add-on stopped.
 
-Tests use synthetic model/tool responses, not a claim of detection accuracy.
-Measure real audio quality, memory usage and speed on the target hardware before
-considering automatic skipping. Dynamic ad insertion can change bytes at the same
-URL; the recorded SHA-256 is not yet checked against client playback.
+Tests use controlled inference and audio-tool responses, not a claim of detection
+accuracy. Evaluate real audio, timings and hardware use before automatic skipping.
+Dynamic ad insertion can change bytes at a stable URL; the recorded SHA-256 is not
+yet compared against client playback.

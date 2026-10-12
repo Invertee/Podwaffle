@@ -171,45 +171,6 @@ test("worker records stages, result and separate job logs; failures remain retry
   assert.equal(store.get(failed.id).error, "Missing model");
 });
 
-test("worker loads the local classifier for a job and unloads it afterwards", async (t) => {
-  const { store } = fixture(t);
-  const job = store.enqueue(validateRequest(request)).job;
-  const lifecycle = [];
-  const models = {
-    async ensureLocalReady() {
-      lifecycle.push("loaded");
-    },
-    async releaseLocal() {
-      lifecycle.push("unloaded");
-    },
-  };
-  const worker = new PodcastWorker(
-    store,
-    { classifier: "local", podcastJobTimeoutMs: 10000 },
-    { info() {}, warn() {}, error() {} },
-    async () => {
-      lifecycle.push("analysed");
-      return { segments: [], fragments: [] };
-    },
-    models,
-  );
-  await worker.tick();
-  assert.equal(store.get(job.id).status, "completed");
-  assert.deepEqual(lifecycle, ["loaded", "analysed", "unloaded"]);
-
-  const failed = store.enqueue(
-    validateRequest({ ...request, requestKey: "lifecycle-failure" }),
-  ).job;
-  lifecycle.length = 0;
-  worker.processor = async () => {
-    lifecycle.push("failed");
-    throw new Error("analysis failed");
-  };
-  await worker.tick();
-  assert.equal(store.get(failed.id).status, "failed");
-  assert.deepEqual(lifecycle, ["loaded", "failed", "unloaded"]);
-});
-
 test("seven-day transcript purge preserves markers and removes old logs", (t) => {
   const { store, filename } = fixture(t);
   const job = store.enqueue(validateRequest(request)).job;
@@ -332,21 +293,75 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   assert.ok(result.fragments.some((f) => f.startMs >= 61000));
   assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
   assert.equal(fs.readFileSync(model, "utf8"), "test model placeholder");
+  global.fetch = async (url) =>
+    url === request.enclosureUrl
+      ? new Response(audio)
+      : Response.json({
+          model: "typesafe-jev-1.13.0",
+          answers: {
+            classification: {
+              type: "choice",
+              choice: "advertisement",
+              confidence: 0.9,
+              probabilities: {
+                advertisement: 0.85,
+                promotion: 0.05,
+                not_ad: 0.05,
+                uncertain: 0.05,
+              },
+            },
+          },
+          usage: { input_tokens: 100, output_tokens: 0 },
+        });
+  const jevConfig = {
+    ...config,
+    classifier: "jev",
+    podcastJevUrl: "https://inference.do-ai.run/v1/systemone",
+    podcastJevModel: "typesafe-jev-1.13.0",
+    podcastJevKey: "test-key",
+  };
+  const classified = await analyse(
+    validateRequest(request),
+    jevConfig,
+    new AbortController().signal,
+    () => {},
+    execute,
+  );
+  assert.equal(classified.provider, "jev");
+  assert.equal(classified.classifierModel, jevConfig.podcastJevModel);
+  assert.equal(
+    classified.diagnostics.classifierUsage.requests,
+    classified.fragments.length,
+  );
+  assert.equal(
+    classified.diagnostics.classifierUsage.inputTokens,
+    classified.fragments.length * 100,
+  );
+  const candidates = classified.segments.filter((s) => s.source === "jev");
+  assert.equal(candidates.length, classified.fragments.length);
+  assert.ok(
+    candidates.every((s) =>
+      classified.fragments.some(
+        (f) => f.startMs === s.startMs && f.endMs === s.endMs,
+      ),
+    ),
+  );
+  assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
   const requests = [];
   global.fetch = async (url) => {
     requests.push(url);
     return url === request.enclosureUrl
       ? new Response(audio)
-      : new Response("Local model unavailable", { status: 503 });
+      : new Response("Provider unavailable", { status: 401 });
   };
   const fallback = await analyse(
     validateRequest(request),
     {
       ...config,
-      classifier: "local",
-      llmUrl: "http://127.0.0.1:8081",
-      llmModel: "test-qwen.gguf",
-      podcastGeminiKey: "must-not-be-used",
+      classifier: "jev",
+      podcastJevUrl: "https://inference.do-ai.run/v1/systemone",
+      podcastJevModel: "typesafe-jev-1.13.0",
+      podcastJevKey: "test-key",
     },
     new AbortController().signal,
     () => {},
@@ -355,14 +370,14 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   assert.equal(fallback.provider, "rules");
   assert.ok(
     fallback.diagnostics.warnings.some((warning) =>
-      warning.includes("Local classification failed for every excerpt"),
+      warning.includes("Jev classification failed for every excerpt"),
     ),
   );
   assert.ok(
     requests.every(
       (url) =>
         url === request.enclosureUrl ||
-        url.startsWith("http://127.0.0.1:8081/"),
+        url === "https://inference.do-ai.run/v1/systemone",
     ),
   );
   await assert.rejects(

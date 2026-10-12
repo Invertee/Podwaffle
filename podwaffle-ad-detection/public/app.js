@@ -2,12 +2,18 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   let selected = null,
-    busy = false;
+    busy = false,
+    jevConfigured = false,
+    transcriptPending = false;
   // Relative paths keep the management UI working behind Home Assistant ingress.
   async function api(route, options) {
     const response = await fetch(`api/podcasts/${route}`, options);
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(body.error || `HTTP ${response.status}`);
+      error.body = body;
+      throw error;
+    }
     return body;
   }
   async function inspect(id) {
@@ -35,17 +41,17 @@
       $("error").textContent = "";
       $("health").textContent =
         `Classifier: ${status.provider} · Sample budget: ${status.sampleBudgetSeconds}s · ${models.ready ? "Whisper ready" : "Waiting for Whisper"}`;
-      $("modelStatus").textContent = models.error || models.stage;
+      $("modelStatus").textContent =
+        models.error || models.legacyCleanupWarning || models.stage;
       $("whisperStatus").textContent = models.ready
         ? `Whisper: verified — ${models.whisper?.filename || "configured model"}`
         : "Whisper: not ready";
-      $("qwenStatus").textContent = models.llmReady
-        ? "Qwen: loaded and ready for local classification"
-        : models.llm
-          ? status.provider === "local"
-            ? "Qwen: downloaded and verified — loads only while a job is running"
-            : "Qwen: downloaded and verified, not loaded"
-          : "Qwen: not yet downloaded / verified";
+      jevConfigured = status.jevConfigured;
+      $("jevStatus").textContent = jevConfigured
+        ? `Jev: configured through DigitalOcean · ${status.classifierModel} · run a transcript test to verify access`
+        : "Jev: select jev and add your DigitalOcean model access key in Configuration to enable classification";
+      $("classifierWarning").textContent = status.classifierWarning || "";
+      $("submitTranscript").disabled = !jevConfigured || transcriptPending;
       $("models").textContent = JSON.stringify(models, null, 2);
       $("download").hidden = !models.busy;
       $("download").value = models.total
@@ -53,7 +59,6 @@
         : 0;
       $("prepare").disabled = models.busy;
       $("downloadWhisper").disabled = models.busy;
-      $("downloadQwen").disabled = models.busy;
       $("jobs").replaceChildren();
       for (const job of status.jobs) {
         const row = document.createElement("tr");
@@ -113,19 +118,112 @@
     await api("models/prepare", { method: "POST" });
     await refresh();
   });
-  for (const [id, target] of [
-    ["downloadWhisper", "whisper"],
-    ["downloadQwen", "qwen"],
-  ]) {
-    $(id).onclick = action(async () => {
-      await api("models/prepare", {
+  $("downloadWhisper").onclick = action(async () => {
+    await api("models/prepare", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "whisper" }),
+    });
+    await refresh();
+  });
+  const field = (form, name) => form.elements.namedItem(name).value;
+  const settings = (form) => ({
+    llmPrompt: field(form, "llmPrompt"),
+    sensitivity: field(form, "sensitivity"),
+  });
+  $("episodeForm").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    $("submitEpisode").disabled = true;
+    $("episodeMessage").textContent = "Submitting…";
+    try {
+      const key = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await api("jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ target }),
+        body: JSON.stringify({
+          requestKey: key,
+          episodeId: key,
+          title: field(form, "title"),
+          enclosureUrl: field(form, "enclosureUrl"),
+          phrases: field(form, "phrases")
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean),
+          edgeFocusMinutes: Number(field(form, "edgeFocusMinutes")),
+          ...settings(form),
+        }),
       });
+      selected = result.job.id;
+      $("episodeMessage").textContent =
+        "Episode queued. Progress and results appear in Analysis jobs and the Job inspector below.";
       await refresh();
-    });
+    } catch (error) {
+      $("episodeMessage").textContent = error.message;
+    } finally {
+      $("submitEpisode").disabled = false;
+    }
+  };
+  function showTest(result) {
+    $("testResponse").textContent = JSON.stringify(result, null, 2);
+    $("testDecisions").replaceChildren();
+    for (const assessment of result.assessments || []) {
+      const card = document.createElement("article");
+      card.className = "decision";
+      const verdict = document.createElement("strong");
+      verdict.textContent = `${assessment.verdict.replace("_", " ")} · ${Math.round(assessment.confidence * 100)}% classification confidence`;
+      const explanation = document.createElement("p");
+      explanation.textContent = assessment.reason;
+      card.append(verdict, explanation);
+      if (assessment.probabilities) {
+        const probabilities = document.createElement("p");
+        probabilities.textContent = Object.entries(assessment.probabilities)
+          .map(
+            ([label, probability]) =>
+              `${label.replace("_", " ")}: ${Math.round(probability * 100)}%`,
+          )
+          .join(" · ");
+        card.append(probabilities);
+      }
+      $("testDecisions").append(card);
+    }
   }
+  $("transcriptForm").onsubmit = async (event) => {
+    event.preventDefault();
+    if (transcriptPending) return;
+    const form = event.currentTarget;
+    transcriptPending = true;
+    $("submitTranscript").disabled = true;
+    $("transcriptMessage").textContent = "Classifying with Jev…";
+    $("testDecisions").replaceChildren();
+    $("testResponse").textContent = "Waiting for Jev…";
+    try {
+      const result = await api("classify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fragments: [
+            {
+              startMs: Math.round(Number(field(form, "startSeconds")) * 1000),
+              endMs: Math.round(Number(field(form, "endSeconds")) * 1000),
+              text: field(form, "text"),
+            },
+          ],
+          episodeDescription: field(form, "episodeDescription"),
+          ...settings(form),
+        }),
+      });
+      showTest(result);
+      $("transcriptMessage").textContent =
+        `${result.elapsedMs}ms · ${result.usage.requests} API requests · ${result.usage.inputTokens ?? "unknown"} input tokens · ${result.segments.length} markers above the ${Math.round(result.minimumAdvertConfidence * 100)}% threshold · ${result.failedCount} failed excerpts`;
+    } catch (error) {
+      $("transcriptMessage").textContent = error.message;
+      showTest(error.body || { error: error.message });
+    } finally {
+      transcriptPending = false;
+      $("submitTranscript").disabled = !jevConfigured;
+    }
+  };
   void refresh();
   setInterval(() => {
     if (!document.hidden) void refresh();

@@ -14,7 +14,7 @@
           <p class="eyebrow">PODWAFFLE / ANALYSIS SIDECAR</p>
           <h1>Chapter & advert detection</h1>
           <p>
-            English audio analysis · Local processing · Suggestions only — no
+            Local speech-to-text · DigitalOcean Jev · Suggestions only — no
             automatic skipping
           </p>
         </div>
@@ -28,13 +28,12 @@
         <p id="modelStatus">Loading model status…</p>
         <p id="whisperStatus">Whisper: checking…</p>
         <button id="downloadWhisper">Download / verify Whisper</button>
-        <p id="qwenStatus">Qwen: checking…</p>
-        <button id="downloadQwen">Download / verify Qwen (1.12 GB)</button>
+        <p id="jevStatus">Jev: checking…</p>
+        <p id="classifierWarning" role="status"></p>
         <p class="muted">
-          Download models independently of the active classifier. Verified files
-          stay in persistent storage across app updates. Downloading Qwen does
-          not switch the classifier. In local mode Qwen loads only while a job
-          is running, then unloads to release RAM.
+          Whisper runs locally and stays in persistent storage across updates.
+          Jev runs through DigitalOcean Serverless Inference and needs no local
+          classifier download or runtime.
         </p>
         <button id="prepare">Retry / verify model setup</button>
         <details>
@@ -42,15 +41,146 @@
           <pre id="models"></pre>
         </details>
         <p class="muted">
-          Choose rules, local Qwen or Gemini in the add-on Configuration tab,
-          then restart. Only explicitly selecting Gemini sends excerpts and
-          episode context outside this service.
+          Choose rules or Jev in the add-on Configuration tab, then restart. Jev
+          sends transcript excerpts, phrase hints, detection guidance and
+          bounded episode context to DigitalOcean. Audio stays local.
         </p>
+      </section>
+      <section>
+        <h2>Test an episode</h2>
+        <p class="muted">
+          Run boundary detection, Whisper transcription and the configured
+          classifier. Jobs use the same queue as Podwaffle.
+        </p>
+        <form id="episodeForm" class="test-form">
+          <label
+            >Episode title<input
+              name="title"
+              required
+              maxlength="500"
+              placeholder="Episode to test"
+          /></label>
+          <label class="full-width"
+            >Audio URL<input
+              name="enclosureUrl"
+              type="url"
+              required
+              placeholder="https://…/episode.mp3"
+          /></label>
+          <label
+            >Sponsor phrases (one per line)<textarea
+              name="phrases"
+              rows="3"
+              placeholder="our sponsor&#10;promo code"
+            ></textarea>
+          </label>
+          <label
+            >Jev detection guidance (optional)<textarea
+              name="llmPrompt"
+              rows="3"
+              maxlength="2000"
+              placeholder="Show-specific advert patterns"
+            ></textarea>
+          </label>
+          <label
+            >Sensitivity<select name="sensitivity">
+              <option value="low">Low</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="high">High</option>
+            </select></label
+          >
+          <label
+            >First / last minutes to prioritise<input
+              name="edgeFocusMinutes"
+              type="number"
+              min="0"
+              max="15"
+              step="1"
+              value="5"
+              required
+          /></label>
+          <button type="submit" id="submitEpisode">Queue episode test</button>
+        </form>
+        <p id="episodeMessage" role="status"></p>
+      </section>
+      <section>
+        <h2>Test Jev with a transcript</h2>
+        <p class="muted">
+          Paste a speech excerpt to test classification without downloading
+          audio or running Whisper. This sends text to DigitalOcean and uses
+          your configured model access key. Test results are shown here without
+          being saved.
+        </p>
+        <form id="transcriptForm" class="test-form">
+          <label class="full-width"
+            >Transcript excerpt<textarea
+              name="text"
+              rows="5"
+              maxlength="4000"
+              required
+              placeholder="This episode is brought to you by…"
+            ></textarea>
+          </label>
+          <label
+            >Start time (seconds)<input
+              name="startSeconds"
+              type="number"
+              min="0"
+              max="28799"
+              step="0.001"
+              value="0"
+              required
+          /></label>
+          <label
+            >End time (seconds)<input
+              name="endSeconds"
+              type="number"
+              min="0.001"
+              max="28800"
+              step="0.001"
+              value="30"
+              required
+          /></label>
+          <label
+            >Episode context (optional)<textarea
+              name="episodeDescription"
+              rows="2"
+              maxlength="8000"
+              placeholder="What the episode is about"
+            ></textarea>
+          </label>
+          <label
+            >Jev detection guidance (optional)<textarea
+              name="llmPrompt"
+              rows="2"
+              maxlength="2000"
+              placeholder="Show-specific advert patterns"
+            ></textarea>
+          </label>
+          <label
+            >Sensitivity<select name="sensitivity">
+              <option value="low">Low</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="high">High</option>
+            </select></label
+          >
+          <button type="submit" id="submitTranscript" disabled>
+            Classify with Jev
+          </button>
+        </form>
+        <p id="transcriptMessage" role="status"></p>
+        <div id="testDecisions"></div>
+        <details>
+          <summary>Full test response</summary>
+          <pre id="testResponse">
+Run a transcript test to see the response.</pre>
+        </details>
       </section>
       <section>
         <h2>Analysis jobs</h2>
         <p class="muted">
-          Submitted by Podwaffle. Latest 200 jobs; one job runs at a time.
+          Submitted by Podwaffle or this dashboard. Latest 200 jobs; one job
+          runs at a time.
         </p>
         <div class="table-wrap">
           <table>

@@ -134,8 +134,8 @@ it("retries with a stable request key, imports results, expires snippets and det
     durationMs: 60000,
     fingerprint: { sha256: "a".repeat(64), sizeBytes: 1234, etag: null },
     model: "tiny.en",
-    provider: "local",
-    classifierModel: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    provider: "jev",
+    classifierModel: "typesafe-jev-1.13.0",
     generatedAt: new Date().toISOString(),
     segments: [
       {
@@ -144,7 +144,7 @@ it("retries with a stable request key, imports results, expires snippets and det
         kind: "advertisement",
         title: "Possible advert",
         confidence: 0.6,
-        source: "local",
+        source: "jev",
         evidence: "Phrase: our sponsor",
         boundaryStatus: "approximate",
       },
@@ -156,13 +156,21 @@ it("retries with a stable request key, imports results, expires snippets and det
       warnings: [],
       sensitivity: "balanced",
       minimumAdvertConfidence: 0.55,
+      classifierUsage: { requests: 1, inputTokens: 350, outputTokens: 0 },
+      classifierReturnedModels: ["typesafe-jev-1.13.0"],
       classifierAssessments: [
         {
           startMs: 10000,
           endMs: 12000,
           verdict: "advertisement",
           confidence: 0.6,
-          reason: "Contains a direct sponsor cue.",
+          reason: "Jev selected advertisement.",
+          probabilities: {
+            advertisement: 0.8,
+            promotion: 0.1,
+            not_ad: 0.05,
+            uncertain: 0.05,
+          },
         },
       ],
     },
@@ -205,6 +213,17 @@ it("retries with a stable request key, imports results, expires snippets and det
     getEpisodeAnalysis(rt.database.db, config, profileId, episodeId).job?.result
       ?.segments,
   ).toHaveLength(1);
+  expect(
+    getEpisodeAnalysis(rt.database.db, config, profileId, episodeId).job
+      ?.result,
+  ).toMatchObject({
+    provider: "jev",
+    classifierModel: "typesafe-jev-1.13.0",
+    diagnostics: {
+      classifierUsage: { inputTokens: 350 },
+      classifierAssessments: [{ probabilities: { advertisement: 0.8 } }],
+    },
+  });
   rt.database.db
     .prepare(
       "UPDATE episode_analysis_jobs SET transcript_expires_at='2000-01-01'",

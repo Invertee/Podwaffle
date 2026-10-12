@@ -1,10 +1,17 @@
 "use strict";
 const express = require("express");
-const { validateRequest } = require("./podcast-analysis");
+const {
+  validateRequest,
+  validateSegments,
+  applySensitivity,
+  sensitivityThreshold,
+} = require("./podcast-analysis");
+const { classifyJev } = require("./classifier");
 const { scheduleStatus } = require("./schedule");
 
-function podcastRouter(store, config, logger) {
+function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
   const router = express.Router();
+  let testing = false;
   router.use((_req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -14,11 +21,121 @@ function podcastRouter(store, config, logger) {
       language: "en",
       whisperConfigured: Boolean(config.podcastWhisperModel),
       provider: config.classifier || "rules",
+      classifierWarning: config.classifierWarning,
+      classifierModel:
+        config.classifier === "jev" ? config.podcastJevModel : null,
+      remoteClassification: config.classifier === "jev",
+      jevConfigured:
+        config.classifier === "jev" && Boolean(config.podcastJevKey),
       sampleBudgetSeconds: config.podcastSampleSeconds,
       schedule: scheduleStatus(config.schedule),
       jobs: store.list(),
     }),
   );
+  // Uses the same classifier as queued audio jobs, without audio/model setup.
+  // Nothing is stored; credentials are taken only from server configuration.
+  router.post("/classify", async (req, res) => {
+    if (config.classifier !== "jev" || !config.podcastJevKey)
+      return res.status(503).json({
+        error:
+          "Select jev and configure a DigitalOcean model access key before testing.",
+      });
+    const body = req.body ?? {};
+    const invalid = (message) =>
+      Object.assign(new Error(message), { statusCode: 400 });
+    const request = validateRequest({
+      requestKey: "transcript-test",
+      episodeId: "transcript-test",
+      title: body.title ?? "Transcript test",
+      enclosureUrl: "https://example.invalid/transcript-test",
+      phrases: body.phrases,
+      llmPrompt: body.llmPrompt,
+      sensitivity: body.sensitivity,
+      podcastTitle: body.podcastTitle,
+      podcastDescription: body.podcastDescription,
+      episodeDescription: body.episodeDescription,
+    });
+    if (
+      !Array.isArray(body.fragments) ||
+      !body.fragments.length ||
+      body.fragments.length > 50
+    )
+      throw invalid(
+        "fragments must contain 1..50 timestamped transcript excerpts",
+      );
+    let totalText = 0;
+    const fragments = body.fragments.map((fragment) => {
+      if (
+        !fragment ||
+        !Number.isSafeInteger(fragment.startMs) ||
+        fragment.startMs < 0 ||
+        !Number.isSafeInteger(fragment.endMs) ||
+        fragment.endMs <= fragment.startMs ||
+        fragment.endMs > 8 * 3600000 ||
+        typeof fragment.text !== "string" ||
+        !fragment.text.trim() ||
+        fragment.text.length > 4000
+      )
+        throw invalid(
+          "Each fragment needs valid startMs/endMs within eight hours and 1..4000 characters of text",
+        );
+      totalText += fragment.text.length;
+      return {
+        startMs: fragment.startMs,
+        endMs: fragment.endMs,
+        text: fragment.text.trim(),
+      };
+    });
+    if (totalText > 20000)
+      throw invalid(
+        "Transcript tests are limited to 20000 characters in total",
+      );
+    if (testing)
+      return res.status(409).json({
+        error:
+          "A transcript test is already running; try again after it finishes.",
+      });
+    testing = true;
+    const controller = new AbortController();
+    res.once("close", () => {
+      if (!res.writableFinished) controller.abort();
+    });
+    const start = Date.now();
+    try {
+      const result = await classify(
+        fragments,
+        request,
+        Math.max(...fragments.map((f) => f.endMs)),
+        config,
+        AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(config.podcastJobTimeoutMs),
+        ]),
+        validateSegments,
+      );
+      res.status(result.successfulCount ? 200 : 502).json({
+        ...(result.successfulCount
+          ? {}
+          : {
+              error:
+                result.failureReasons.join(" ") || "Jev classification failed.",
+            }),
+        provider: "jev",
+        classifierModel: config.podcastJevModel,
+        returnedModels: result.returnedModels,
+        elapsedMs: Date.now() - start,
+        minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
+        segments: applySensitivity(result.segments, request.sensitivity),
+        assessments: result.assessments,
+        successfulCount: result.successfulCount,
+        failedCount: result.failedFragments.length,
+        warnings: result.failureReasons,
+        usage: result.usage,
+      });
+    } finally {
+      testing = false;
+    }
+  });
   router.post("/jobs/:id/retry", (req, res) => {
     const job = store.get(req.params.id);
     if (!job) return res.status(404).json({ error: "Podcast job not found" });

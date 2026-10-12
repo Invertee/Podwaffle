@@ -23,7 +23,14 @@ export const analysisSegmentSchema = z
     ]),
     title: z.string().max(200),
     confidence: z.number().min(0).max(1),
-    source: z.enum(["publisher", "embedded", "rules", "gemini", "local"]),
+    source: z.enum([
+      "publisher",
+      "embedded",
+      "rules",
+      "gemini",
+      "local",
+      "jev",
+    ]),
     evidence: z.string().max(500),
     boundaryStatus: z.literal("approximate"),
   })
@@ -36,6 +43,14 @@ const classifierAssessmentSchema = z
     verdict: z.enum(["advertisement", "promotion", "not_ad", "uncertain"]),
     confidence: z.number().min(0).max(1),
     reason: z.string().max(300),
+    probabilities: z
+      .object({
+        advertisement: z.number().min(0).max(1),
+        promotion: z.number().min(0).max(1),
+        not_ad: z.number().min(0).max(1),
+        uncertain: z.number().min(0).max(1),
+      })
+      .optional(),
   })
   .refine((assessment) => assessment.endMs > assessment.startMs);
 
@@ -55,7 +70,7 @@ export const analysisResultSchema = z
       etag: z.string().nullable(),
     }),
     model: z.string().max(200),
-    provider: z.enum(["rules", "gemini", "local"]),
+    provider: z.enum(["rules", "gemini", "local", "jev"]),
     classifierModel: z.string().max(200).optional(),
     generatedAt: z.iso.datetime(),
     segments: z.array(analysisSegmentSchema).max(2000),
@@ -85,6 +100,17 @@ export const analysisResultSchema = z
         .array(classifierAssessmentSchema)
         .max(2000)
         .default([]),
+      classifierUsage: z
+        .object({
+          requests: z.number().int().nonnegative(),
+          inputTokens: z.number().int().nonnegative().optional(),
+          outputTokens: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
+      classifierReturnedModels: z
+        .array(z.string().max(200))
+        .max(2000)
+        .optional(),
     }),
     transcriptExpired: z.boolean(),
   })

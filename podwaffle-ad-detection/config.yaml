@@ -1,7 +1,7 @@
 name: Podwaffle Ad Detection
-version: "0.1.5"
+version: "0.2.0"
 slug: podwaffle_ad_detection
-description: Experimental local English podcast chapter and advert analysis
+description: English podcast analysis with local Whisper and DigitalOcean Jev classification
 url: https://github.com/Invertee/Podwaffle
 arch:
   - amd64
@@ -25,26 +25,24 @@ options:
   max_audio_mb: 512
   job_timeout_minutes: 60
   classifier: rules
-  llm_threads: 2
-  llm_timeout_seconds: 60
+  jev_api_key: ""
+  jev_model: typesafe-jev-1.13.0
+  jev_timeout_seconds: 30
   schedule_enabled: true
   schedule_start: "23:00"
   schedule_end: "07:00"
   schedule_timezone: Europe/London
-  gemini_api_key: ""
-  gemini_model: gemini-2.5-flash
 schema:
   whisper_model: list(tiny.en|base.en)
   whisper_threads: int(1,64)
   sample_seconds: int(30,3600)
   max_audio_mb: int(1,2048)
   job_timeout_minutes: int(1,1440)
-  classifier: list(rules|local|gemini)
-  llm_threads: int(1,64)
-  llm_timeout_seconds: int(10,300)
+  classifier: list(rules|jev)
+  jev_api_key: password?
+  jev_model: str
+  jev_timeout_seconds: int(5,300)
   schedule_enabled: bool
   schedule_start: str
   schedule_end: str
   schedule_timezone: str
-  gemini_api_key: password?
-  gemini_model: str

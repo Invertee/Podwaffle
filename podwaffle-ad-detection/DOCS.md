@@ -1,119 +1,156 @@
 # Installation and migration
 
+## DigitalOcean Jev setup
+
+1. In DigitalOcean's **Serverless Inference** tab, create a **model access key**.
+   This is an inference key, not the personal access token used for infrastructure.
+2. Check access to **typesafe-jev-1.13.0** in the model catalog. Third-party model
+   access requires a qualifying account tier; HTTP 403 can indicate a key/access
+   problem. The catalog may list a newer model ID; set `jev_model` accordingly.
+3. In the Home Assistant add-on Configuration tab set:
+
+   ```yaml
+   classifier: jev
+   jev_api_key: YOUR_DIGITALOCEAN_MODEL_ACCESS_KEY
+   jev_model: typesafe-jev-1.13.0
+   jev_timeout_seconds: 30
+   ```
+
+4. Restart the sidecar and open its dashboard. **Test Jev with a transcript**
+   verifies access and classification without downloading audio or running Whisper.
+   The status message shows configuration, not a successful connection check.
+5. Use **Test an episode** with a podcast audio URL for the complete pipeline.
+   Inspect its job for sampled intervals, transcript excerpts and Jev decisions.
+
+Standalone equivalents: `CLASSIFIER=jev`, `PODCAST_JEV_API_KEY`,
+`PODCAST_JEV_MODEL` and `JEV_TIMEOUT_SECONDS`. For Docker, provide a private
+`--env-file` alongside the volume/port arguments in the README. Do not commit keys.
+No GPU Droplet or inference server deployment is needed: Jev is hosted and billed
+through DigitalOcean Serverless Inference.
+
+The sidecar posts to `https://inference.do-ai.run/v1/systemone` using Bearer
+authentication with a `state` string and a named `choice` question. It does not
+use chat completions. Jev accepts text, not audio: the local sequence is
+**silence boundaries → sample audio → Whisper speech-to-text → Jev classification**.
+Only transcript excerpts, phrase hints, operator guidance and bounded episode /
+podcast context go to DigitalOcean. The key stays in server configuration and is
+never returned by status, dashboard or job endpoints. See [DigitalOcean's System
+One API guide](https://docs.digitalocean.com/products/inference/how-to/use-system-one-api/)
+for the protocol, access tiers and model limits.
+
 ## Home Assistant
 
 1. Refresh the existing Podwaffle add-on repository. Install **Podwaffle Ad
-   Detection**, separately from **Podwaffle**. Supports amd64 and aarch64.
-2. Start it and open its web interface. On first start it downloads the current
-   upstream `tiny.en` Whisper weights (~78 MB), verifies SHA-256 and saves them in
-   persistent `/data/models`. Jobs wait while setup is in progress. A failed
-   download is visible and can be retried from the UI. Installation builds the
-   native tools; the model download happens on first startup, when `/data` exists.
-3. Set Podwaffle's `analysis_server_url` to `http://<sidecar-hostname>:5000`, using
-   the hostname shown on the sidecar's Home Assistant Info page. Do not use an
-   ingress URL. Alternatively map its optional network port to an unused host
-   port and use that LAN address. Port 5000 is mapped by default in version 0.1.1.
-   Existing installations may retain the old disabled mapping: in the add-on's
-   **Configuration → Network**, set **5000/tcp** to **5000**, save and restart.
-   If that host port is already used, choose another free port and use it in the
-   URL. Ingress and direct LAN port access are separate settings.
-4. Restart Podwaffle. Enable analysis per podcast or test an existing episode
-   through **Details & chapters → Analysis diagnostics & testing tools**.
+   Detection** separately from **Podwaffle**, on amd64 or aarch64.
+2. Start the add-on. It downloads and SHA-256 verifies the English `tiny.en`
+   Whisper weights (~78 MB) into persistent `/data/models`. Audio jobs wait for
+   Whisper setup; the dashboard and transcript tests remain available.
+3. Set Podwaffle's `analysis_server_url` to `http://<sidecar-hostname>:5000`
+   using the hostname on the add-on Info page, or its mapped LAN address. Use a
+   URL reachable from the Podwaffle server rather than an ingress URL. Port 5000
+   is mapped by default; check Configuration → Network on older installations.
+4. Restart Podwaffle. Enable analysis per podcast, or test an existing episode in
+   **Details & chapters → Analysis diagnostics & testing tools**.
 
-No authentication is implemented. Keep the API private to Home Assistant / your
-trusted LAN. It can fetch submitted audio URLs and perform resource-intensive
-work, so it must not be internet-accessible. Ingress provides access to the UI via
-Home Assistant; direct API access has no credentials.
+The dashboard uses relative API paths and works behind Home Assistant ingress.
+The direct API has no authentication: keep it on a trusted LAN / private network,
+not a public DigitalOcean port. If hosting the sidecar on a Droplet, use private
+connectivity or an authenticated reverse proxy; this repository supplies the
+inference integration, not a public hosting/authentication layer.
+
+## Migrating from local Qwen or Gemini
+
+Version 0.2 removes Qwen, llama.cpp and Gemini inference. Select `rules` for
+fully local phrase detection, or configure `jev` explicitly to enable DigitalOcean.
+Legacy `local` / `gemini` selections are treated as `rules` with a visible
+migration warning; a supplied Jev key does not implicitly enable cloud processing.
+Update saved Home Assistant options to `rules` or `jev` when upgrading.
+Old LLM thread/timeout and Gemini key options are ignored.
+
+On model preparation the sidecar removes only its known obsolete
+`qwen2.5-1.5b-instruct-q4_k_m.gguf` weight file, adjacent manifest and partial
+download files from `/data/models`. This frees the old classifier's disk space.
+Other models, Whisper weights, jobs and logs are retained. Removal failures are
+reported in model status. The rebuilt image contains no llama runtime; Qwen is
+never downloaded or started. Existing completed results remain readable, including
+historical local/Gemini results in Podwaffle. The `llmPrompt` API/storage name is
+retained for compatibility and now supplies Jev detection guidance.
+
+Existing submitted jobs retain their captured input and analyser URL. Retry in the
+sidecar affects its queue; if Podwaffle already recorded a terminal failure, use
+**Reanalyse** there to create a fresh tracked request. Switching services does not
+import another analyser's database or change completed results.
 
 ## Models and resource use
 
-The app UI has independent **Download / verify Whisper** and **Download / verify
-Qwen** buttons. You can download Qwen while using rules mode; this does not switch
-the classifier or start the LLM. To use it, select `classifier: local` in the
-add-on configuration and restart. The Qwen runtime loads on demand immediately
-before a local-classifier job and stops after that job, releasing its model RAM
-while the queue is idle. Separate readiness messages distinguish verified model
-files from a currently running local classifier.
+| Option                    | Behaviour                                               |
+| ------------------------- | ------------------------------------------------------- |
+| `whisper_model: tiny.en`  | Default, smallest/quickest English Whisper option       |
+| `whisper_model: base.en`  | Larger English model for quality comparisons            |
+| `whisper_threads: 2`      | Local transcription CPU workers, 1–64                   |
+| `classifier: rules`       | Default; literal sponsor phrases, no remote inference   |
+| `classifier: jev`         | Sends sampled transcripts to DigitalOcean; requires key |
+| `jev_timeout_seconds: 30` | Per-excerpt deadline including retry, 5–300 seconds     |
 
-The existing **Retry / verify model setup** button prepares the currently
-configured models together. Downloads are serialized; progress and errors remain
-visible while the UI/API stays available. A failed local setup leaves phrase
-fallback available and is explicitly shown as local classification unavailable.
-Models live outside the app image in persistent `/data/models`; updating the app
-does not require downloading verified weights again.
+Whisper and FFmpeg still use local CPU and audio cache space. The migration removes
+classifier memory/CPU and its ~1.12 GB weights; it does not eliminate transcription
+cost. Whisper weights are cached and verified across restarts. The verify button
+checks cached weights rather than silently upgrading to a different revision.
 
-| Option                   | Behaviour                                                                                                        |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `whisper_model: tiny.en` | Default, quickest/smallest English Whisper option                                                                |
-| `whisper_model: base.en` | Larger English model for quality comparisons                                                                     |
-| `classifier: rules`      | Default; literal sponsor/phrase hints, no LLM download                                                           |
-| `classifier: local`      | Downloads Qwen2.5 1.5B Instruct Q4_K_M (~1.12 GB) and runs bundled llama.cpp on CPU only during analysis jobs    |
-| `classifier: gemini`     | Requires `gemini_api_key`; sends sampled transcripts, phrase hints and bounded episode/podcast context to Gemini |
-| `llm_timeout_seconds`    | Per-excerpt local-classifier timeout, default 60 seconds (10–300)                                                |
+One job runs at a time. Defaults: 900 seconds of initial samples plus up to 240
+seconds around phrase hits, 512 MiB audio limit, eight-hour maximum duration and a
+one-hour job deadline. Native Whisper builds with two compilation workers.
 
-Qwen is optional because its weights, runtime memory and processing time are
-significant on smaller Home Assistant hosts. Allow several GB of free RAM plus
-audio cache/model storage and measure on your hardware; model file size is not a
-RAM estimate. The LLM's memory is released after each job, although the container
-and operating-system filesystem cache may not report an immediate return to its
-pre-job figure. Native tools build with two compilation workers. Whisper and LLM
-threads are configurable. The LLM listens only on container loopback; no LLM port
-is exposed. This is a constrained classifier, not a general-purpose agent.
+## Decisions, failures and testing
 
-The small model is an initial candidate, **not** a validated advert detector.
-Off-topic speech alone is not an advert, and descriptions may contain sponsor
-links. Prompts require evidence of commercial intent. Descriptions and transcripts
-are treated as untrusted data; generated ranges cannot bridge transcript gaps.
-Podwaffle can attach bounded per-podcast local-LLM guidance to each queued job.
-Low/Balanced/High sensitivity changes acoustic silence detection and accepted
-classifier confidence, while a configurable edge-focus window prioritises the
-first and last few minutes without increasing the configured sample budget.
-Local classification runs once per transcript excerpt, so one slow or malformed
-response is recorded as uncertain without discarding successful decisions for the
-other excerpts. Phrase rules cover failed excerpts and remain the full fallback
-when no local request succeeds.
+Jev receives one timestamped excerpt per request and selects **advertisement**,
+**promotion**, **not_ad** or **uncertain**, with classification confidence and label
+probabilities. Low / balanced / high sensitivity accepts advert/promotion markers
+at 0.75 / 0.55 / 0.35 confidence, and also adjusts existing silence detection.
+Descriptions and transcripts are data, not operator instructions. Off-topic speech
+alone is insufficient advertising evidence. Operator guidance is bounded to 2,000
+characters. Topic chapters still come from publisher/embedded metadata.
 
-First installation resolves the current upstream model revision and records its
-checksum. Verified cached models survive upgrades and can start offline; routine
-restarts do not silently replace weights. Changing Whisper size downloads the
-selected model. To refresh an existing model to current upstream weights, stop the
-add-on and move that model and its adjacent `.json` manifest out of `/data/models`
-using your administrator tools, then restart. Preserve those files for rollback.
-The UI's verify button does not force an upgrade or discard a good model.
+Markers use exact transcript excerpt endpoints, marked approximate, never generated
+ranges or bridges across unsampled gaps. This can mark only part of an ad and can
+include editorial speech in mixed excerpts. Confidence/probabilities are model
+outputs, not an accuracy measurement on your podcasts. Jev produces no explanatory
+text; displayed notes are application summaries of selected labels and boundaries.
 
-Upstream references: [Whisper models](https://github.com/ggml-org/whisper.cpp/tree/master/models),
-[Qwen model card and licence](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF),
-[llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server).
+Each failed excerpt is uncertain and uses phrase rules while successful Jev
+results are retained. If every excerpt fails, the job reports rules as its provider
+and preserves the configured Jev model plus failure diagnostics. HTTP 429 / 5xx is
+retried once with bounded backoff inside the deadline. Credential/access failures
+stop additional requests for that classification run. No alternate provider is used.
 
-## Moving away from the Radarr/Sonarr transcoder
+The dashboard offers:
 
-1. Prefer to let the old analyser finish outstanding jobs before upgrading the
-   transcoder. Existing Podwaffle results remain in Podwaffle's database.
-2. Install/start the sidecar, wait for model readiness, then change Podwaffle's
-   analyser URL. Existing submitted jobs retain the old URL: changing the setting
-   does not move those jobs automatically. If the old service has already gone,
-   let their bounded transport retries reach failure and reanalyse from Podwaffle.
-3. Upgrade the transcoder with the podcast removal changes. It no longer registers
-   podcast endpoints, starts the worker or renders the podcast tab. Existing video
-   jobs and statistics are unaffected. Its old `PODCAST_*` variables are ignored.
-4. The sidecar starts with a fresh SQLite database. Old analyser jobs are not
-   imported automatically; reanalyse episodes if needed. Do not point it at the
-   video database. The transcoder leaves its unused podcast tables intact unless
-   its optional `scripts/remove-podcast-tables.js` cleanup is explicitly run with
-   the transcoder stopped. That command backs up the database before dropping only
-   the two podcast tables. Keep the backup if the old job details matter.
+- **Test an episode:** submit an audio URL, sponsor phrases, guidance, sensitivity
+  and edge focus; inspect the queued job's full request, result and logs.
+- **Test Jev with a transcript:** paste text, times, optional episode context and
+  guidance; see labels, probabilities, threshold, latency, API request count and
+  returned token usage. Nothing is saved by the sidecar. Provider retention is
+  governed by your DigitalOcean/TypeSafe terms.
 
-Retry in the sidecar is for its local queue. If Podwaffle has already recorded a
-terminal failure, use **Reanalyse** in Podwaffle to create a fresh tracked request.
+`POST /api/podcasts/classify` accepts
+`{fragments: [{startMs, endMs, text}], title?, phrases?, llmPrompt?, sensitivity?,
+podcastTitle?, podcastDescription?, episodeDescription?}`. Limits: 1–50 excerpts,
+4,000 characters each, 20,000 total and valid original timestamps within eight
+hours. One dashboard transcript test runs at a time; it can run alongside an audio
+job. It never accepts a client-supplied API key or endpoint. All failed requests
+return HTTP 502, disabled Jev returns 503, invalid input 400, concurrent tests 409.
+Missing token usage stays unknown. Usage reports only counts returned by successful
+HTTP responses; billable timed-out requests may not be included.
 
-## Diagnostics and limits
+## Retention and validation
 
-The web UI shows model setup, job status/stage/progress, full request/result
-inspection, per-job logs and a dedicated rotating service log. Defaults: one job
-at a time, 900 seconds initially sampled plus up to 240 seconds around phrase hits,
-512 MiB audio download, eight-hour episode maximum, one-hour job deadline.
-Transcripts expire after seven days; markers and input metadata remain.
+Transcript excerpts and classification assessments expire after seven days. Compact
+jobs, input metadata, fingerprints and markers remain. Temporary audio/PCM files
+are removed after normal success/error; abrupt termination can leave cache files.
+Clear those only while stopped. Logs record stages/errors rather than transcript
+text. No automatic skipping or playback-fingerprint verification is enabled.
 
-No automatic skipping, multilingual processing or Android changes are included.
-The Podwaffle client still needs a future playback-fingerprint comparison before
-timings can be trusted for automatic actions.
+Run `npm test` in this folder. Tests use synthetic audio-tool and Jev responses
+for protocol, timestamps, fallback, validation, key handling, retention and HTTP
+behavior. Test representative podcasts through the dashboard to assess detection
+quality, boundary accuracy, real latency and resource use before automatic skipping.

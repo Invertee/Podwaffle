@@ -27,12 +27,26 @@ function loadConfig(env = process.env, options) {
   const model = value("whisper_model", "WHISPER_MODEL", "tiny.en");
   if (!["tiny.en", "base.en"].includes(model))
     throw new Error("whisper_model must be tiny.en or base.en");
-  const classifier = value("classifier", "CLASSIFIER", "rules");
-  if (!["rules", "local", "gemini"].includes(classifier))
+  const selectedClassifier = value("classifier", "CLASSIFIER", "rules");
+  if (!["rules", "jev", "local", "gemini"].includes(selectedClassifier))
     throw new Error("Invalid classifier");
-  const geminiKey = value("gemini_api_key", "PODCAST_GEMINI_API_KEY", "");
-  if (classifier === "gemini" && !geminiKey)
-    throw new Error("Gemini classifier requires gemini_api_key");
+  // Never enable a remote provider implicitly when upgrading a local install.
+  const removedClassifier = ["local", "gemini"].includes(selectedClassifier);
+  const classifier = removedClassifier ? "rules" : selectedClassifier;
+  const jevKey = value("jev_api_key", "PODCAST_JEV_API_KEY", "");
+  if (typeof jevKey !== "string" || /[\r\n]/.test(jevKey))
+    throw new Error("Invalid jev_api_key");
+  if (classifier === "jev" && !jevKey.trim())
+    throw new Error(
+      "Jev classifier requires jev_api_key (DigitalOcean model access key)",
+    );
+  const jevModel = value(
+    "jev_model",
+    "PODCAST_JEV_MODEL",
+    "typesafe-jev-1.13.0",
+  );
+  if (typeof jevModel !== "string" || !jevModel.trim() || jevModel.length > 200)
+    throw new Error("Invalid jev_model");
   const scheduleEnabled = value("schedule_enabled", "SCHEDULE_ENABLED", true);
   if (![true, false, "true", "false"].includes(scheduleEnabled))
     throw new Error("schedule_enabled must be true or false");
@@ -76,18 +90,14 @@ function loadConfig(env = process.env, options) {
     podcastJobTimeoutMs:
       number("job_timeout_minutes", "JOB_TIMEOUT_MINUTES", 60, 1, 1440) * 60000,
     classifier,
-    podcastGeminiKey: geminiKey,
-    podcastGeminiModel: value(
-      "gemini_model",
-      "PODCAST_GEMINI_MODEL",
-      "gemini-2.5-flash",
-    ),
-    llmPath: env.LLAMA_SERVER_PATH || "llama-server",
-    llmUrl: "http://127.0.0.1:8081",
-    llmModel: path.join(modelDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf"),
-    llmThreads: number("llm_threads", "LLM_THREADS", 2, 1, 64),
-    llmRequestTimeoutMs:
-      number("llm_timeout_seconds", "LLM_TIMEOUT_SECONDS", 60, 10, 300) * 1000,
+    classifierWarning: removedClassifier
+      ? `${selectedClassifier} classification has been removed. Using phrase rules; select jev and configure jev_api_key to use DigitalOcean.`
+      : null,
+    podcastJevKey: jevKey.trim(),
+    podcastJevModel: jevModel.trim(),
+    podcastJevUrl: "https://inference.do-ai.run/v1/systemone",
+    jevRequestTimeoutMs:
+      number("jev_timeout_seconds", "JEV_TIMEOUT_SECONDS", 30, 5, 300) * 1000,
   };
 }
 module.exports = { loadConfig };
