@@ -158,6 +158,14 @@ it("retries with a stable request key, imports results, expires snippets and det
       minimumAdvertConfidence: 0.55,
       classifierUsage: { requests: 1, inputTokens: 350, outputTokens: 0 },
       classifierReturnedModels: ["typesafe-jev-1.13.0"],
+      classifierErrors: [
+        {
+          status: 403,
+          code: "forbidden",
+          message: "Example failed excerpt",
+          requestId: "support-123",
+        },
+      ],
       classifierAssessments: [
         {
           startMs: 10000,
@@ -221,6 +229,7 @@ it("retries with a stable request key, imports results, expires snippets and det
     classifierModel: "typesafe-jev-1.13.0",
     diagnostics: {
       classifierUsage: { inputTokens: 350 },
+      classifierErrors: [{ status: 403, requestId: "support-123" }],
       classifierAssessments: [{ probabilities: { advertisement: 0.8 } }],
     },
   });

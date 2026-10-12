@@ -180,7 +180,7 @@ test("retries transient failures once; permanent credential failures stop furthe
   });
   assert.equal(calls, 1);
   assert.equal(failed.failedFragments.length, 2);
-  assert.match(failed.failureReasons[0], /account tier/);
+  assert.match(failed.failureReasons[0], /account eligibility/);
   assert.doesNotMatch(
     JSON.stringify(failed),
     /secret provider body|secret-test-key/,
@@ -201,6 +201,88 @@ test("oversized replies, timeouts and fetch errors become safe uncertain decisio
     throw new Error("request contained secret-test-key");
   }, [fragments[0]]);
   assert.doesNotMatch(JSON.stringify(leaked), /secret-test-key/);
+});
+
+test("DigitalOcean error messages and support request IDs explain a 403 without repeated calls", async () => {
+  let calls = 0;
+  const result = await classify(async () => {
+    calls++;
+    return Response.json(
+      {
+        id: "forbidden",
+        message: "This model is not available for your subscription tier.",
+        request_id: "support-123",
+      },
+      { status: 403 },
+    );
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(result.providerErrors, [
+    {
+      status: 403,
+      code: "forbidden",
+      message: "This model is not available for your subscription tier.",
+      requestId: "support-123",
+    },
+  ]);
+  assert.match(result.assessments[0].reason, /subscription tier/);
+  assert.match(result.assessments[1].reason, /support-123/);
+  assert.equal(result.successfulCount, 0);
+});
+
+test("only selected error fields are kept; credentials and echoed excerpts are redacted", async () => {
+  const result = await classify(
+    async () =>
+      Response.json(
+        {
+          error: {
+            code: "access_denied",
+            message: "Rejected secret-test-key and Bearer another-secret",
+          },
+          request: {
+            authorization: "secret-test-key",
+            transcript: fragments[0].text,
+          },
+          request_id: "secret-test-key",
+        },
+        { status: 403, headers: { "x-request-id": "request-456" } },
+      ),
+    [fragments[0]],
+  );
+  assert.equal(result.providerErrors[0].requestId, "request-456");
+  assert.equal(result.providerErrors[0].code, "access_denied");
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /secret-test-key|another-secret|authorization/,
+  );
+  assert.doesNotMatch(JSON.stringify(result.providerErrors), /Our sponsor/);
+  const echoed = await classify(
+    async () =>
+      Response.json(
+        { message: `Rejected text: ${fragments[0].text}` },
+        { status: 403 },
+      ),
+    [fragments[0]],
+  );
+  assert.equal(
+    echoed.providerErrors[0].message,
+    "Provider error echoed request content; message omitted.",
+  );
+});
+
+test("malformed and oversized provider errors preserve the HTTP status without raw bodies", async () => {
+  for (const body of [
+    "<html>secret-test-key</html>",
+    JSON.stringify({ message: "secret-test-key".repeat(1000) }),
+  ]) {
+    const result = await classify(
+      async () => new Response(body, { status: 403 }),
+      [fragments[0]],
+    );
+    assert.deepEqual(result.providerErrors, [{ status: 403 }]);
+    assert.match(result.assessments[0].reason, /HTTP 403/);
+    assert.doesNotMatch(JSON.stringify(result), /secret-test-key|<html>/);
+  }
 });
 
 test("shutdown cancels inference instead of returning fallback decisions", async () => {
@@ -342,16 +424,30 @@ test("transcript endpoint validates ranges and budgets and rejects disabled Jev"
 });
 
 test("transcript endpoint returns a failure status for unavailable inference", async (t) => {
-  const { post } = await httpFixture(
-    t,
-    config,
-    async () => new Response("no access", { status: 401 }),
+  const { post } = await httpFixture(t, config, async () =>
+    Response.json(
+      {
+        id: "forbidden",
+        message: "Jev access is unavailable for this team.",
+        request_id: "support-http-123",
+      },
+      { status: 403 },
+    ),
   );
   const response = await post({ fragments });
   assert.equal(response.status, 502);
   const result = await response.json();
   assert.equal(result.failedCount, 2);
   assert.equal(result.assessments[0].verdict, "uncertain");
+  assert.match(result.error, /Jev access is unavailable for this team/);
+  assert.deepEqual(result.providerErrors, [
+    {
+      status: 403,
+      code: "forbidden",
+      message: "Jev access is unavailable for this team.",
+      requestId: "support-http-123",
+    },
+  ]);
 });
 
 test("concurrent transcript tests are rejected and the slot is released afterwards", async (t) => {

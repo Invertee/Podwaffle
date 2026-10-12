@@ -107,6 +107,17 @@ export const analysisResultSchema = z
           outputTokens: z.number().int().nonnegative().optional(),
         })
         .optional(),
+      classifierErrors: z
+        .array(
+          z.object({
+            status: z.number().int().min(400).max(599),
+            code: z.string().max(60).optional(),
+            message: z.string().max(200).optional(),
+            requestId: z.string().max(100).optional(),
+          }),
+        )
+        .max(2000)
+        .optional(),
       classifierReturnedModels: z
         .array(z.string().max(200))
         .max(2000)

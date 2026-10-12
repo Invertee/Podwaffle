@@ -24,7 +24,7 @@ function context(request) {
   };
 }
 
-async function readResponse(response) {
+async function readResponse(response, maxBytes = 256 * 1024) {
   if (!response.body) throw new Error("Jev returned an empty response.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -35,13 +35,87 @@ async function readResponse(response) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > 256 * 1024)
+      if (bytes > maxBytes)
         throw new Error("Jev response exceeds the size limit.");
       text += decoder.decode(value, { stream: true });
     }
     return JSON.parse(text + decoder.decode());
   } finally {
     await reader.cancel().catch(() => {});
+  }
+}
+
+async function providerError(response, config, request, excerpt) {
+  let body;
+  try {
+    body = await readResponse(response, 8192);
+  } catch {
+    // Ignore HTML, oversized responses and malformed JSON; never echo raw bodies.
+  }
+  const redact = (value) => {
+    if (typeof value !== "string") return "";
+    let text = value;
+    for (const secret of [
+      config.podcastJevKey,
+      encodeURIComponent(config.podcastJevKey ?? ""),
+    ]) {
+      if (secret) text = text.replaceAll(secret, "[redacted]");
+    }
+    return text
+      .replace(/Bearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
+      .replace(/\b(?:dop_v1_|doo_v1_|sk-)[A-Za-z0-9_-]+/g, "[redacted]")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+  let message = redact(
+    body?.message ??
+      body?.error?.message ??
+      (typeof body?.error === "string" ? body.error : body?.detail),
+  );
+  // Provider errors may quote input. Do not retain excerpts or operator guidance.
+  const suppliedText = [
+    excerpt.text,
+    request.llmPrompt,
+    ...Object.values(context(request)),
+    ...(request.phrases ?? []),
+  ];
+  if (
+    suppliedText.some(
+      (text) =>
+        typeof text === "string" &&
+        text.length >= 8 &&
+        message.toLowerCase().includes(text.toLowerCase()),
+    )
+  )
+    message = "Provider error echoed request content; message omitted.";
+  const identifier = (value, limit) => {
+    const safe = redact(value);
+    return safe.length <= limit && /^[A-Za-z0-9_.:-]+$/.test(safe)
+      ? safe
+      : undefined;
+  };
+  const code = identifier(body?.id ?? body?.error?.code ?? body?.code, 60);
+  const requestId = identifier(
+    response.headers.get("x-request-id") ?? body?.request_id,
+    100,
+  );
+  return {
+    status: response.status,
+    ...(message ? { message: message.slice(0, 200) } : {}),
+    ...(code ? { code } : {}),
+    ...(requestId ? { requestId } : {}),
+  };
+}
+
+class JevHttpError extends Error {
+  constructor(detail) {
+    const fallback = [401, 403].includes(detail.status)
+      ? "Check DigitalOcean model access, account eligibility and billing."
+      : "DigitalOcean inference request failed.";
+    super(
+      `Jev returned HTTP ${detail.status}: ${detail.message || fallback}${detail.requestId ? ` Request ID: ${detail.requestId}` : ""}`,
+    );
   }
 }
 
@@ -81,7 +155,8 @@ async function classifyJev(
   const segments = [],
     assessments = [],
     failedFragments = [],
-    failureReasons = [];
+    failureReasons = [],
+    providerErrors = [];
   const timeoutMs = config.jevRequestTimeoutMs ?? 30000;
   const usage = { requests: 0 };
   const returnedModels = new Set();
@@ -90,7 +165,7 @@ async function classifyJev(
     const excerpt = fragments[index];
     try {
       signal.throwIfAborted();
-      if (unavailable) throw new Error(unavailable);
+      if (unavailable) throw unavailable;
       if (!config.podcastJevKey)
         throw new Error("Jev requires a DigitalOcean model access key.");
       const requestSignal = AbortSignal.any([
@@ -140,13 +215,11 @@ async function classifyJev(
         break;
       }
       if (!response.ok) {
-        await response.body?.cancel();
-        const message =
-          response.status === 401 || response.status === 403
-            ? `Jev returned HTTP ${response.status}; check the DigitalOcean model access key and account tier.`
-            : `Jev returned HTTP ${response.status}.`;
-        if ([401, 403, 429].includes(response.status)) unavailable = message;
-        throw new Error(message);
+        const detail = await providerError(response, config, request, excerpt);
+        providerErrors.push(detail);
+        const error = new JevHttpError(detail);
+        if ([401, 403, 429].includes(response.status)) unavailable = error;
+        throw error;
       }
       const parsed = await readResponse(response);
       for (const [remote, local] of [
@@ -206,8 +279,11 @@ async function classifyJev(
           ? `Jev request timed out after ${Math.round(timeoutMs / 1000)} seconds.`
           : error instanceof SyntaxError
             ? "Jev returned invalid JSON."
-            : String(error?.message || "").startsWith("Jev ")
-              ? error.message.slice(0, 200)
+            : error instanceof JevHttpError ||
+                String(error?.message || "").startsWith("Jev ")
+              ? error.message
+                  .replaceAll(config.podcastJevKey || "\u0000", "[redacted]")
+                  .slice(0, 300)
               : "Jev request failed; check connectivity and DigitalOcean configuration.";
       failedFragments.push(excerpt);
       failureReasons.push(reason);
@@ -230,6 +306,7 @@ async function classifyJev(
     successfulCount: fragments.length - failedFragments.length,
     usage,
     returnedModels: [...returnedModels],
+    providerErrors,
   };
 }
 

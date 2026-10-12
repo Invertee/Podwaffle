@@ -123,6 +123,7 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
         provider: "jev",
         classifierModel: config.podcastJevModel,
         returnedModels: result.returnedModels,
+        providerErrors: result.providerErrors,
         elapsedMs: Date.now() - start,
         minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
         segments: applySensitivity(result.segments, request.sensitivity),

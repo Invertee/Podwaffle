@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Show bounded DigitalOcean error messages, error codes and request IDs for rejected Jev requests instead of assuming every 403 is a key/tier issue.
+- Redact credentials and omit error messages that echo supplied transcript/context; ignore raw, malformed and oversized error bodies.
+- Preserve provider diagnostics in transcript tests and queued analysis results.
+
 ## 0.2.0
 
 - Replace local Qwen/llama.cpp and Gemini inference with DigitalOcean Jev's System One API.

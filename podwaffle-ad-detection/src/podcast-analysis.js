@@ -537,7 +537,8 @@ async function analyse(request, config, signal, progress, execute = run) {
     let provider = "rules",
       classifierAssessments = [],
       classifierUsage,
-      classifierReturnedModels;
+      classifierReturnedModels,
+      classifierErrors;
     if (config.classifier === "jev") {
       try {
         const jev = await classifyJev(
@@ -557,6 +558,7 @@ async function analyse(request, config, signal, progress, execute = run) {
         classifierAssessments = jev.assessments;
         classifierUsage = jev.usage;
         classifierReturnedModels = jev.returnedModels;
+        classifierErrors = jev.providerErrors;
         const failureSummary = jev.failureReasons.slice(0, 3).join(" ");
         if (jev.successfulCount > 0 || fragments.length === 0) {
           segments.push(...applySensitivity(jev.segments, request.sensitivity));
@@ -609,7 +611,7 @@ async function analyse(request, config, signal, progress, execute = run) {
         minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
         classifierAssessments,
         ...(classifierUsage
-          ? { classifierUsage, classifierReturnedModels }
+          ? { classifierUsage, classifierReturnedModels, classifierErrors }
           : {}),
       },
       transcriptExpired: false,

@@ -144,6 +144,25 @@ HTTP responses; billable timed-out requests may not be included.
 
 ## Retention and validation
 
+### Troubleshooting DigitalOcean rejections
+
+Version 0.2.1 shows DigitalOcean's bounded, credential-redacted error message beside
+the transcript decision. The full test response also includes `providerErrors`
+with HTTP status, error code and request ID when supplied. Queued jobs preserve
+these under `diagnostics.classifierErrors`. Raw response bodies are never saved.
+
+A 403 alone does not establish whether model access, account eligibility, key
+scope, network restrictions or billing caused the rejection. Check the provider's
+message before adding funds or changing account tiers. A model access key must
+include Jev and allow requests from the sidecar's network. For a Home Assistant
+host outside DigitalOcean, choose **No VPC network**. Serverless Inference can
+draw from an eligible positive account prepayment or Inference & Agents balance
+on the team owning the key. See [model key settings](https://docs.digitalocean.com/products/inference/how-to/manage-model-access-keys/)
+and [prepayment rules](https://docs.digitalocean.com/products/inference/how-to/manage-serverless-inference-prepayment/).
+If the rejection persists, provide DigitalOcean support the error and request ID.
+
+### Stored data and tests
+
 Transcript excerpts and classification assessments expire after seven days. Compact
 jobs, input metadata, fingerprints and markers remain. Temporary audio/PCM files
 are removed after normal success/error; abrupt termination can leave cache files.
