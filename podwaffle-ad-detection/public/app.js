@@ -1,10 +1,12 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  let selected = null,
+  let selected = new URLSearchParams(location.hash.slice(1)).get("job"),
     busy = false,
     jevConfigured = false,
-    transcriptPending = false;
+    transcriptPending = false,
+    inspectionRequest = 0;
+  let jobs = [];
   // Relative paths keep the management UI working behind Home Assistant ingress.
   async function api(route, options) {
     const response = await fetch(`api/podcasts/${route}`, options);
@@ -18,9 +20,13 @@
   }
   async function inspect(id) {
     selected = id;
+    const request = ++inspectionRequest;
+    history.replaceState(null, "", `#${new URLSearchParams({ job: id })}`);
+    for (const row of $("jobs").children)
+      row.classList.toggle("selected-job", row.dataset.jobId === id);
     const data = await api(`jobs/${encodeURIComponent(id)}`);
-    $("detailTitle").textContent = `Job inspector — ${data.job.request.title}`;
-    $("details").textContent = JSON.stringify(data, null, 2);
+    if (selected === id && request === inspectionRequest)
+      window.PodcastInspector.render(data);
   }
   const action = (task) => async () => {
     try {
@@ -29,6 +35,67 @@
       $("error").textContent = e.message;
     }
   };
+  function renderJobs() {
+    const query = $("jobSearch").value.trim().toLowerCase();
+    const matching = jobs.filter((job) =>
+      `${job.request.title} ${job.request.podcastTitle || ""} ${job.status}`
+        .toLowerCase()
+        .includes(query),
+    );
+    $("jobs").replaceChildren();
+    for (const job of matching) {
+      const row = document.createElement("tr");
+      row.dataset.jobId = job.id;
+      row.classList.toggle("selected-job", job.id === selected);
+      for (const value of [
+        new Date(job.createdAt).toLocaleString(),
+        job.request.title,
+        job.status,
+        job.stage,
+        `${job.progress}%`,
+        job.segmentCount,
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = String(value);
+        row.append(cell);
+      }
+      const cell = document.createElement("td"),
+        button = document.createElement("button");
+      button.textContent = "Inspect";
+      button.setAttribute("aria-label", `Inspect ${job.request.title}`);
+      button.onclick = action(async () => {
+        await inspect(job.id);
+        $("inspector").scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+      cell.append(button);
+      if (job.status === "failed") {
+        const retry = document.createElement("button");
+        retry.textContent = "Retry";
+        retry.onclick = action(async () => {
+          await api(`jobs/${encodeURIComponent(job.id)}/retry`, {
+            method: "POST",
+          });
+          await refresh();
+          await inspect(job.id);
+          $("error").textContent =
+            "Retried here. If Podwaffle already marked this job failed, use Reanalyse in its episode modal to refresh its result.";
+        });
+        cell.append(retry);
+      }
+      row.append(cell);
+      $("jobs").append(row);
+    }
+    if (!matching.length) {
+      const row = document.createElement("tr"),
+        cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.textContent = jobs.length
+        ? "No episodes match your search."
+        : "No analysis jobs yet. Enable analysis or test an episode in Podwaffle.";
+      row.append(cell);
+      $("jobs").append(row);
+    }
+  }
   async function refresh() {
     if (busy) return;
     busy = true;
@@ -59,52 +126,9 @@
         : 0;
       $("prepare").disabled = models.busy;
       $("downloadWhisper").disabled = models.busy;
-      $("jobs").replaceChildren();
-      for (const job of status.jobs) {
-        const row = document.createElement("tr");
-        for (const value of [
-          new Date(job.createdAt).toLocaleString(),
-          job.request.title,
-          job.status,
-          job.stage,
-          `${job.progress}%`,
-          job.segmentCount,
-        ]) {
-          const cell = document.createElement("td");
-          cell.textContent = String(value);
-          row.append(cell);
-        }
-        const cell = document.createElement("td"),
-          button = document.createElement("button");
-        button.textContent = "Inspect";
-        button.onclick = action(() => inspect(job.id));
-        cell.append(button);
-        if (job.status === "failed") {
-          const retry = document.createElement("button");
-          retry.textContent = "Retry";
-          retry.onclick = action(async () => {
-            await api(`jobs/${encodeURIComponent(job.id)}/retry`, {
-              method: "POST",
-            });
-            await refresh();
-            await inspect(job.id);
-            $("error").textContent =
-              "Retried here. If Podwaffle already marked this job failed, use Reanalyse in its episode modal to refresh its result.";
-          });
-          cell.append(retry);
-        }
-        row.append(cell);
-        $("jobs").append(row);
-      }
-      if (!status.jobs.length) {
-        const row = document.createElement("tr"),
-          cell = document.createElement("td");
-        cell.colSpan = 7;
-        cell.textContent =
-          "No analysis jobs yet. Enable analysis or test an episode in Podwaffle.";
-        row.append(cell);
-        $("jobs").append(row);
-      }
+      jobs = status.jobs;
+      if (!selected && jobs.length) selected = jobs[0].id;
+      renderJobs();
       $("logs").textContent = logs.lines.join("\n") || "No log entries.";
       if (selected) await inspect(selected);
     } catch (e) {
@@ -114,6 +138,7 @@
     }
   }
   $("refresh").onclick = refresh;
+  $("jobSearch").oninput = renderJobs;
   $("prepare").onclick = action(async () => {
     await api("models/prepare", { method: "POST" });
     await refresh();
@@ -156,7 +181,7 @@
       });
       selected = result.job.id;
       $("episodeMessage").textContent =
-        "Episode queued. Progress and results appear in Analysis jobs and the Job inspector below.";
+        "Episode queued. Progress, timeline and transcripts appear in the episode explorer above.";
       await refresh();
     } catch (error) {
       $("episodeMessage").textContent = error.message;

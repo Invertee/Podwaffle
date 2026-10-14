@@ -116,6 +116,7 @@ class JevHttpError extends Error {
     super(
       `Jev returned HTTP ${detail.status}: ${detail.message || fallback}${detail.requestId ? ` Request ID: ${detail.requestId}` : ""}`,
     );
+    this.detail = detail;
   }
 }
 
@@ -163,6 +164,8 @@ async function classifyJev(
   let unavailable = null;
   for (let index = 0; index < fragments.length; index++) {
     const excerpt = fragments[index];
+    const started = Date.now();
+    const requestsBefore = usage.requests;
     try {
       signal.throwIfAborted();
       if (unavailable) throw unavailable;
@@ -239,7 +242,11 @@ async function classifyJev(
       )
         throw new Error("Jev returned an invalid model identifier.");
       const answer = validateAnswer(parsed.answers?.classification);
-      returnedModels.add(parsed.model);
+      const returnedModel = parsed.model.replaceAll(
+        config.podcastJevKey,
+        "[redacted]",
+      );
+      returnedModels.add(returnedModel);
       // Jev selects a label. These notes are application text, not model rationale.
       const reason = `Jev selected ${answer.choice.replace("_", " ")} (${Math.round(answer.confidence * 100)}% classification confidence). Times are the original transcript excerpt boundaries.`;
       const assessment = {
@@ -248,10 +255,35 @@ async function classifyJev(
         verdict: answer.choice,
         confidence: answer.confidence,
         reason,
+        status: "completed",
+        elapsedMs: Date.now() - started,
+        requestCount: usage.requests - requestsBefore,
         probabilities: Object.fromEntries(
           Object.keys(criteria).map((key) => [key, answer.probabilities[key]]),
         ),
       };
+      // Persist only the validated response fields, never arbitrary provider data.
+      // Keeping this on the assessment gives it the same transcript expiry.
+      assessment.response = {
+        model: returnedModel,
+        answers: {
+          classification: {
+            type: answer.type,
+            choice: answer.choice,
+            confidence: answer.confidence,
+            probabilities: assessment.probabilities,
+          },
+        },
+      };
+      const responseUsage = Object.fromEntries(
+        ["input_tokens", "output_tokens"].flatMap((key) =>
+          Number.isSafeInteger(parsed.usage?.[key]) && parsed.usage[key] >= 0
+            ? [[key, parsed.usage[key]]]
+            : [],
+        ),
+      );
+      if (Object.keys(responseUsage).length)
+        assessment.response.usage = responseUsage;
       const detected = ["advertisement", "promotion"].includes(answer.choice)
         ? validate(
             [
@@ -293,6 +325,10 @@ async function classifyJev(
         verdict: "uncertain",
         confidence: 0,
         reason,
+        status: usage.requests === requestsBefore ? "skipped" : "failed",
+        elapsedMs: Date.now() - started,
+        requestCount: usage.requests - requestsBefore,
+        ...(error instanceof JevHttpError ? { error: error.detail } : {}),
       });
     } finally {
       onProgress(index + 1, fragments.length);

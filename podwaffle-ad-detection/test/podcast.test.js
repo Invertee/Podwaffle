@@ -178,7 +178,16 @@ test("seven-day transcript purge preserves markers and removes old logs", (t) =>
     segments: [{ title: "Chapter" }],
     fragments: [{ text: "expire me" }],
     diagnostics: {
-      classifierAssessments: [{ reason: "expire this too" }],
+      classifierAssessments: [
+        {
+          reason: "expire this too",
+          response: {
+            model: "jev",
+            answers: { classification: { choice: "advertisement" } },
+          },
+          error: { message: "expired provider detail" },
+        },
+      ],
     },
   });
   const { DatabaseSync } = require("node:sqlite");
@@ -195,6 +204,10 @@ test("seven-day transcript purge preserves markers and removes old logs", (t) =>
   );
   assert.equal(store.get(job.id).result.segments.length, 1);
   assert.equal(store.get(job.id).result.transcriptExpired, true);
+  assert.doesNotMatch(
+    JSON.stringify(store.get(job.id).result),
+    /expire this too|expired provider detail|classification/,
+  );
 });
 
 test("local HTTP API exposes independent job status and diagnostic logs", async (t) => {

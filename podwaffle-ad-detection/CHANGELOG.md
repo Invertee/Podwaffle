@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Replace the JSON-only job inspector with an episode timeline and searchable transcript explorer.
+- Link sampled coverage, Jev decisions and saved ad markers to excerpt transcripts, confidence, probabilities and response fields; add timeline zoom and position navigation.
+- Distinguish low-confidence candidates, failed/skipped requests, phrase fallback and unsampled audio. Preserve inspection of older and expired results.
+- Retain validated per-excerpt Jev response fields, elapsed time, API request counts and safe provider errors for seven days alongside transcripts. Keep full job data and service logs in expandable views.
+
 ## 0.2.1
 
 - Show bounded DigitalOcean error messages, error codes and request IDs for rejected Jev requests instead of assuming every 403 is a key/tier issue.

@@ -39,6 +39,21 @@ transcript tests with label probabilities, confidence, elapsed time and token us
 Transcript tests work before Whisper downloads and are not stored by the sidecar.
 Keep the unauthenticated dashboard/API on a trusted network.
 
+Use **Inspect** beside any episode in **Analysis jobs** for its interactive timeline.
+The three lanes show sampled audio, excerpt decisions and saved advert/promotion
+markers. Select a range to read the matching transcript and Jev response, or search
+and filter excerpts. Zoom to one or five minutes around the selection for short
+ranges in long episodes. Dashed candidates fall below the saved-marker confidence
+threshold; failed requests and phrase-rule fallback remain visible. Unsampled gaps
+have no classification. Selection and filters survive automatic refreshes; the URL
+links directly to the selected job.
+
+New jobs retain validated Jev classification, returned model and token usage per
+excerpt, plus latency, request counts and bounded provider errors. Other provider
+fields are omitted. Older jobs show their saved decisions without inventing response
+data. Transcripts and these response details expire after seven days; saved markers
+and sampled coverage remain available.
+
 | Method | Path                           | Purpose                                               |
 | ------ | ------------------------------ | ----------------------------------------------------- |
 | GET    | `/api/podcasts/status`         | Latest 200 jobs and classifier configuration (no key) |

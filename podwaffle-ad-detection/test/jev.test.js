@@ -101,6 +101,10 @@ test("uses DigitalOcean System One and preserves original timestamps without gen
   assert.equal(result.segments[0].startMs, 1000);
   assert.equal(result.segments[0].endMs, 4000);
   assert.equal(result.assessments[1].verdict, "not_ad");
+  assert.equal(result.assessments[0].status, "completed");
+  assert.equal(result.assessments[0].requestCount, 1);
+  assert.ok(result.assessments[0].elapsedMs >= 0);
+  assert.deepEqual(result.assessments[0].response, answer());
   assert.deepEqual(result.usage, {
     requests: 2,
     inputTokens: 246,
@@ -124,6 +128,8 @@ test("preserves successful decisions around a malformed excerpt response", async
   assert.equal(result.successfulCount, 1);
   assert.deepEqual(result.failedFragments, [fragments[1]]);
   assert.equal(result.assessments[1].verdict, "uncertain");
+  assert.equal(result.assessments[1].status, "failed");
+  assert.equal(result.assessments[1].response, undefined);
   assert.match(result.failureReasons[0], /invalid JSON/);
   assert.equal(applySensitivity(result.segments, "balanced").length, 0);
   assert.equal(applySensitivity(result.segments, "high").length, 1);
@@ -180,6 +186,9 @@ test("retries transient failures once; permanent credential failures stop furthe
   });
   assert.equal(calls, 1);
   assert.equal(failed.failedFragments.length, 2);
+  assert.equal(failed.assessments[0].status, "failed");
+  assert.equal(failed.assessments[1].status, "skipped");
+  assert.equal(failed.assessments[1].requestCount, 0);
   assert.match(failed.failureReasons[0], /account eligibility/);
   assert.doesNotMatch(
     JSON.stringify(failed),
@@ -227,6 +236,8 @@ test("DigitalOcean error messages and support request IDs explain a 403 without 
   ]);
   assert.match(result.assessments[0].reason, /subscription tier/);
   assert.match(result.assessments[1].reason, /support-123/);
+  assert.deepEqual(result.assessments[0].error, result.providerErrors[0]);
+  assert.deepEqual(result.assessments[1].error, result.providerErrors[0]);
   assert.equal(result.successfulCount, 0);
 });
 
@@ -314,6 +325,37 @@ test("unknown token usage stays unknown and returned model is recorded", async (
   );
   assert.deepEqual(result.usage, { requests: 1 });
   assert.deepEqual(result.returnedModels, ["resolved-jev-version"]);
+  assert.equal(result.assessments[0].response.model, "resolved-jev-version");
+  assert.equal(result.assessments[0].response.usage, undefined);
+});
+
+test("inspection response fields exclude arbitrary provider payloads and redact the configured key", async () => {
+  const body = answer();
+  body.debug = {
+    authorization: "secret-test-key",
+    transcript: "private echoed text",
+  };
+  body.answers.classification.extra = "secret-test-key";
+  body.answers.classification.probabilities.extra = "secret-test-key";
+  body.model = "jev-secret-test-key";
+  body.usage.debug = "secret-test-key";
+  const result = await classify(
+    async () => Response.json(body),
+    [fragments[0]],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /secret-test-key|authorization|private echoed text/,
+  );
+  assert.equal(result.assessments[0].response.model, "jev-[redacted]");
+  assert.equal(
+    result.assessments[0].response.answers.classification.extra,
+    undefined,
+  );
+  assert.deepEqual(result.assessments[0].response.usage, {
+    input_tokens: 123,
+    output_tokens: 0,
+  });
 });
 
 test("the actual per-excerpt deadline aborts slow inference and continues the run", async () => {
@@ -421,6 +463,42 @@ test("transcript endpoint validates ranges and budgets and rejects disabled Jev"
   assert.equal(calls, 0);
   const disabled = await httpFixture(t, loadConfig({}, {}));
   assert.equal((await disabled.post({ fragments })).status, 503);
+});
+
+test("job inspection API returns persisted per-excerpt responses without expanding the status listing", async (t) => {
+  const { store, url } = await httpFixture(t);
+  const classified = await classify(
+    async () => Response.json(answer()),
+    [fragments[0]],
+  );
+  const { job } = store.enqueue({
+    requestKey: "inspection",
+    episodeId: "inspection",
+    title: "Inspection episode",
+    enclosureUrl: "https://example.invalid/audio.mp3",
+  });
+  store.finish(job.id, {
+    durationMs: 90000,
+    fragments,
+    segments: classified.segments,
+    diagnostics: { classifierAssessments: classified.assessments },
+  });
+  const inspected = await (await fetch(`${url}/jobs/${job.id}`)).json();
+  assert.deepEqual(
+    inspected.job.result.diagnostics.classifierAssessments[0].response,
+    answer(),
+  );
+  assert.equal(inspected.job.result.fragments[0].text, fragments[0].text);
+  const status = await (await fetch(`${url}/status`)).json();
+  assert.equal(status.jobs[0].result, undefined);
+  assert.doesNotMatch(JSON.stringify(inspected), /secret-test-key/);
+  const page = await fetch(url.replace(/api\/podcasts$/, ""));
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /id="timeline"/);
+  assert.match(
+    page.headers.get("content-security-policy"),
+    /script-src 'self'/,
+  );
 });
 
 test("transcript endpoint returns a failure status for unavailable inference", async (t) => {

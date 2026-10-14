@@ -125,6 +125,15 @@ stop additional requests for that classification run. No alternate provider is u
 
 The dashboard offers:
 
+- **Episode explorer:** choose **Inspect** for a job to see sampled coverage,
+  excerpt decisions and saved advert/promotion ranges on a clickable timeline.
+  Search transcripts, filter suspected ads, editorial speech, uncertainty or failed
+  requests, and zoom around the selected excerpt. The detail pane links the exact
+  transcript boundaries to Jev confidence, probabilities, validated response fields,
+  elapsed time and request count. Failed/skipped requests show safe provider details
+  where available; phrase-rule markers retain their source and evidence. Dashed Jev
+  candidates did not meet that job's confidence threshold. Unsampled audio has no
+  verdict. Automatic refresh preserves the selection and filters.
 - **Test an episode:** submit an audio URL, sponsor phrases, guidance, sensitivity
   and edge focus; inspect the queued job's full request, result and logs.
 - **Test Jev with a transcript:** paste text, times, optional episode context and
@@ -163,7 +172,15 @@ If the rejection persists, provide DigitalOcean support the error and request ID
 
 ### Stored data and tests
 
-Transcript excerpts and classification assessments expire after seven days. Compact
+New assessments retain only the validated response's model, classification choice,
+confidence, probabilities and supported token counts. Arbitrary provider response
+fields are omitted. Earlier jobs still show their retained decisions and explicitly
+report when response fields were not recorded. Failed requests are distinct from
+successful uncertain decisions. Full requests, results and logs are expandable
+under the explorer, including the operator guidance captured for that job.
+
+Transcript excerpts and classification assessments, including per-excerpt response
+fields and provider error details, expire after seven days. Compact
 jobs, input metadata, fingerprints and markers remain. Temporary audio/PCM files
 are removed after normal success/error; abrupt termination can leave cache files.
 Clear those only while stopped. Logs record stages/errors rather than transcript
