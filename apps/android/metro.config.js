@@ -15,4 +15,17 @@ config.resolver.sourceExts = [
   "mts",
 ];
 
+// Contracts use Node ESM .js specifiers for their emitted output. Metro consumes
+// their TypeScript source, so resolve those relative imports without the suffix.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const source = context.originModulePath.replace(/\\/g, "/");
+  const target =
+    source.includes("/packages/contracts/src/") &&
+    moduleName.startsWith(".") &&
+    moduleName.endsWith(".js")
+      ? moduleName.slice(0, -3)
+      : moduleName;
+  return context.resolveRequest(context, target, platform);
+};
+
 module.exports = config;

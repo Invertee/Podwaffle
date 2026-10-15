@@ -48,7 +48,9 @@ export function createProfileRouter(
     requireScope("devices:write"),
     (request, response, next) => {
       try {
-        const name = apiKeyName(request.body?.name);
+        const name = apiKeyName(
+          (request.body as { name?: unknown } | undefined)?.name,
+        );
         const created = createApiKey(
           database.db,
           request.auth!.profile.id,
@@ -69,11 +71,7 @@ export function createProfileRouter(
         const apiKeyId = request.params.apiKeyId;
         if (
           typeof apiKeyId !== "string" ||
-          !revokeProfileApiKey(
-            database.db,
-            request.auth!.profile.id,
-            apiKeyId,
-          )
+          !revokeProfileApiKey(database.db, request.auth!.profile.id, apiKeyId)
         ) {
           throw new ApiError(404, "NOT_FOUND", "API key was not found");
         }
@@ -95,7 +93,11 @@ export function createProfileRouter(
         (db) => {
           const current = getProfile(db, profile.id);
           if (!current) {
-            throw new ApiError(404, "PROFILE_NOT_FOUND", "Profile was not found");
+            throw new ApiError(
+              404,
+              "PROFILE_NOT_FOUND",
+              "Profile was not found",
+            );
           }
           if (
             input.expectedRevision !== undefined &&

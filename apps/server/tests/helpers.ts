@@ -3,16 +3,16 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { AddressInfo } from "node:net";
 import type supertest from "supertest";
-import { configForTest } from "../src/config.js";
+import { configForTest, type AppConfig } from "../src/config.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 
-export async function testRuntime(): Promise<{
+export async function testRuntime(overrides: Partial<AppConfig> = {}): Promise<{
   runtime: Runtime;
   dataDir: string;
   baseUrl: string;
 }> {
   const dataDir = await mkdtemp(resolve(tmpdir(), "podwaffle-test-"));
-  const runtime = await createRuntime(configForTest(dataDir));
+  const runtime = await createRuntime(configForTest(dataDir, overrides));
   await new Promise<void>((done) =>
     runtime.server.listen(0, "127.0.0.1", () => done()),
   );

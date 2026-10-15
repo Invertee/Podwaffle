@@ -330,7 +330,7 @@ class PodwaffleMediaService : MediaSessionService() {
                         IllegalStateException("No saved playback is available"),
                     )
                 }
-                localItems = media.map { it.toMediaItem(useDownload = true) }
+                localItems = media.map { (downloadStore?.enrich(it) ?: it.copy(localDownloadPath = null)).toMediaItem(useDownload = true) }
                 remoteItems = media.map { it.toMediaItem(useDownload = false) }
                 val savedId = playbackPreferences.getString("mediaId", null)
                 val savedIndex = playbackPreferences.getInt("index", 0)
@@ -465,6 +465,22 @@ class PodwaffleMediaService : MediaSessionService() {
 
             override fun onPlayerError(error: PlaybackException) {
                 if (activeOwner() == null) return
+                val player = activePlayer
+                val media = EpisodeMedia.fromMediaItem(player?.currentMediaItem)
+                if (player != null && player === localPlayer && media?.analysedUrl != null) {
+                    val fallback = AdSkipping.publisherFallback(media) ?: return
+                    val index = player.currentMediaItemIndex
+                    val position = player.currentPosition.coerceAtLeast(0L)
+                    val resume = player.playWhenReady
+                    val item = fallback.toMediaItem()
+                    localItems = localItems.mapIndexed { i, previous -> if (i == index) item else previous }
+                    player.replaceMediaItem(index, item)
+                    player.seekTo(index, position)
+                    player.prepare()
+                    player.playWhenReady = resume
+                    notifyStateChanged()
+                    return
+                }
                 val message = error.message ?: "Playback error"
                 emitError(error.errorCodeName, message)
                 notifyStateChanged(error.errorCodeName to message)
@@ -591,7 +607,7 @@ class PodwaffleMediaService : MediaSessionService() {
                 val episodeId = payload["episodeId"] as? String
                 val localPath = payload["localPath"] as? String
                 if (episodeId != null && localPath != null) {
-                    promoteDownloadedQueueItem(episodeId, localPath)
+                    promoteDownloadedQueueItem(episodeId)
                 }
             }
             eventEmitter?.invoke(name, payload)
@@ -1293,10 +1309,7 @@ class PodwaffleMediaService : MediaSessionService() {
         }
 
         currentMedia?.let { media ->
-            val localMedia = media.withDownloadPath(
-                downloadStore?.completedPath(media.episodeId)
-                    ?: media.localDownloadPath,
-            )
+            val localMedia = downloadStore?.enrich(media) ?: media.copy(localDownloadPath = null)
             localItems = upsertQueueItem(
                 localItems,
                 localMedia.toMediaItem(useDownload = true),
@@ -1629,13 +1642,11 @@ class PodwaffleMediaService : MediaSessionService() {
 
     private fun promoteDownloadedQueueItem(
         episodeId: String,
-        localPath: String,
     ) {
         val index = localItems.indexOfFirst { it.mediaId == episodeId }
         if (index < 0) return
-        val media = EpisodeMedia.fromMediaItem(localItems[index])
-            ?.withDownloadPath(localPath)
-            ?: return
+        val original = EpisodeMedia.fromMediaItem(localItems[index]) ?: return
+        val media = downloadStore?.enrich(original) ?: original.copy(localDownloadPath = null)
         val updated = media.toMediaItem(useDownload = true)
         localItems = localItems.toMutableList().also { it[index] = updated }
         val local = localPlayer
@@ -1671,6 +1682,13 @@ class PodwaffleMediaService : MediaSessionService() {
                     player != null &&
                     (player.isPlaying || player.playbackState == Player.STATE_BUFFERING)
                 ) {
+                    if (player === localPlayer && player.isPlaying && NativeConfigurationStore.current?.autoSkipAds == true) {
+                        val current = EpisodeMedia.fromMediaItem(player.currentMediaItem)
+                        if (current?.analysisSha256 != null) {
+                            val duration = player.duration.takeIf { it > 0L } ?: current.durationMs ?: 0L
+                            AdSkipping.target(player.currentPosition, duration, AdSkipping.parse(current.adSegments))?.let(player::seekTo)
+                        }
+                    }
                     notifyPositionChanged()
                     if (System.currentTimeMillis() - lastPersistAt >= 10_000L) {
                         persistPlayback()
@@ -1824,10 +1842,7 @@ class PodwaffleMediaService : MediaSessionService() {
             }
             if (media.isEmpty()) return
             val restoredMedia = media.map { item ->
-                item.withDownloadPath(
-                    downloadStore?.completedPath(item.episodeId)
-                        ?: item.localDownloadPath,
-                )
+                downloadStore?.enrich(item) ?: item.copy(localDownloadPath = null)
             }
             localItems = restoredMedia.map { it.toMediaItem(useDownload = true) }
             remoteItems = restoredMedia.map { it.toMediaItem(useDownload = false) }

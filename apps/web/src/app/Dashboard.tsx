@@ -19,7 +19,8 @@ import {
   PodcastAnalysisSettings,
 } from "./EpisodeAnalysis";
 
-type Page = "library" | "discover" | "progress" | "history" | "profile";
+type Page =
+  "library" | "discover" | "progress" | "history" | "profile" | "analysis";
 
 function EpisodeList({
   episodes,
@@ -354,6 +355,7 @@ export function Dashboard({ session }: { session: Session }) {
               ["progress", "In progress", "progress"],
               ["discover", "Discover", "discover"],
               ["history", "History", "history"],
+              ["analysis", "Ad detection", "progress"],
               ["profile", "Profile", "profile"],
             ] as const
           ).map(([id, label, icon]) => (
@@ -395,6 +397,19 @@ export function Dashboard({ session }: { session: Session }) {
             </span>
           </div>
         </header>
+
+        {page === "analysis" && (
+          <iframe
+            title="Ad detection management"
+            src="/analysis-ui/"
+            style={{
+              width: "100%",
+              height: "85vh",
+              border: 0,
+              borderRadius: 16,
+            }}
+          />
+        )}
 
         {page === "library" && !selected && (
           <section>

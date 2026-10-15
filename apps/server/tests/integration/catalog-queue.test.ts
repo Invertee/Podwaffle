@@ -149,7 +149,8 @@ describe("podcast catalog, episode state, and queue", () => {
       .post(`/api/v1/episodes/${episodes[0]!.id}/progress`)
       .send({
         ...command(samRevision),
-        positionMs: episodes[0]!.durationMs * 0.98,
+        // Stay below the existing 97% completion threshold.
+        positionMs: episodes[0]!.durationMs * 0.96,
         durationMs: episodes[0]!.durationMs,
       })
       .expect(200);

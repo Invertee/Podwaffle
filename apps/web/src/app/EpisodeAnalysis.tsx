@@ -70,13 +70,13 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
           <>
             {!settings.data?.configured && (
               <p className="analysis-notice">
-                Set <code>analysis_server_url</code> in the server options to
-                connect your local analyser.
+                Enable analysis in the server options.
               </p>
             )}
             <p>
               Analyse newly discovered episodes for this profile. English only.
-              All seeking is manual while detection is being tested.
+              Checked recordings are retained and automatically downloaded to
+              Android on Wi-Fi.
             </p>
             <label>
               <input
@@ -87,7 +87,7 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
                   editSettings({ enabled: event.target.checked })
                 }
               />{" "}
-              Analyse new episodes
+              Analyse and download new episodes
             </label>
             <label className="analysis-field">
               Sponsor names and phrases (one per line, up to 50)
@@ -272,8 +272,9 @@ function EpisodeAnalysisModal({
       </p>
       <h3>Chapters & suggested adverts</h3>
       <p className="analysis-notice">
-        Experimental · No automatic skipping. Suggested times may differ from
-        the version you hear, especially with dynamically inserted adverts.
+        Suggested regions apply to the checked recording. Android can skip
+        adverts when enabled in Profile; publisher fallback plays without
+        skipping.
       </p>
       {analysis.isLoading && <p>Loading analysis…</p>}
       {analysis.error && <p role="alert">{analysis.error.message}</p>}
@@ -358,7 +359,7 @@ function EpisodeAnalysisModal({
         <summary>Analysis diagnostics & testing tools</summary>
         <p>
           Run an analysis using the saved podcast detection settings. This
-          downloads and transcribes audio on your local analyser. When Jev is
+          downloads and transcribes audio on your Podwaffle server. When Jev is
           selected there, transcript excerpts, episode context and detection
           guidance are sent to DigitalOcean for classification.
         </p>
@@ -384,10 +385,7 @@ function EpisodeAnalysisModal({
           Refresh diagnostics
         </button>
         {!analysis.data?.configured && (
-          <p>
-            Configure <code>analysis_server_url</code> on the Podwaffle server
-            to enable analysis.
-          </p>
+          <p>Enable analysis in the Podwaffle server options.</p>
         )}
         {run.error && <p role="alert">{run.error.message}</p>}
         {job && (
@@ -452,7 +450,7 @@ function EpisodeAnalysisModal({
                 {classifierAssessments.length === 0 && (
                   <p>
                     No per-excerpt decisions were retained. Reanalyse with the
-                    updated sidecar to generate them.
+                    integrated engine to generate them.
                   </p>
                 )}
               </>

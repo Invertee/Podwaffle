@@ -597,6 +597,8 @@ async function analyse(request, config, signal, progress, execute = run) {
         "Phrase-only detection: ranges mark matched speech, not complete advert breaks. Topic chapters require publisher metadata. Jev classifies adverts and promotions only.",
       );
     }
+    if (config.retainAudio)
+      await config.retainAudio(request, input, fingerprint);
     return {
       version: 1,
       language: "en",

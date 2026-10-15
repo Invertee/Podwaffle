@@ -117,9 +117,7 @@ class PodwaffleMediaModule : Module() {
                     }
                 }
                 val enriched = snapshot.items.map { media ->
-                    media.withDownloadPath(
-                        store.completedPath(media.episodeId) ?: media.localDownloadPath,
-                    )
+                    store.enrich(media)
                 }
                 service.setQueue(
                     local = enriched.map { it.toMediaItem(useDownload = true) },
@@ -133,10 +131,7 @@ class PodwaffleMediaModule : Module() {
         AsyncFunction("playEpisode") { input: Map<String, Any?>, startPositionMs: Long ->
             val media = EpisodeMedia.fromMap(input)
             withServiceOnMain { service ->
-                val enriched = media.withDownloadPath(
-                    service.getDownloadStore().completedPath(media.episodeId)
-                        ?: media.localDownloadPath,
-                )
+                val enriched = service.getDownloadStore().enrich(media)
                 service.playEpisode(
                     local = enriched.toMediaItem(useDownload = true),
                     remote = enriched.toMediaItem(useDownload = false),
@@ -194,10 +189,7 @@ class PodwaffleMediaModule : Module() {
         AsyncFunction("startCast") { input: Map<String, Any?>, startPositionMs: Long, autoplay: Boolean ->
             val media = EpisodeMedia.fromMap(input)
             withServiceOnMain { service ->
-                val enriched = media.withDownloadPath(
-                    service.getDownloadStore().completedPath(media.episodeId)
-                        ?: media.localDownloadPath,
-                )
+                val enriched = service.getDownloadStore().enrich(media)
                 service.playEpisode(
                     local = enriched.toMediaItem(useDownload = true),
                     remote = enriched.toMediaItem(useDownload = false),

@@ -129,6 +129,7 @@ test("optional context is bounded and old request bodies still work", () => {
     /podcastTitle/,
   );
   const { episodeDescription, ...legacy } = request;
+  void episodeDescription;
   assert.equal(validateRequest(legacy).episodeDescription, undefined);
 });
 

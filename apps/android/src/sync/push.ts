@@ -21,6 +21,7 @@ import {
   type PushDiagnosticLevel,
 } from "./pushDiagnostics";
 import { syncRuntime } from "./runtime";
+import { downloadAnalysedEpisodes } from "./analysisDownloads";
 
 const PUSH_WAKE_TASK = "podwaffle.push-wake.v1";
 const MESSAGE_CHANNEL_ID = "podwaffle-messages";
@@ -48,9 +49,7 @@ function pushEnvelopeSummary(value: unknown, data: PushData | null) {
       ? (value as Record<string, unknown>)
       : null;
   const nested =
-    outer?.data &&
-    typeof outer.data === "object" &&
-    !Array.isArray(outer.data)
+    outer?.data && typeof outer.data === "object" && !Array.isArray(outer.data)
       ? (outer.data as Record<string, unknown>)
       : null;
   return {
@@ -128,7 +127,9 @@ async function displayEncryptedNotification(data: PushData): Promise<void> {
       result.shown ? "info" : "error",
     );
     if (!result.shown) {
-      throw new Error(result.reason ?? "Android did not display the notification");
+      throw new Error(
+        result.reason ?? "Android did not display the notification",
+      );
     }
   } catch (error) {
     displayedMessageIds.delete(identifier);
@@ -197,32 +198,42 @@ async function synchronizeFromPush(): Promise<void> {
   // expensive full-profile refresh. This keeps background controls responsive.
   await syncRuntime.processPendingCommands();
   await current.refresh();
+  await downloadAnalysedEpisodes().catch((error: unknown) =>
+    logPush(
+      "push.analysis_downloads.failed",
+      pushErrorMessage(error),
+      "warning",
+    ),
+  );
   await playbackController.flushPendingPlayback();
 }
 
-TaskManager.defineTask(PUSH_WAKE_TASK, async ({ data, error, executionInfo }) => {
-  await logPush("push.background.task_started", {
-    taskName: executionInfo?.taskName ?? PUSH_WAKE_TASK,
-    hasError: Boolean(error),
-  });
-  if (error) {
-    await logPush(
-      "push.background.task_error",
-      pushErrorMessage(error),
-      "error",
-    );
-    return;
-  }
-  try {
-    await handlePush(data, "background");
-  } catch (taskError) {
-    await logPush(
-      "push.background.processing_failed",
-      pushErrorMessage(taskError),
-      "error",
-    );
-  }
-});
+TaskManager.defineTask(
+  PUSH_WAKE_TASK,
+  async ({ data, error, executionInfo }) => {
+    await logPush("push.background.task_started", {
+      taskName: executionInfo?.taskName ?? PUSH_WAKE_TASK,
+      hasError: Boolean(error),
+    });
+    if (error) {
+      await logPush(
+        "push.background.task_error",
+        pushErrorMessage(error),
+        "error",
+      );
+      return;
+    }
+    try {
+      await handlePush(data, "background");
+    } catch (taskError) {
+      await logPush(
+        "push.background.processing_failed",
+        pushErrorMessage(taskError),
+        "error",
+      );
+    }
+  },
+);
 
 async function ensureChannels(): Promise<void> {
   await Notifications.setNotificationChannelAsync("podwaffle-sync", {
@@ -312,9 +323,8 @@ export async function registerPushWake(): Promise<() => void> {
       permission.granted && joinCodePresent ? "info" : "warning",
     );
 
-    const taskRegistered = await TaskManager.isTaskRegisteredAsync(
-      PUSH_WAKE_TASK,
-    );
+    const taskRegistered =
+      await TaskManager.isTaskRegisteredAsync(PUSH_WAKE_TASK);
     if (!taskRegistered) {
       await Notifications.registerTaskAsync(PUSH_WAKE_TASK);
     }

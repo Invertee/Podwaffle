@@ -220,9 +220,10 @@ test("local HTTP API exposes independent job status and diagnostic logs", async 
     "/api/podcasts",
     podcastRouter(store, {}, { info() {}, tail: () => ["podcast-only log"] }),
   );
-  app.use((error, _req, res, _next) =>
-    res.status(error.statusCode || 500).json({ error: error.message }),
-  );
+  app.use((error, _req, res, next) => {
+    void next;
+    res.status(error.statusCode || 500).json({ error: error.message });
+  });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -249,7 +250,11 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const model = path.join(directory, "tiny.en.bin");
   fs.writeFileSync(model, "test model placeholder");
+  const retained = [];
   const config = {
+    retainAudio: async (_request, input, fingerprint) => {
+      retained.push({ bytes: fs.readFileSync(input), fingerprint });
+    },
     podcastWhisperModel: model,
     podcastCacheDir: path.join(directory, "cache"),
     podcastMaxBytes: 1000,
@@ -303,6 +308,9 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
     createHash("sha256").update(audio).digest("hex"),
   );
   assert.equal(result.segments[0].source, "embedded");
+  assert.equal(retained.length, 1);
+  assert.deepEqual(retained[0].bytes, audio);
+  assert.deepEqual(retained[0].fingerprint, result.fingerprint);
   assert.ok(result.fragments.some((f) => f.startMs >= 61000));
   assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
   assert.equal(fs.readFileSync(model, "utf8"), "test model placeholder");

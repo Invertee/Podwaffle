@@ -13,6 +13,8 @@ import { PushService } from "./push/service.js";
 import { OperationalStatusReporter } from "./operational-status.js";
 import { CastProgressWatchdog } from "./playback/cast-watchdog.js";
 import { AnalysisDispatcher } from "./analysis/service.js";
+import { IntegratedAnalysis } from "./analysis/engine.js";
+import { EpisodeMediaCache } from "./analysis/media.js";
 
 export interface Runtime {
   database: PodwaffleDatabase;
@@ -23,6 +25,8 @@ export interface Runtime {
   push: PushService;
   operationalStatus: OperationalStatusReporter;
   server: Server;
+  analysis: IntegratedAnalysis;
+  mediaCache: EpisodeMediaCache;
   close: () => Promise<void>;
 }
 
@@ -55,7 +59,15 @@ export async function createRuntime(
   );
   webSockets.setConnectionObserver(() => operationalStatus.report());
   const feedScheduler = new FeedScheduler(database, sync, config);
-  const analysisDispatcher = new AnalysisDispatcher(database, sync, config);
+  const mediaCache = new EpisodeMediaCache(database.db, config);
+  await mediaCache.recover();
+  const analysis = new IntegratedAnalysis(config, mediaCache);
+  const analysisDispatcher = new AnalysisDispatcher(
+    database,
+    sync,
+    config,
+    analysis,
+  );
   const castWatchdog = new CastProgressWatchdog(
     database,
     config.cast_progress_watchdog,
@@ -69,6 +81,8 @@ export async function createRuntime(
     push,
     webSockets,
     operationalStatus,
+    analysis,
+    mediaCache,
     ...(options.webDistPath === undefined
       ? {}
       : { webDistPath: options.webDistPath }),
@@ -91,10 +105,13 @@ export async function createRuntime(
     castWatchdog,
     push,
     server,
+    analysis,
+    mediaCache,
     close: async () => {
       castWatchdog.stop();
       feedScheduler.stop();
       await analysisDispatcher.stop();
+      await analysis.stop();
       webSockets.shutdown();
       await push.close();
       if (server.listening) {

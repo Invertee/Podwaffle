@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -18,6 +19,7 @@ data class NativeConfiguration(
     val hideGroupSpeakers: Boolean,
     val downloadRetentionDays: Int,
     val maxDownloadStorageBytes: Long,
+    val autoSkipAds: Boolean = false,
     val revision: Long = 0L
 ) {
     companion object {
@@ -53,6 +55,7 @@ data class NativeConfiguration(
                 maxDownloadStorageBytes =
                     ((input["maxDownloadStorageBytes"] as? Number)?.toLong() ?: 2_000_000_000L)
                         .coerceAtLeast(50_000_000L),
+                autoSkipAds = input["autoSkipAds"] as? Boolean ?: false,
                 revision = (input["revision"] as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
             )
         }
@@ -75,7 +78,10 @@ data class EpisodeMedia(
     val artworkUrl: String?,
     val durationMs: Long?,
     val queueItemId: String?,
-    val resumePositionMs: Long = 0L
+    val resumePositionMs: Long = 0L,
+    val analysedUrl: String? = null,
+    val analysisSha256: String? = null,
+    val adSegments: String = "[]"
 ) {
     companion object {
         fun fromMap(input: Map<String, Any?>): EpisodeMedia {
@@ -96,6 +102,10 @@ data class EpisodeMedia(
                     ?.takeIf { it.isNotBlank() }
                     ?: "Podcast",
                 enclosureUrl = enclosureUrl,
+                analysedUrl = (input["analysedUrl"] as? String)?.takeIf { it.isNotBlank() },
+                analysisSha256 = (input["analysisSha256"] as? String)?.takeIf { it.matches(Regex("[a-f0-9]{64}")) },
+                adSegments = (input["adSegments"] as? List<*>)?.takeIf { it.isNotEmpty() }
+                    ?.let { JSONArray(it).toString() } ?: "[]",
                 enclosureType = (input["enclosureType"] as? String)
                     ?.takeIf { it.isNotBlank() }
                     ?: "audio/mpeg",
@@ -116,6 +126,9 @@ data class EpisodeMedia(
                 title = json.optString("title", "Episode"),
                 podcastTitle = json.optString("podcastTitle", "Podcast"),
                 enclosureUrl = json.optString("enclosureUrl"),
+                analysedUrl = json.optNullableString("analysedUrl"),
+                analysisSha256 = json.optNullableString("analysisSha256"),
+                adSegments = json.optJSONArray("adSegments")?.toString() ?: "[]",
                 enclosureType = json.optString("enclosureType", "audio/mpeg"),
                 localDownloadPath = json.optNullableString("localDownloadPath"),
                 artworkUrl = json.optNullableString("artworkUrl"),
@@ -138,6 +151,9 @@ data class EpisodeMedia(
                     ?: metadata.albumTitle?.toString()
                     ?: "Podcast",
                 enclosureUrl = extras?.getString("enclosureUrl").orEmpty(),
+                analysedUrl = extras?.getString("analysedUrl"),
+                analysisSha256 = extras?.getString("analysisSha256"),
+                adSegments = extras?.getString("adSegments") ?: "[]",
                 enclosureType = extras?.getString("enclosureType") ?: "audio/mpeg",
                 localDownloadPath = extras?.getString("localDownloadPath"),
                 artworkUrl = metadata.artworkUri?.toString(),
@@ -156,12 +172,17 @@ data class EpisodeMedia(
         val localPath = localDownloadPath
             ?.takeIf { useDownload }
             ?.takeIf { File(it).isFile }
-        val uri = if (localPath != null) Uri.fromFile(File(localPath)) else Uri.parse(enclosureUrl)
+        val uri = if (localPath != null) Uri.fromFile(File(localPath)) else Uri.parse(if (useDownload) analysedUrl ?: enclosureUrl else enclosureUrl)
         val extras = Bundle().apply {
             putString("podcastId", podcastId)
             queueItemId?.let { putString("queueItemId", it) }
             putString("source", if (localPath == null) "stream" else "download")
             putString("enclosureUrl", enclosureUrl)
+            if (useDownload && (localPath != null || analysedUrl != null)) {
+                putString("analysedUrl", analysedUrl)
+                putString("analysisSha256", analysisSha256)
+                putString("adSegments", adSegments)
+            }
             putString("enclosureType", enclosureType)
             localPath?.let { putString("localDownloadPath", it) }
             durationMs?.let { putLong("durationMs", it) }
@@ -192,6 +213,9 @@ data class EpisodeMedia(
         "title" to title,
         "podcastTitle" to podcastTitle,
         "enclosureUrl" to enclosureUrl,
+        "analysedUrl" to analysedUrl,
+        "analysisSha256" to analysisSha256,
+        "adSegments" to AdSkipping.parse(adSegments).map { mapOf("startMs" to it.startMs, "endMs" to it.endMs) },
         "enclosureType" to enclosureType,
         "localDownloadPath" to localDownloadPath,
         "artworkUrl" to artworkUrl,
@@ -206,6 +230,9 @@ data class EpisodeMedia(
         put("title", title)
         put("podcastTitle", podcastTitle)
         put("enclosureUrl", enclosureUrl)
+        put("analysedUrl", analysedUrl ?: JSONObject.NULL)
+        put("analysisSha256", analysisSha256 ?: JSONObject.NULL)
+        put("adSegments", JSONArray(adSegments))
         put("enclosureType", enclosureType)
         put("localDownloadPath", localDownloadPath ?: JSONObject.NULL)
         put("artworkUrl", artworkUrl ?: JSONObject.NULL)

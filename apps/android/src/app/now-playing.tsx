@@ -52,11 +52,13 @@ function SeekBar({
   bufferedPositionMs,
   durationMs,
   onSeek,
+  adSegments = [],
 }: {
   positionMs: number;
   bufferedPositionMs: number;
   durationMs: number | null;
   onSeek: (positionMs: number) => void;
+  adSegments?: Array<{ startMs: number; endMs: number }>;
 }) {
   const [width, setWidth] = useState(1);
   const duration = durationMs ?? 0;
@@ -87,6 +89,20 @@ function SeekBar({
       <View style={styles.seekTrack}>
         <View style={[styles.buffered, { width: `${buffered * 100}%` }]} />
         <View style={[styles.played, { width: `${progress * 100}%` }]} />
+        {duration > 0 &&
+          adSegments.map((segment, index) => (
+            <View
+              key={index}
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                height: "100%",
+                backgroundColor: colors.warning,
+                left: `${Math.min(100, (segment.startMs / duration) * 100)}%`,
+                width: `${(Math.max(0, Math.min(duration, segment.endMs) - segment.startMs) / duration) * 100}%`,
+              }}
+            />
+          ))}
         <View style={[styles.thumb, { left: `${progress * 100}%` }]} />
       </View>
     </Pressable>
@@ -293,8 +309,14 @@ export default function NowPlayingScreen() {
               positionMs={media?.positionMs ?? 0}
               bufferedPositionMs={media?.bufferedPositionMs ?? 0}
               durationMs={media?.durationMs ?? null}
+              adSegments={media?.analysisSha256 ? media.adSegments : []}
               onSeek={(position) => void playbackController.seekTo(position)}
             />
+            {Boolean(media?.analysisSha256 && media.adSegments?.length) && (
+              <Text style={styles.timestamp}>
+                Amber sections indicate adverts
+              </Text>
+            )}
             <View style={styles.timestamps}>
               <Text style={styles.timestamp}>
                 {formatMs(media?.positionMs ?? 0)}

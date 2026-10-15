@@ -61,12 +61,15 @@ async function providerError(response, config, request, excerpt) {
     ]) {
       if (secret) text = text.replaceAll(secret, "[redacted]");
     }
-    return text
-      .replace(/Bearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
-      .replace(/\b(?:dop_v1_|doo_v1_|sk-)[A-Za-z0-9_-]+/g, "[redacted]")
-      .replace(/[\u0000-\u001f\u007f]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    return (
+      text
+        .replace(/Bearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
+        .replace(/\b(?:dop_v1_|doo_v1_|sk-)[A-Za-z0-9_-]+/g, "[redacted]")
+        // eslint-disable-next-line no-control-regex -- Strip provider control characters from diagnostics.
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
   };
   let message = redact(
     body?.message ??

@@ -19,6 +19,8 @@ export interface NativeCastSessionSummary {
 }
 
 export interface NativePlaybackState {
+  analysisSha256?: string | null;
+  adSegments?: Array<{ startMs: number; endMs: number }>;
   episodeId: string | null;
   podcastId: string | null;
   title: string | null;
@@ -66,6 +68,9 @@ export interface NativeEpisodeMedia {
   title: string;
   podcastTitle: string;
   enclosureUrl: string;
+  analysedUrl?: string | null;
+  analysisSha256?: string | null;
+  adSegments?: Array<{ startMs: number; endMs: number }>;
   enclosureType?: string | null;
   localDownloadPath: string | null;
   artworkUrl: string | null;
@@ -86,6 +91,9 @@ export interface NativeDownload {
   podcastTitle: string;
   artworkUrl: string | null;
   enclosureUrl: string;
+  analysedUrl?: string | null;
+  analysisSha256?: string | null;
+  adSegments?: Array<{ startMs: number; endMs: number }>;
   enclosureType: string | null;
   durationMs: number | null;
   localPath: string | null;
@@ -111,6 +119,7 @@ export interface PodwaffleMediaConfig {
   skipBackSeconds: number;
   skipForwardSeconds: number;
   hideGroupSpeakers: boolean;
+  autoSkipAds?: boolean;
   downloadRetentionDays?: number;
   maxDownloadStorageBytes?: number;
 }

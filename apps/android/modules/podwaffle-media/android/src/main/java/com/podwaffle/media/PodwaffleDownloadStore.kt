@@ -7,6 +7,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.database.Cursor
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import java.security.MessageDigest
+import java.util.concurrent.Executors
 import android.os.Build
 import android.os.Environment
 import org.json.JSONArray
@@ -21,6 +25,10 @@ class PodwaffleDownloadStore(
     private val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
     private val entries = linkedMapOf<String, Entry>()
+    private val verifier = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val verifying = mutableSetOf<String>()
+    private val verified = mutableMapOf<String, Boolean>()
 
     private val completionReceiver = object : BroadcastReceiver() {
         override fun onReceive(receiverContext: Context?, intent: Intent?) {
@@ -51,21 +59,29 @@ class PodwaffleDownloadStore(
         val key = entryKey(profileId, episodeId)
         val enclosureUrl = input["enclosureUrl"] as? String
             ?: throw IllegalArgumentException("enclosureUrl is required")
+        val expectedSha = input["analysisSha256"] as? String
+        val retainedReason = if (entries[key]?.reason == "manual") "manual" else reason
         entries[key]?.let { existing ->
             val state = mapEntry(existing)
             val promoteToManual = reason != "automatic" && existing.reason == "automatic" &&
                 state["state"] != "completed"
             val migrateAutomatic = existing.reason == "automatic" && existing.allowedOverMetered &&
                 state["state"] != "completed"
-            if (state["state"] != "failed" && !promoteToManual && !migrateAutomatic) return state
+            if (state["state"] != "failed" && !promoteToManual && !migrateAutomatic && existing.analysisSha256 == expectedSha) {
+                val updated = existing.copy(adSegments = JSONArray(input["adSegments"] as? List<*> ?: emptyList<Any>()).toString())
+                entries[key] = updated
+                persist()
+                return mapEntry(updated).also { emit(DOWNLOAD_STATE_CHANGED, it) }
+            }
             manager.remove(existing.requestId)
         }
         val extension = extensionFor(
             input["enclosureType"] as? String,
             Uri.parse(enclosureUrl).lastPathSegment,
         )
-        val fileName = "${safeName(profileId)}-${safeName(episodeId)}.$extension"
-        val request = DownloadManager.Request(Uri.parse(enclosureUrl))
+        val fileName = "${safeName(profileId)}-${safeName(episodeId)}-${expectedSha?.take(12) ?: "feed"}.$extension"
+        val analysedUrl = (input["analysedUrl"] as? String)?.takeIf { it.isNotBlank() }
+        val request = DownloadManager.Request(Uri.parse(analysedUrl ?: enclosureUrl))
             .setTitle(input["title"] as? String ?: "Podcast episode")
             .setDescription(input["podcastTitle"] as? String ?: "Podwaffle")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN)
@@ -93,10 +109,13 @@ class PodwaffleDownloadStore(
             podcastTitle = input["podcastTitle"] as? String ?: "Podcast",
             artworkUrl = input["artworkUrl"] as? String,
             enclosureUrl = enclosureUrl,
+            analysedUrl = analysedUrl,
+            analysisSha256 = expectedSha,
+            adSegments = JSONArray(input["adSegments"] as? List<*> ?: emptyList<Any>()).toString(),
             enclosureType = input["enclosureType"] as? String,
             durationMs = (input["durationMs"] as? Number)?.toLong()?.takeIf { it > 0L },
             localPath = localFile.absolutePath,
-            reason = if (reason == "automatic") "automatic" else "manual",
+            reason = if (retainedReason == "automatic") "automatic" else "manual",
             allowedOverMetered = reason != "automatic",
             createdAtMs = System.currentTimeMillis(),
         )
@@ -127,6 +146,9 @@ class PodwaffleDownloadStore(
                 "podcastTitle" to entry.podcastTitle,
                 "artworkUrl" to entry.artworkUrl,
                 "enclosureUrl" to entry.enclosureUrl,
+            "analysedUrl" to entry.analysedUrl,
+            "analysisSha256" to entry.analysisSha256,
+            "adSegments" to AdSkipping.parse(entry.adSegments).map { mapOf("startMs" to it.startMs, "endMs" to it.endMs) },
                 "enclosureType" to entry.enclosureType,
                 "durationMs" to entry.durationMs,
             ),
@@ -136,10 +158,10 @@ class PodwaffleDownloadStore(
 
     fun getDownloads(): List<Map<String, Any?>> {
         val profileId = currentProfileId() ?: return emptyList()
-        return entries.values
+        return entries.values.toList()
             .asSequence()
             .filter { it.profileId == profileId }
-            .map(::mapEntry)
+            .map { entry -> fallbackIfNeeded(entry, mapEntry(entry)) }
             .sortedByDescending { item ->
                 (item["downloadedAt"] as? String) ?: ""
             }
@@ -153,6 +175,12 @@ class PodwaffleDownloadStore(
         return if (mapped["state"] == "completed" && File(entry.localPath).exists()) {
             entry.localPath
         } else null
+    }
+
+    fun enrich(media: EpisodeMedia): EpisodeMedia {
+        val entry = entries[entryKey(currentProfileId() ?: return media, media.episodeId)] ?: return media
+        val path = completedPath(media.episodeId) ?: return media.copy(localDownloadPath = null)
+        return media.copy(localDownloadPath = path, analysedUrl = entry.analysedUrl, analysisSha256 = entry.analysisSha256, adSegments = entry.adSegments)
     }
 
     fun maintenance(
@@ -239,6 +267,7 @@ class PodwaffleDownloadStore(
     }
 
     fun release() {
+        verifier.shutdownNow()
         try {
             context.unregisterReceiver(completionReceiver)
         } catch (_: IllegalArgumentException) {
@@ -247,7 +276,21 @@ class PodwaffleDownloadStore(
     }
 
     private fun emitState(entry: Entry) {
-        emit(DOWNLOAD_STATE_CHANGED, mapEntry(entry))
+        emit(DOWNLOAD_STATE_CHANGED, fallbackIfNeeded(entry, mapEntry(entry)))
+    }
+
+    private fun fallbackIfNeeded(entry: Entry, state: Map<String, Any?>): Map<String, Any?> {
+        if (state["state"] != "failed" || entry.analysedUrl == null || entry.profileId != currentProfileId()) return state
+        // Keep mapping and checksum checks free of entry replacement. A completed
+        // broadcast or catch-up may retry the publisher once, without markers.
+        entries.remove(entryKey(entry.profileId, entry.episodeId))
+        manager.remove(entry.requestId)
+        return add(EpisodeMedia(
+            episodeId = entry.episodeId, podcastId = entry.podcastId, title = entry.title,
+            podcastTitle = entry.podcastTitle, enclosureUrl = entry.enclosureUrl,
+            enclosureType = entry.enclosureType ?: "audio/mpeg", localDownloadPath = null,
+            artworkUrl = entry.artworkUrl, durationMs = entry.durationMs, queueItemId = null,
+        ).toMap(), entry.reason)
     }
 
     private fun currentProfileId(): String? = NativeConfigurationStore.current?.profileId
@@ -275,13 +318,38 @@ class PodwaffleDownloadStore(
                 total = progress
             }
         }
-        val state = when (status) {
+        var state = when (status) {
             DownloadManager.STATUS_PENDING -> "queued"
             DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PAUSED -> "downloading"
             DownloadManager.STATUS_SUCCESSFUL -> "completed"
             else -> "failed"
         }
         val file = File(entry.localPath)
+        val verificationKey = "${entry.localPath}:${file.length()}:${file.lastModified()}"
+        if (state == "completed" && entry.analysisSha256 != null) {
+            when (verified[verificationKey]) {
+                true -> Unit
+                false -> { state = "failed"; failure = "Analysed recording checksum mismatch" }
+                null -> {
+                    state = "downloading"
+                    if (verifying.add(verificationKey)) verifier.execute {
+                        val matches = runCatching {
+                            val hash = MessageDigest.getInstance("SHA-256")
+                            file.inputStream().use { stream ->
+                                val buffer = ByteArray(64 * 1024)
+                                while (true) { val count = stream.read(buffer); if (count < 0) break; hash.update(buffer, 0, count) }
+                            }
+                            hash.digest().joinToString("") { "%02x".format(it) } == entry.analysisSha256
+                        }.getOrDefault(false)
+                        mainHandler.post {
+                            verified[verificationKey] = matches
+                            verifying.remove(verificationKey)
+                            if (entries[entryKey(entry.profileId, entry.episodeId)]?.requestId == entry.requestId && entry.profileId == currentProfileId()) emitState(entry)
+                        }
+                    }
+                }
+            }
+        }
         val downloadedAt = if (state == "completed" && file.exists()) {
             Instant.ofEpochMilli(file.lastModified().coerceAtLeast(entry.createdAtMs)).toString()
         } else null
@@ -300,6 +368,9 @@ class PodwaffleDownloadStore(
             "podcastTitle" to entry.podcastTitle,
             "artworkUrl" to entry.artworkUrl,
             "enclosureUrl" to entry.enclosureUrl,
+            "analysedUrl" to entry.analysedUrl,
+            "analysisSha256" to entry.analysisSha256,
+            "adSegments" to AdSkipping.parse(entry.adSegments).map { mapOf("startMs" to it.startMs, "endMs" to it.endMs) },
             "enclosureType" to entry.enclosureType,
             "durationMs" to entry.durationMs,
         )
@@ -320,6 +391,9 @@ class PodwaffleDownloadStore(
                     podcastTitle = item.optString("podcastTitle", "Podcast"),
                     artworkUrl = item.optString("artworkUrl").ifBlank { null },
                     enclosureUrl = item.optString("enclosureUrl"),
+                    analysedUrl = item.optString("analysedUrl").takeIf { it.isNotBlank() },
+                    analysisSha256 = item.optString("analysisSha256").takeIf { it.isNotBlank() },
+                    adSegments = item.optString("adSegments", "[]"),
                     enclosureType = item.optString("enclosureType").ifBlank { null },
                     durationMs = item.optLong("durationMs", 0L).takeIf { it > 0L },
                     localPath = item.getString("localPath"),
@@ -347,6 +421,9 @@ class PodwaffleDownloadStore(
                     .put("podcastTitle", entry.podcastTitle)
                     .put("artworkUrl", entry.artworkUrl ?: "")
                     .put("enclosureUrl", entry.enclosureUrl)
+                    .put("analysedUrl", entry.analysedUrl ?: "")
+                    .put("analysisSha256", entry.analysisSha256 ?: "")
+                    .put("adSegments", entry.adSegments)
                     .put("enclosureType", entry.enclosureType ?: "")
                     .put("durationMs", entry.durationMs ?: JSONObject.NULL)
                     .put("localPath", entry.localPath)
@@ -377,6 +454,9 @@ class PodwaffleDownloadStore(
         val podcastTitle: String,
         val artworkUrl: String?,
         val enclosureUrl: String,
+        val analysedUrl: String? = null,
+        val analysisSha256: String? = null,
+        val adSegments: String = "[]",
         val enclosureType: String?,
         val durationMs: Long?,
         val localPath: String,

@@ -1,3 +1,4 @@
+import type { IntegratedAnalysis } from "../../src/analysis/engine.js";
 import { randomUUID } from "node:crypto";
 import supertest from "supertest";
 import { afterEach, expect, it, vi } from "vitest";
@@ -24,8 +25,8 @@ const feed = (count: number) =>
     `<rss><channel><title>Test</title>${Array.from({ length: count }, (_, i) => `<item><guid>${i}</guid><title>Episode ${i}</title><enclosure url="https://example.com/${i}.mp3" type="audio/mpeg"/><podcast:chapters url="https://example.com/${i}.json"/></item>`).join("")}</channel></rss>`,
   );
 
-async function setup() {
-  const test = await testRuntime();
+async function setup(analysisEnabled = true) {
+  const test = await testRuntime({ analysis_enabled: analysisEnabled });
   runtime = test.runtime;
   const agent = supertest.agent(test.baseUrl);
   const joined = await join(agent);
@@ -120,11 +121,10 @@ it("opt-in queues only newly discovered episodes and isolates subscription setti
   ).toBe(1);
 });
 
-it("retries with a stable request key, imports results, expires snippets and detects enclosure changes", async () => {
+it("retries local work with a stable request key, imports results, expires snippets and detects enclosure changes", async () => {
   const { runtime: rt, profileId, episodeId, config } = await setup();
   const id = enqueueAnalysis(rt.database.db, profileId, episodeId);
   expect(enqueueAnalysis(rt.database.db, profileId, episodeId)).toBe(id);
-  const dispatcher = new AnalysisDispatcher(rt.database, rt.sync, config);
   const remoteId = randomUUID();
   let complete = false;
   const result = {
@@ -184,29 +184,43 @@ it("retries with a stable request key, imports results, expires snippets and det
     },
     transcriptExpired: false,
   };
-  const transport = vi.fn(async (_url: string, options?: RequestInit) => {
-    if (options?.body)
-      expect(JSON.parse(String(options.body)).requestKey).toBe(id);
-    return Response.json({
-      job: {
-        id: remoteId,
-        requestKey: id,
-        status: complete ? "completed" : "queued",
-        stage: complete ? "completed" : "queued",
-        progress: complete ? 100 : 0,
-        error: null,
-        result: complete ? result : null,
-      },
-      logs: [],
-    });
-  });
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Offline")));
+  const baseJob = {
+    id: remoteId,
+    requestKey: id,
+    request: { episodeId },
+    status: "queued",
+    stage: "queued",
+    progress: 0,
+    error: null,
+    result: null,
+  };
+  const engine = {
+    enqueue: vi.fn().mockImplementation(() => {
+      throw new Error("Temporary local failure");
+    }),
+    get: vi.fn(() => ({
+      ...baseJob,
+      status: complete ? "completed" : "queued",
+      result: complete ? result : null,
+    })),
+    logs: () => [],
+    tick: async () => {},
+  };
+  const dispatcher = new AnalysisDispatcher(
+    rt.database,
+    rt.sync,
+    config,
+    engine as unknown as Pick<
+      IntegratedAnalysis,
+      "enqueue" | "get" | "logs" | "tick"
+    >,
+  );
   await dispatcher.tick();
   expect(
     getEpisodeAnalysis(rt.database.db, config, profileId, episodeId).job
       ?.attempts,
   ).toBe(1);
-  vi.stubGlobal("fetch", transport);
+  engine.enqueue.mockImplementation(() => baseJob);
   rt.database.db
     .prepare("UPDATE episode_analysis_jobs SET next_attempt_at='2000-01-01'")
     .run();
@@ -216,7 +230,7 @@ it("retries with a stable request key, imports results, expires snippets and det
     .prepare("UPDATE episode_analysis_jobs SET next_attempt_at='2000-01-01'")
     .run();
   await dispatcher.tick();
-  expect(transport.mock.calls[1]?.[0]).toContain(`/jobs/${remoteId}`);
+  expect(engine.get).toHaveBeenCalledWith(remoteId);
   expect(
     getEpisodeAnalysis(rt.database.db, config, profileId, episodeId).job?.result
       ?.segments,
@@ -295,29 +309,42 @@ it("snapshots bounded plain-text episode and podcast context without changing ac
 });
 
 it("rejects malformed analysis results and unavailable manual analysis with clear errors", async () => {
-  const { runtime: rt, agent, profileId, episodeId, config } = await setup();
+  const {
+    runtime: rt,
+    agent,
+    profileId,
+    episodeId,
+    config,
+  } = await setup(false);
   await agent
     .post(`/api/v1/episodes/${episodeId}/analysis`)
     .send(command())
     .expect(503);
   const id = enqueueAnalysis(rt.database.db, profileId, episodeId);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () =>
-      Response.json({
-        job: {
-          id: randomUUID(),
-          requestKey: id,
-          status: "completed",
-          stage: "completed",
-          progress: 100,
-          error: null,
-          result: { segments: [{ startMs: -1 }] },
-        },
-      }),
-    ),
+  const engine = {
+    enqueue: () => ({
+      id: randomUUID(),
+      requestKey: id,
+      request: { episodeId },
+      status: "completed",
+      stage: "completed",
+      progress: 100,
+      error: null,
+      result: { segments: [{ startMs: -1 }] },
+    }),
+    get: () => null,
+    logs: () => [],
+    tick: async () => {},
+  };
+  const dispatcher = new AnalysisDispatcher(
+    rt.database,
+    rt.sync,
+    config,
+    engine as unknown as Pick<
+      IntegratedAnalysis,
+      "enqueue" | "get" | "logs" | "tick"
+    >,
   );
-  const dispatcher = new AnalysisDispatcher(rt.database, rt.sync, config);
   await dispatcher.tick();
   const job = getEpisodeAnalysis(
     rt.database.db,
@@ -326,6 +353,6 @@ it("rejects malformed analysis results and unavailable manual analysis with clea
     episodeId,
   ).job;
   expect(job?.result).toBeNull();
-  expect(job?.error).toContain("Invalid analyser response");
+  expect(job?.error).toContain("Invalid analysis result");
   await dispatcher.stop();
 });

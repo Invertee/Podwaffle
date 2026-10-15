@@ -24,6 +24,8 @@ import { log } from "./logging.js";
 import { openApiDocument } from "./api/openapi.js";
 import { createCatalogRouter } from "./api/catalog.js";
 import { createAnalysisRouter } from "./analysis/routes.js";
+import { IntegratedAnalysis } from "./analysis/engine.js";
+import type { EpisodeMediaCache } from "./analysis/media.js";
 import { createPlaybackRouter } from "./api/playback.js";
 import { createProfileRouter } from "./api/profile.js";
 import type { PushService } from "./push/service.js";
@@ -44,6 +46,8 @@ export interface AppDependencies {
   push: PushService;
   operationalStatus: OperationalStatusReporter;
   webDistPath?: string;
+  analysis?: IntegratedAnalysis;
+  mediaCache?: EpisodeMediaCache;
 }
 
 function joinCodeMatches(expected: string, supplied: string): boolean {
@@ -75,6 +79,7 @@ export function createApp(dependencies: AppDependencies): Express {
   const { config, database, sync, webSockets, push, operationalStatus } =
     dependencies;
   const app = express();
+  if (dependencies.mediaCache) app.use(dependencies.mediaCache.router());
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
   app.use(express.json({ limit: "32kb" }));
@@ -301,19 +306,22 @@ export function createApp(dependencies: AppDependencies): Express {
     requireScope("notifications:send"),
     async (request, response, next) => {
       try {
+        const notificationBody = request.body as
+          { title?: unknown; message?: unknown } | undefined;
         const requestFields = {
           requestId: request.requestId,
           profileId: request.auth!.profile.id,
           deviceId: request.auth!.device.id,
           titleProvided:
-            typeof request.body?.title === "string" && request.body.title.length > 0,
+            typeof notificationBody?.title === "string" &&
+            notificationBody.title.length > 0,
           titleLength:
-            typeof request.body?.title === "string"
-              ? request.body.title.length
+            typeof notificationBody?.title === "string"
+              ? notificationBody.title.length
               : undefined,
           messageLength:
-            typeof request.body?.message === "string"
-              ? request.body.message.length
+            typeof notificationBody?.message === "string"
+              ? notificationBody.message.length
               : undefined,
         };
         log("info", "push.notification.received", {
@@ -335,11 +343,10 @@ export function createApp(dependencies: AppDependencies): Express {
         }
         const input = pushNotificationSchema.parse(request.body);
         const plaintextBytes = Buffer.byteLength(JSON.stringify(input), "utf8");
-        if (
-          plaintextBytes > MAX_NOTIFICATION_PLAINTEXT_BYTES
-        ) {
+        if (plaintextBytes > MAX_NOTIFICATION_PLAINTEXT_BYTES) {
           log("warn", "push.notification.rejected", {
-            message: "Push notification request rejected because it is too large",
+            message:
+              "Push notification request rejected because it is too large",
             ...requestFields,
             plaintextBytes,
             reason: "NOTIFICATION_TOO_LARGE",
@@ -547,9 +554,23 @@ export function createApp(dependencies: AppDependencies): Express {
   authenticated.use(createProfileRouter(database, sync));
   authenticated.use(createCatalogRouter(database, sync, config));
   authenticated.use(createAnalysisRouter(database, sync, config));
+  if (dependencies.analysis) {
+    authenticated.use(
+      "/analysis",
+      requireScope("profile:write"),
+      dependencies.analysis.router(sync),
+    );
+  }
   authenticated.use(createPlaybackRouter(database, sync, webSockets));
   api.use(authenticated);
   app.use("/api/v1", api);
+  if (dependencies.analysis) {
+    app.use(
+      "/analysis-ui",
+      requireAuth(database),
+      express.static(IntegratedAnalysis.publicPath),
+    );
+  }
 
   const webDistPath =
     dependencies.webDistPath ??

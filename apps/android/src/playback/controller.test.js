@@ -30,7 +30,10 @@ jest.mock("../stores/auth", () => ({ useAuthStore: { getState: jest.fn() } }));
 jest.mock("../stores/nativeMedia", () => ({
   useNativeMediaStore: { getState: jest.fn() },
 }));
-jest.mock("../stores/downloads", () => ({ downloadedPath: jest.fn() }));
+jest.mock("../stores/downloads", () => ({
+  downloadedPath: jest.fn(),
+  useDownloadsStore: { getState: () => ({ items: [] }) },
+}));
 jest.mock("../stores/playerUi", () => ({
   usePlayerUiStore: { getState: () => ({ setCastStatus: jest.fn() }) },
 }));

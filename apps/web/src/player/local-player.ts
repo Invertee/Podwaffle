@@ -94,6 +94,7 @@ export class LocalPlayer {
   private resumeCastPromise: Promise<void> | null = null;
   private failedCastSessionId: string | null = null;
   private restoringLocalEpisodeId: string | null = null;
+  private usingRetainedAudio = false;
 
   public constructor(private readonly cast: CastAdapter = castAdapter) {
     this.castState = cast.state();
@@ -122,9 +123,26 @@ export class LocalPlayer {
       this.lastPlayingTick = performance.now();
       usePlayer.setState({ buffering: false, error: null });
     });
-    this.audio.addEventListener("error", () =>
-      usePlayer.setState({ error: "This episode could not be played." }),
-    );
+    this.audio.addEventListener("error", () => {
+      const episode = usePlayer.getState().episode;
+      if (this.usingRetainedAudio && episode?.enclosureUrl) {
+        this.usingRetainedAudio = false;
+        const position = this.audio.currentTime;
+        const resume = usePlayer.getState().playing;
+        this.audio.src = episode.enclosureUrl;
+        this.audio.currentTime = position;
+        usePlayer.setState({
+          episode: { ...episode, analysedMedia: null },
+          error: null,
+        });
+        if (resume)
+          void this.audio.play().catch(() =>
+            usePlayer.setState({
+              error: "This episode could not be played.",
+            }),
+          );
+      } else usePlayer.setState({ error: "This episode could not be played." });
+    });
     this.audio.addEventListener("ended", () => void this.handleEnded());
     this.channel?.addEventListener("message", (event) => {
       const message = event.data as { type?: string; action?: string };
@@ -345,7 +363,12 @@ export class LocalPlayer {
       acquired.episode?.id === playbackEpisode.id
         ? acquired.positionMs
         : requestedPositionMs;
-    this.audio.src = playbackEpisode.enclosureUrl ?? episode.enclosureUrl ?? "";
+    this.usingRetainedAudio = Boolean(playbackEpisode.analysedMedia);
+    this.audio.src =
+      playbackEpisode.analysedMedia?.path ??
+      playbackEpisode.enclosureUrl ??
+      episode.enclosureUrl ??
+      "";
     this.audio.currentTime = startPositionMs / 1000;
     this.playbackInstanceId = crypto.randomUUID();
     this.sequence = 0;
@@ -406,7 +429,15 @@ export class LocalPlayer {
       ) {
         this.audio.currentTime = acquired.positionMs / 1000;
       }
-      await this.audio.play();
+      const tryingRetainedAudio = this.usingRetainedAudio;
+      try {
+        await this.audio.play();
+      } catch (error) {
+        // The error listener starts the publisher fallback. A rejected play()
+        // for the replaced source must not overwrite that recovery with an error.
+        if (!tryingRetainedAudio || this.usingRetainedAudio) throw error;
+        return;
+      }
       await this.reportState("playing");
     } catch {
       usePlayer.setState({ error: "Playback was blocked by the browser." });
@@ -1345,7 +1376,9 @@ export class LocalPlayer {
     positionMs: number,
     playbackRate: number,
   ): Promise<void> {
-    if (episode.enclosureUrl) this.audio.src = episode.enclosureUrl;
+    this.usingRetainedAudio = Boolean(episode.analysedMedia);
+    if (episode.enclosureUrl)
+      this.audio.src = episode.analysedMedia?.path ?? episode.enclosureUrl;
     this.audio.playbackRate = playbackRate;
     if (this.audio.readyState < 1) {
       await new Promise<void>((resolve) => {

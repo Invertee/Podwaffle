@@ -677,3 +677,14 @@ select:disabled {
     padding: 16px;
   }
 }
+
+.marker-edit-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-block: 12px;
+}
+.marker-edit-row input {
+  width: 110px;
+}

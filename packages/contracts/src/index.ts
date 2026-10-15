@@ -381,6 +381,13 @@ export interface Episode {
   title: string;
   descriptionHtml: string | null;
   enclosureUrl: string | null;
+  analysedMedia?: {
+    path: string;
+    sha256: string;
+    sizeBytes: number;
+    durationMs: number;
+    adSegments: Array<{ startMs: number; endMs: number }>;
+  } | null;
   enclosureType: string | null;
   publishedAt: string | null;
   firstDiscoveredAt: string;

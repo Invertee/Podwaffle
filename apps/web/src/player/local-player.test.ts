@@ -131,6 +131,31 @@ beforeEach(() => {
 });
 
 describe("local player completion", () => {
+  it("prefers retained audio and falls back to the feed once without markers", async () => {
+    const checked = {
+      ...first,
+      analysedMedia: {
+        path: "/media/checked",
+        sha256: "a".repeat(64),
+        sizeBytes: 100,
+        durationMs: 60000,
+        adSegments: [{ startMs: 1000, endMs: 2000 }],
+      },
+    };
+    api.episode.mockResolvedValue(checked);
+    await playerModule.player.load(checked, false);
+    expect(audio.src).toBe("/media/checked");
+    audio.currentTime = 12;
+    audio.dispatchEvent(new Event("error"));
+    expect(audio.src).toBe(first.enclosureUrl);
+    expect(audio.currentTime).toBe(12);
+    expect(playerModule.usePlayer.getState().episode?.analysedMedia).toBeNull();
+    expect(playerModule.usePlayer.getState().error).toBeNull();
+    audio.dispatchEvent(new Event("error"));
+    expect(playerModule.usePlayer.getState().error).toContain(
+      "could not be played",
+    );
+  });
   it("requests the beginning when replaying a completed episode", async () => {
     api.episode.mockResolvedValue({
       ...first,

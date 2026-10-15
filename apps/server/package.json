@@ -13,7 +13,8 @@
     "backup": "node dist/cli/backup.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:integration": "pnpm --filter @podwaffle/contracts build && vitest run tests/integration"
+    "test:integration": "pnpm --filter @podwaffle/contracts build && vitest run tests/integration",
+    "test:engine": "node --test src/analysis/engine/test/*.test.js"
   },
   "dependencies": {
     "@podwaffle/contracts": "workspace:*",

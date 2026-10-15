@@ -15,6 +15,7 @@ import {
 import { api } from "../../api/client";
 import { cachedQuery } from "../../api/queryCache";
 import { EpisodeCard } from "../../components/EpisodeCard";
+import { PodcastAnalysisSettings } from "../../components/PodcastAnalysisSettings";
 import { Icon } from "../../components/Icon";
 import { useEpisodeActions } from "../../hooks/useEpisodeActions";
 import { useAuthStore } from "../../stores/auth";
@@ -137,6 +138,7 @@ export default function PodcastScreen() {
                 {description}
               </Text>
             ) : null}
+            <PodcastAnalysisSettings podcastId={podcastId} />
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>Episodes</Text>
               <Text style={styles.count}>{episodes.data?.length ?? 0}</Text>

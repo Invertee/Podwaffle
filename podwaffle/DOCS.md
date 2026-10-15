@@ -1,11 +1,6 @@
 # Podwaffle Home Assistant app
 
-Optional podcast analysis: set `analysis_server_url` to your local analyser's
-base URL (for example `http://192.168.1.50:5000`) and restart. Install
-the separate **Podwaffle Ad Detection** add-on (which downloads English Whisper automatically), then enable **Chapters & advert analysis** per podcast
-in the web client. Episode **Details & chapters** contains expandable diagnostics
-and an on-demand analysis button. Automatic skipping is disabled. See the
-[setup and testing guide](https://github.com/Invertee/Podwaffle/blob/main/docs/podcast-analysis.md).
+Optional podcast analysis is integrated into this add-on. Open **Ad detection** in the web sidebar, then opt in individual series. See the [analysis and upgrade guide](../docs/podcast-analysis.md) for model configuration, retained audio, Firebase downloads and Android skipping. Retained audio lives in `/data/episode-cache` and is excluded from Home Assistant add-on backups.
 
 Podwaffle serves its web client, API and WebSocket endpoint from internal port 3000. Home Assistant ingress or an existing nginx proxy should terminate TLS and forward the original host, protocol and client address. Forward `/ws` with WebSocket upgrade support.
 

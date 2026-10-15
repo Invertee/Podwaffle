@@ -74,6 +74,9 @@ object MediaStateMapper {
             "playWhenReady" to if (cast?.connected == true) cast.playing else player.playWhenReady,
             "playbackRate" to player.playbackParameters.speed,
             "source" to source,
+            "analysisSha256" to if (source == "cast") null else extras?.getString("analysisSha256"),
+            "adSegments" to if (source == "cast") emptyList<Map<String, Long>>() else
+                AdSkipping.parse(extras?.getString("adSegments")).map { mapOf("startMs" to it.startMs, "endMs" to it.endMs) },
             "queueItemId" to (cast?.episode?.queueItemId ?: extras?.getString("queueItemId")),
             "queueIndex" to player.currentMediaItemIndex.coerceAtLeast(0),
             "queueLength" to player.mediaItemCount,

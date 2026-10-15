@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.0.0 — Integrated analysis and retained audio
+
+- Move advert analysis, model preparation, scheduling, diagnostics and sensitivity controls into the main server with an Ad detection sidebar tab; retire the separate add-on.
+- Retain exact analysed recordings in a bounded audio cache excluded from Home Assistant backups, with byte-range streaming and publisher fallback.
+- Preserve per-profile series opt-in and analysis results; send Firebase completion data and provide reconnect catch-up for Android automatic Wi-Fi downloads.
+- Add Android 0.5.0 native advert skipping, persisted verified offline analysis metadata, publisher failover and amber advert highlights. Skipping defaults off in Profile.
+- Add editing of advert regions, profile isolation and cache/stream regression coverage. See docs/podcast-analysis.md for upgrade instructions.
+
+## Earlier changes
+
 - Added per-podcast local-LLM advert guidance, detection sensitivity, and
   configurable first/last-minute sampling focus to chapter and advert analysis,
   with concise local-classifier decisions beside sampled transcript excerpts.

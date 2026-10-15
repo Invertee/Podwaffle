@@ -367,39 +367,20 @@ private data class AutoEpisode(
     val artworkUrl: String?,
     val durationMs: Long?,
     val positionMs: Long,
+    val analysedMediaJson: String? = null,
 ) {
     fun toMediaItem(downloadStore: PodwaffleDownloadStore): MediaItem {
-        val localPath = downloadStore.completedPath(id)?.takeIf { File(it).isFile }
-        val uri = localPath?.let { Uri.fromFile(File(it)) } ?: Uri.parse(enclosureUrl)
-        val extras = Bundle().apply {
-            putString("podcastId", podcastId)
-            putString("source", if (localPath == null) "stream" else "download")
-            putString("enclosureUrl", enclosureUrl)
-            putString("enclosureType", enclosureType)
-            localPath?.let { putString("localDownloadPath", it) }
-            durationMs?.let { putLong("durationMs", it) }
-            putLong("resumePositionMs", positionMs.coerceAtLeast(0L))
-        }
-        return MediaItem.Builder()
-            .setMediaId(id)
-            .setUri(uri)
-            .setMimeType(enclosureType)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setDisplayTitle(title)
-                    .setArtist(podcastTitle)
-                    .setAlbumTitle(podcastTitle)
-                    .setSubtitle(podcastTitle)
-                    .setArtworkUri(artworkUrl?.let(Uri::parse))
-                    .setDurationMs(durationMs)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .setExtras(extras)
-                    .build(),
-            )
-            .build()
+        val analysed = analysedMediaJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val baseUrl = NativeConfigurationStore.current?.serverBaseUrl
+        val media = EpisodeMedia(
+            episodeId = id, podcastId = podcastId, title = title, podcastTitle = podcastTitle,
+            enclosureUrl = enclosureUrl, enclosureType = enclosureType, localDownloadPath = null,
+            artworkUrl = artworkUrl, durationMs = durationMs, queueItemId = null, resumePositionMs = positionMs,
+            analysedUrl = if (baseUrl != null) analysed?.optString("path")?.takeIf { it.startsWith("/media/") }?.let { baseUrl + it } else null,
+            analysisSha256 = analysed?.optString("sha256"),
+            adSegments = analysed?.optJSONArray("adSegments")?.toString() ?: "[]",
+        )
+        return downloadStore.enrich(media).toMediaItem()
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -412,6 +393,7 @@ private data class AutoEpisode(
         put("artworkUrl", artworkUrl ?: JSONObject.NULL)
         put("durationMs", durationMs ?: JSONObject.NULL)
         put("positionMs", positionMs)
+        put("analysedMedia", analysedMediaJson?.let(::JSONObject) ?: JSONObject.NULL)
     }
 }
 
@@ -457,5 +439,6 @@ private fun JSONObject.toEpisode(podcastArtworkUrl: String?): AutoEpisode? {
         artworkUrl = podcastArtworkUrl ?: optNullableString("artworkUrl"),
         durationMs = optLong("durationMs", 0L).takeIf { it > 0L },
         positionMs = optLong("positionMs", 0L).coerceAtLeast(0L),
+        analysedMediaJson = optJSONObject("analysedMedia")?.toString(),
     )
 }

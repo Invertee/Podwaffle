@@ -14,16 +14,29 @@
     <main>
       <header>
         <div>
-          <p class="eyebrow">PODWAFFLE / ANALYSIS SIDECAR</p>
+          <p class="eyebrow">PODWAFFLE / AD DETECTION</p>
           <h1>Ad detection</h1>
           <p>
-            Local speech-to-text · DigitalOcean Jev · Suggestions only — no
-            automatic skipping
+            Local speech-to-text · DigitalOcean Jev · Retained recordings for
+            local and offline listening
           </p>
         </div>
         <button id="refresh">Refresh</button>
       </header>
       <p id="error" role="alert"></p>
+      <section class="card">
+        <h2>Retained episodes</h2>
+        <label
+          >Audio storage limit (MB)
+          <input id="cacheLimit" type="number" min="0" max="1000000" step="1"
+        /></label>
+        <button id="saveCache">Save storage limit</button>
+        <p id="cacheUsage"></p>
+        <p>
+          Oldest unused audio is removed first. A limit of zero disables
+          retention. Feed playback remains available without ad skipping.
+        </p>
+      </section>
       <nav
         class="dashboard-tabs"
         role="tablist"
@@ -564,8 +577,8 @@ Run a transcript test to see the response.</pre>
         </section>
       </div>
       <footer>
-        No authentication. Keep this service on a trusted network; do not expose
-        its port to the internet.
+        Managed through your signed-in Podwaffle profile. Retained audio and
+        model downloads share this server’s storage.
       </footer>
     </main>
   </body>

@@ -39,6 +39,7 @@ interface PlaybackSettings {
   skipBackwardSeconds: number;
   skipForwardSeconds: number;
   hideGroupSpeakers: boolean;
+  autoSkipAds: boolean;
 }
 
 type AuthStatus = "restoring" | "signed-out" | "authenticated";
@@ -56,6 +57,7 @@ interface AuthStore {
   skipBackwardSeconds: number;
   skipForwardSeconds: number;
   hideGroupSpeakers: boolean;
+  autoSkipAds: boolean;
   settingsProfileId: string | null;
   restore: () => Promise<void>;
   validateServer: (value: string) => Promise<{
@@ -76,6 +78,7 @@ interface AuthStore {
     forwardSeconds: number,
   ) => Promise<void>;
   setHideGroupSpeakers: (enabled: boolean) => Promise<void>;
+  setAutoSkipAds: (enabled: boolean) => Promise<void>;
   setLiveSyncConnected: (connected: boolean) => void;
   logout: () => Promise<void>;
 }
@@ -112,6 +115,7 @@ async function readPlaybackSettings(
         Number(parsed.skipForwardSeconds),
         DEFAULT_SKIP_FORWARD_SECONDS,
       ),
+      autoSkipAds: parsed.autoSkipAds === true,
       hideGroupSpeakers:
         typeof parsed.hideGroupSpeakers === "boolean"
           ? parsed.hideGroupSpeakers
@@ -122,6 +126,7 @@ async function readPlaybackSettings(
       skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
       skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
       hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
+      autoSkipAds: false,
     };
   }
 }
@@ -164,6 +169,7 @@ async function configureNative(
       skipBackSeconds: settings.skipBackwardSeconds,
       skipForwardSeconds: settings.skipForwardSeconds,
       hideGroupSpeakers: settings.hideGroupSpeakers,
+      autoSkipAds: settings.autoSkipAds,
       downloadRetentionDays: 30,
       maxDownloadStorageBytes: 2_000_000_000,
     });
@@ -184,6 +190,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
   skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
   hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
+  autoSkipAds: false,
   settingsProfileId: null,
 
   restore: async () => {
@@ -212,6 +219,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
             skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
             hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
+            autoSkipAds: false,
           };
       set({
         status: "authenticated",
@@ -335,6 +343,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
               skipBackwardSeconds: current.skipBackwardSeconds,
               skipForwardSeconds: current.skipForwardSeconds,
               hideGroupSpeakers: current.hideGroupSpeakers,
+              autoSkipAds: current.autoSkipAds,
             }
           : await readPlaybackSettings(session.profile.id);
       await configureNative(credentials, session, settings);
@@ -417,6 +426,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       skipBackwardSeconds: backward,
       skipForwardSeconds: forward,
       hideGroupSpeakers: get().hideGroupSpeakers,
+      autoSkipAds: get().autoSkipAds,
     };
     const { credentials, session, snapshot } = get();
     const profileId = session?.profile.id ?? snapshot?.profile.id ?? null;
@@ -433,6 +443,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       skipBackwardSeconds: current.skipBackwardSeconds,
       skipForwardSeconds: current.skipForwardSeconds,
       hideGroupSpeakers,
+      autoSkipAds: current.autoSkipAds,
     };
     const profileId =
       current.session?.profile.id ?? current.snapshot?.profile.id ?? null;
@@ -441,6 +452,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (current.credentials && current.session) {
       await configureNative(current.credentials, current.session, settings);
     }
+  },
+
+  setAutoSkipAds: async (autoSkipAds) => {
+    const current = get();
+    const profileId =
+      current.session?.profile.id ?? current.snapshot?.profile.id;
+    const settings = {
+      skipBackwardSeconds: current.skipBackwardSeconds,
+      skipForwardSeconds: current.skipForwardSeconds,
+      hideGroupSpeakers: current.hideGroupSpeakers,
+      autoSkipAds,
+    };
+    set({ autoSkipAds });
+    if (profileId) await writePlaybackSettings(profileId, settings);
+    if (current.credentials && current.session)
+      await configureNative(current.credentials, current.session, settings);
   },
 
   logout: async () => {
@@ -462,6 +489,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       skipBackwardSeconds: DEFAULT_SKIP_BACKWARD_SECONDS,
       skipForwardSeconds: DEFAULT_SKIP_FORWARD_SECONDS,
       hideGroupSpeakers: DEFAULT_HIDE_GROUP_SPEAKERS,
+      autoSkipAds: false,
       error: null,
       liveSyncConnected: false,
     });

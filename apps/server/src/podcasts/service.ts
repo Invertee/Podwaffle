@@ -8,6 +8,7 @@ import type {
   Subscription,
 } from "@podwaffle/contracts";
 import { parseRss, type ParsedFeed } from "./rss.js";
+import { analysedMedia } from "../analysis/media.js";
 import { enqueueDiscoveredAnalysis } from "../analysis/service.js";
 
 interface PodcastRow {
@@ -419,7 +420,10 @@ export function listEpisodes(
     .all(
       ...(podcastId ? [profileId, podcastId] : [profileId]),
     ) as unknown as EpisodeRow[];
-  return rows.map(mapEpisode);
+  return rows.map((row) => ({
+    ...mapEpisode(row),
+    analysedMedia: analysedMedia(db, profileId, row.id),
+  }));
 }
 
 export function getEpisode(
@@ -430,7 +434,12 @@ export function getEpisode(
   const row = db
     .prepare(`${episodeSelect} WHERE e.id = ?`)
     .get(profileId, episodeId) as EpisodeRow | undefined;
-  return row ? mapEpisode(row) : null;
+  return row
+    ? {
+        ...mapEpisode(row),
+        analysedMedia: analysedMedia(db, profileId, row.id),
+      }
+    : null;
 }
 
 export function setEpisodeState(
@@ -540,7 +549,10 @@ export function listHistory(db: DatabaseSync, profileId: string): Episode[] {
        ORDER BY s.last_played_at DESC`,
     )
     .all(profileId) as unknown as EpisodeRow[];
-  return rows.map(mapEpisode);
+  return rows.map((row) => ({
+    ...mapEpisode(row),
+    analysedMedia: analysedMedia(db, profileId, row.id),
+  }));
 }
 
 export function listQueue(db: DatabaseSync, profileId: string): QueueItem[] {

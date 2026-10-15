@@ -4,12 +4,20 @@ ARG BUILD_ARCH=local
 # Home Assistant builds an add-on with only the add-on directory as context.
 # Fetch the application source instead of trying to COPY files from the
 # repository root, which is outside that context.
-FROM node:24-alpine AS build
+FROM node:24-bookworm-slim AS native
+ARG WHISPER_REF=v1.9.4
+RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential ca-certificates libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${WHISPER_REF}" https://github.com/ggml-org/whisper.cpp /whisper \
+ && cmake -S /whisper -B /whisper/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF \
+ && cmake --build /whisper/build --target whisper-cli -j2
+
+FROM node:24-bookworm-slim AS build
 ARG BUILD_VERSION
 ARG PODWAFFLE_REF=main
 WORKDIR /workspace
 RUN echo "Building Podwaffle ${BUILD_VERSION} from ${PODWAFFLE_REF}" \
- && apk add --no-cache git \
+ && apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
  && git init \
  && git remote add origin https://github.com/Invertee/Podwaffle.git \
  && git fetch --depth 1 origin "${PODWAFFLE_REF}" \
@@ -22,11 +30,13 @@ RUN pnpm install --frozen-lockfile \
 RUN pnpm build \
  && pnpm --filter @podwaffle/server deploy --prod --legacy /production/server
 
-FROM node:24-alpine
+FROM node:24-bookworm-slim
 ARG BUILD_VERSION
 ARG BUILD_ARCH
 ENV NODE_ENV=production \
+    PODWAFFLE_VERSION=${BUILD_VERSION} \
     PODWAFFLE_DATA_DIR=/config/podwaffle \
+    PODWAFFLE_EPISODE_CACHE_DIR=/data/episode-cache \
     PODWAFFLE_OPTIONS_PATH=/data/options.json \
     PODWAFFLE_WEB_DIST=/app/apps/web/dist
 LABEL io.hass.type="app" \
@@ -35,6 +45,9 @@ LABEL io.hass.type="app" \
       org.opencontainers.image.title="Podwaffle" \
       org.opencontainers.image.description="Self-hosted podcast server and web client" \
       org.opencontainers.image.source="https://github.com/Invertee/Podwaffle"
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates libgomp1 libssl3 wget tini \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=native /whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli
 WORKDIR /app
 COPY --from=build /production/server apps/server
 COPY --from=build /workspace/apps/web/dist apps/web/dist
@@ -43,4 +56,5 @@ RUN chmod 0755 /run.sh && mkdir -p /data /config/podwaffle
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/run.sh"]

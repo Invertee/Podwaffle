@@ -11,6 +11,7 @@ import type { PodwaffleDatabase } from "../db/connection.js";
 import type { SyncService } from "../sync/service.js";
 import { log } from "../logging.js";
 import { z } from "zod";
+import type { IntegratedAnalysis } from "./engine.js";
 
 interface JobRow {
   id: string;
@@ -180,7 +181,7 @@ export function getEpisodeAnalysis(
     .prepare("SELECT enclosure_url FROM episodes WHERE id=?")
     .get(episodeId) as { enclosure_url: string | null } | undefined;
   return {
-    configured: Boolean(config.analysis_server_url),
+    configured: config.analysis_enabled,
     job: row
       ? {
           id: row.id,
@@ -208,48 +209,30 @@ export function getEpisodeAnalysis(
   };
 }
 
-const remoteResponse = z.object({
-  job: z.object({
-    id: z.uuid(),
-    requestKey: z.string(),
-    status: z.enum(["queued", "processing", "completed", "failed"]),
-    stage: z.string().max(200),
-    progress: z.number().min(0).max(100),
-    error: z.string().max(2000).nullable(),
-    result: z.unknown().nullable(),
-  }),
-  logs: z
-    .array(
-      z.object({
-        createdAt: z.string(),
-        level: z.string().max(20),
-        message: z.string().max(2000),
-      }),
-    )
-    .max(300)
-    .optional(),
-});
-
 export class AnalysisDispatcher {
   private timer: NodeJS.Timeout | undefined;
   private pending: Promise<void> | undefined;
-  private controller = new AbortController();
+  private stopped = false;
   public constructor(
     private readonly database: PodwaffleDatabase,
     private readonly sync: SyncService,
     private readonly config: AppConfig,
+    private readonly engine?: Pick<
+      IntegratedAnalysis,
+      "enqueue" | "get" | "logs" | "tick"
+    >,
   ) {}
   public start(): void {
     this.timer = setInterval(() => {
       void this.tick().catch((error) =>
         log("warn", "analysis.dispatch.failed", { error: String(error) }),
       );
-    }, 5000);
+    }, 3000);
     this.timer.unref();
   }
   public async stop(): Promise<void> {
     clearInterval(this.timer);
-    this.controller.abort();
+    this.stopped = true;
     await this.pending;
   }
   public async tick(): Promise<void> {
@@ -261,94 +244,41 @@ export class AnalysisDispatcher {
       this.pending = undefined;
     }
   }
-  private async request(
-    base: string,
-    suffix: string,
-    body?: string,
-  ): Promise<z.infer<typeof remoteResponse>> {
-    const response = await fetch(
-      `${base.replace(/\/$/, "")}/api/podcasts${suffix}`,
-      {
-        signal: AbortSignal.any([
-          this.controller.signal,
-          AbortSignal.timeout(15000),
-        ]),
-        ...(body
-          ? {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body,
-            }
-          : {}),
-      },
-    );
-    if (!response.ok)
-      throw new Error(`Analyser returned HTTP ${response.status}`);
-    // Bound responses before JSON parsing, including on servers without Content-Length.
-    if (!response.body) throw new Error("Empty analyser response");
-    const reader = response.body.getReader();
-    let text = "";
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        text += decoder.decode(chunk.value as Uint8Array, { stream: true });
-        if (text.length > 8 * 1024 * 1024)
-          throw new Error("Analyser response too large");
-      }
-    } finally {
-      await reader.cancel();
-    }
-    return remoteResponse.parse(JSON.parse(text + decoder.decode()));
-  }
   private async process(): Promise<void> {
     const db = this.database.db;
     pruneTranscripts(db);
-    if (!this.config.analysis_server_url || this.controller.signal.aborted)
-      return;
+    if (!this.config.analysis_enabled || !this.engine || this.stopped) return;
     const jobs = db
       .prepare(
-        "SELECT * FROM episode_analysis_jobs WHERE status IN ('queued','processing') AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT 4",
+        "SELECT * FROM episode_analysis_jobs WHERE status IN ('queued','processing') AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT 20",
       )
       .all(new Date().toISOString()) as unknown as JobRow[];
     for (const row of jobs) {
-      if (this.controller.signal.aborted) break;
       try {
-        const base = row.remote_base_url ?? this.config.analysis_server_url;
-        const data = await this.request(
-          base,
-          row.remote_job_id
-            ? `/jobs/${encodeURIComponent(row.remote_job_id)}`
-            : "/jobs",
-          row.remote_job_id ? undefined : row.request_json,
-        );
-        if (
-          data.job.requestKey !== row.id ||
-          (row.remote_job_id && data.job.id !== row.remote_job_id)
-        )
-          throw new Error("Analyser job identity mismatch");
-        const completed = data.job.status === "completed";
-        const result = completed
-          ? analysisResultSchema.parse(data.job.result)
-          : null;
+        // Old in-flight sidecar jobs are requeued locally with the same request key.
+        const job =
+          (row.remote_job_id ? this.engine.get(row.remote_job_id) : null) ??
+          this.engine.enqueue(JSON.parse(row.request_json));
+        const result =
+          job.status === "completed"
+            ? analysisResultSchema.parse(job.result)
+            : null;
         if (result && result.episodeId !== row.episode_id)
-          throw new Error("Analyser episode identity mismatch");
+          throw new Error("Analysis episode identity mismatch");
         const finish = () => {
           db.prepare(
-            `UPDATE episode_analysis_jobs SET status=?,stage=?,progress=?,remote_job_id=?,remote_base_url=?,attempts=0,
+            `UPDATE episode_analysis_jobs SET status=?,stage=?,progress=?,remote_job_id=?,remote_base_url=NULL,attempts=0,
             next_attempt_at=?,error=?,result_json=?,logs_json=?,finished_at=?,transcript_expires_at=? WHERE id=?`,
           ).run(
-            data.job.status,
-            data.job.stage,
-            data.job.progress,
-            data.job.id,
-            base,
-            new Date(Date.now() + 5000).toISOString(),
-            data.job.error,
+            job.status,
+            job.stage,
+            job.progress,
+            job.id,
+            new Date(Date.now() + 3000).toISOString(),
+            job.error,
             result ? JSON.stringify(result) : null,
-            JSON.stringify(data.logs ?? []),
-            ["completed", "failed"].includes(data.job.status)
+            JSON.stringify(this.engine!.logs(job.id)),
+            ["completed", "failed"].includes(job.status)
               ? new Date().toISOString()
               : null,
             result && !result.transcriptExpired
@@ -359,7 +289,7 @@ export class AnalysisDispatcher {
             row.id,
           );
         };
-        if (["completed", "failed"].includes(data.job.status))
+        if (["completed", "failed"].includes(job.status))
           this.sync.mutate(row.profile_id, "episode.analysis.updated", () => {
             finish();
             return {
@@ -367,34 +297,28 @@ export class AnalysisDispatcher {
               payload: {
                 episodeId: row.episode_id,
                 analysisId: row.id,
-                status: data.job.status,
+                status: job.status,
               },
             };
           });
         else finish();
       } catch (error) {
-        if (this.controller.signal.aborted) break;
         const attempts = row.attempts + 1,
-          failed = attempts >= 10;
-        const message =
-          error instanceof z.ZodError
-            ? "Invalid analyser response; see analyser diagnostics"
-            : error instanceof Error
-              ? error.message
-              : "Analysis transport failure";
+          failed = attempts >= 3;
         db.prepare(
           "UPDATE episode_analysis_jobs SET attempts=?,error=?,next_attempt_at=?,status=?,stage=? WHERE id=?",
         ).run(
           attempts,
-          message,
-          new Date(
-            Date.now() + Math.min(300000, 5000 * 2 ** attempts),
-          ).toISOString(),
+          error instanceof z.ZodError
+            ? "Invalid analysis result"
+            : String(error).slice(0, 2000),
+          new Date(Date.now() + 30000).toISOString(),
           failed ? "failed" : row.status,
-          failed ? "failed" : "retrying connection",
+          failed ? "failed" : "retrying",
           row.id,
         );
       }
     }
+    await this.engine.tick();
   }
 }

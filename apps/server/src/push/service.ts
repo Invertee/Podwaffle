@@ -9,6 +9,7 @@ import type { PodwaffleDatabase } from "../db/connection.js";
 import { log } from "../logging.js";
 import type { SyncService } from "../sync/service.js";
 import { encryptNotification } from "./encryption.js";
+import { analysedMedia } from "../analysis/media.js";
 
 interface RegistrationRow {
   id: string;
@@ -323,7 +324,8 @@ export class PushService {
     const registrations = this.registrationsForProfile(profileId);
     if (registrations.length === 0) {
       log("info", "push.notification.no_targets", {
-        message: "No registered Android devices available for push notification",
+        message:
+          "No registered Android devices available for push notification",
         profileId,
       });
       return { targeted: 0, accepted: false };
@@ -360,6 +362,26 @@ export class PushService {
     profileId: string,
     event: SyncEvent,
   ): Promise<boolean> {
+    if (
+      event.type === "episode.analysis.updated" &&
+      event.payload.status === "completed" &&
+      typeof event.payload.episodeId === "string" &&
+      analysedMedia(this.database.db, profileId, event.payload.episodeId)
+    ) {
+      // Each episode has its own durable REST catch-up entry. Do not collapse
+      // different episodes into a single Firebase message.
+      return this.sendToRegistrations(
+        this.registrationsForProfile(profileId),
+        {
+          kind: "analysis-ready",
+          episodeId: event.payload.episodeId,
+          revision: String(event.revision),
+        },
+        false,
+        undefined,
+        7 * 24 * 60 * 60_000,
+      );
+    }
     const activeDeviceId = (
       event.payload.playback as { activeDeviceId?: unknown } | undefined
     )?.activeDeviceId;
@@ -450,7 +472,8 @@ export class PushService {
         this.applyResults(batch, response);
       } catch (error) {
         log("warn", "push.send_failed", {
-          message: "Firebase request failed before a push batch response was received",
+          message:
+            "Firebase request failed before a push batch response was received",
           kind: data.kind,
           batchSize: batch.length,
           error: error instanceof Error ? error.message : "Unknown FCM error",

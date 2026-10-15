@@ -1,5 +1,5 @@
 name: Podwaffle
-version: "5.0.41"
+version: "6.0.0"
 slug: podwaffle
 description: Self-hosted, synchronised podcast listening
 url: https://github.com/Invertee/Podwaffle
@@ -22,7 +22,21 @@ options:
   join_code: "replace-me"
   port: 3000
   feed_refresh_minutes: 22
-  analysis_server_url: ""
+  analysis_enabled: true
+  whisper_model: tiny.en
+  whisper_threads: 2
+  sample_seconds: 900
+  max_audio_mb: 512
+  job_timeout_minutes: 60
+  classifier: rules
+  jev_api_key: ""
+  jev_model: typesafe-jev-1.13.0
+  jev_timeout_seconds: 30
+  schedule_enabled: true
+  schedule_start: "23:00"
+  schedule_end: "07:00"
+  schedule_timezone: Europe/London
+  episode_cache_mb: 5000
   sync_event_retention_days: 30
   history_retention_days: 365
   artwork_cache_mb: 500
@@ -39,7 +53,21 @@ schema:
   join_code: password
   port: port
   feed_refresh_minutes: int(5,1440)
-  analysis_server_url: str?
+  analysis_enabled: bool
+  whisper_model: list(tiny.en|base.en)
+  whisper_threads: int(1,64)
+  sample_seconds: int(30,3600)
+  max_audio_mb: int(1,2048)
+  job_timeout_minutes: int(1,1440)
+  classifier: list(rules|jev)
+  jev_api_key: password?
+  jev_model: str
+  jev_timeout_seconds: int(5,300)
+  schedule_enabled: bool
+  schedule_start: str
+  schedule_end: str
+  schedule_timezone: str
+  episode_cache_mb: int(0,1000000)
   sync_event_retention_days: int(1,365)
   history_retention_days: int(1,3650)
   artwork_cache_mb: int(0,10000)
@@ -55,3 +83,9 @@ ports:
   3000/tcp: 3000
 ports_description:
   3000/tcp: Podwaffle web server
+
+# Retained audio, temporary PCM and downloaded model weights.
+backup_exclude:
+  - "episode-cache"
+  - "episode-cache/*"
+backup: cold

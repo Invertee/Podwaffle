@@ -1,9 +1,6 @@
 # Podwaffle
 
-Optional English chapter/advert analysis is provided by the independently
-installable [Podwaffle Ad Detection add-on](podwaffle-ad-detection/DOCS.md) in this
-repository. It downloads Whisper automatically and supports optional local Qwen
-classification. Suggestions are for manual review; automatic skipping is disabled.
+Optional English chapter and advert analysis runs inside the main Podwaffle server. Use **Ad detection** in the web sidebar to manage models, sensitivity and retained audio. Android can download checked recordings and optionally skip adverts. See the [analysis and upgrade guide](docs/podcast-analysis.md).
 
 Podwaffle is a self-hosted podcast system for the Web and Android clients, hostable in Home Assistant (and elsewhere).
 

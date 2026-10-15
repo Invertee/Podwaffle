@@ -9,6 +9,7 @@ import { playbackController } from "../playback/controller";
 import type { Credentials } from "../stores/auth";
 import { useAuthStore } from "../stores/auth";
 import { useNativeMediaStore } from "../stores/nativeMedia";
+import { downloadAnalysedEpisodes } from "./analysisDownloads";
 
 const HEARTBEAT_MS = 25_000;
 const MAX_RECONNECT_MS = 30_000;
@@ -76,6 +77,7 @@ class AndroidSyncRuntime {
       if (this.socket !== socket) return;
       this.reconnectAttempt = 0;
       useAuthStore.getState().setLiveSyncConnected(true);
+      void downloadAnalysedEpisodes().catch(() => undefined);
       this.heartbeatTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ type: "client.heartbeat" }));
@@ -136,6 +138,11 @@ class AndroidSyncRuntime {
   private handleEvent(event: SyncEvent): void {
     if (event.revision <= this.afterRevision) return;
     this.afterRevision = event.revision;
+    if (
+      event.type === "episode.analysis.updated" ||
+      event.type === "subscription.analysis-settings.updated"
+    )
+      void downloadAnalysedEpisodes().catch(() => undefined);
     this.scheduleRefresh(120);
   }
 

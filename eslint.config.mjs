@@ -41,4 +41,12 @@ export default tseslint.config(
       globals: { ...globals.node },
     },
   },
+  {
+    files: ["apps/server/src/analysis/engine/**/*.js"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    files: ["apps/server/src/analysis/engine/public/*.js"],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 );

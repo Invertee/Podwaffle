@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  AnalysisSettings,
   CastConfirmedState,
   Device,
   DiscoveryResult,
@@ -153,6 +154,33 @@ function commandBody(revision: number, extra: Record<string, unknown> = {}) {
 }
 
 export const api = {
+  analysisSettings: (serverUrl: string, token: string, podcastId: string) =>
+    request<{ settings: AnalysisSettings; configured: boolean }>(
+      serverUrl,
+      `/api/v1/subscriptions/${podcastId}/analysis`,
+      token,
+    ),
+  saveAnalysisSettings: (
+    serverUrl: string,
+    token: string,
+    podcastId: string,
+    settings: AnalysisSettings,
+  ) =>
+    request<{ settings: AnalysisSettings }>(
+      serverUrl,
+      `/api/v1/subscriptions/${podcastId}/analysis`,
+      token,
+      {
+        method: "PUT",
+        body: JSON.stringify({ commandId: createCommandId(), settings }),
+      },
+    ),
+  analysedDownloads: (serverUrl: string, token: string) =>
+    request<{ episodes: Episode[] }>(
+      serverUrl,
+      "/api/v1/analysis/downloads",
+      token,
+    ).then((result) => result.episodes),
   system: (serverUrl: string) =>
     request<SystemInfo>(serverUrl, "/version.json"),
 

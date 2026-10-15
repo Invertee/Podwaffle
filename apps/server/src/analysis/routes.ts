@@ -9,6 +9,9 @@ import {
   enqueueAnalysis,
   getEpisodeAnalysis,
 } from "./service.js";
+import { getEpisode } from "../podcasts/service.js";
+import { analysedMedia } from "./media.js";
+import { requireScope } from "../auth/middleware.js";
 
 export function createAnalysisRouter(
   database: PodwaffleDatabase,
@@ -17,6 +20,29 @@ export function createAnalysisRouter(
 ): express.Router {
   const router = express.Router(),
     db = database.db;
+  router.get(
+    "/analysis/downloads",
+    requireScope("catalog:write"),
+    (req, res) => {
+      const profileId = req.auth!.profile.id;
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT j.episode_id FROM episode_analysis_jobs j
+      JOIN episodes e ON e.id=j.episode_id
+      JOIN subscription_analysis_settings a ON a.profile_id=j.profile_id AND a.podcast_id=e.podcast_id AND a.enabled=1
+      JOIN subscriptions s ON s.profile_id=j.profile_id AND s.podcast_id=e.podcast_id
+      LEFT JOIN episode_state es ON es.profile_id=j.profile_id AND es.episode_id=e.id
+      WHERE j.profile_id=? AND j.status='completed' AND e.removed_at IS NULL AND COALESCE(es.played,0)=0
+      ORDER BY j.created_at DESC`,
+        )
+        .all(profileId) as unknown as Array<{ episode_id: string }>;
+      res.json({
+        episodes: rows
+          .filter((row) => analysedMedia(db, profileId, row.episode_id))
+          .map((row) => getEpisode(db, profileId, row.episode_id)),
+      });
+    },
+  );
   function subscription(profileId: string, podcastId: string) {
     if (
       !db
@@ -40,7 +66,7 @@ export function createAnalysisRouter(
     subscription(profileId, podcastId);
     res.json({
       settings: analysisSettings(db, profileId, podcastId),
-      configured: Boolean(config.analysis_server_url),
+      configured: config.analysis_enabled,
     });
   });
   router.put("/subscriptions/:podcastId/analysis", (req, res) => {
@@ -119,11 +145,11 @@ export function createAnalysisRouter(
     const episodeId = String(req.params.episodeId),
       profileId = req.auth!.profile.id;
     episode(profileId, episodeId);
-    if (!config.analysis_server_url)
+    if (!config.analysis_enabled)
       throw new ApiError(
         503,
         "ANALYSIS_NOT_CONFIGURED",
-        "Set analysis_server_url in the Podwaffle server options",
+        "Enable analysis in the Podwaffle server options",
       );
     const command = commandSchema.parse(req.body);
     const applied = sync.command(

@@ -132,7 +132,7 @@
         ])
           $(id).disabled = false;
         $("settingsMessage").textContent =
-          "Saved on this sidecar. Settings survive restarts.";
+          "Saved on this Podwaffle server. Settings survive restarts.";
         form.onsubmit = async (event) => {
           event.preventDefault();
           if (saving) return;

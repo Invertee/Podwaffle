@@ -60,6 +60,7 @@ function createPodcastStore(filename) {
         // Saved detection controls are server-owned and must not break a caller's retry.
         const { detectionSettings: capturedSettings, ...originalRequest } =
           JSON.parse(existing.request_json);
+        void capturedSettings;
         if (JSON.stringify(originalRequest) !== JSON.stringify(request)) {
           const error = new Error(
             "requestKey already used for different input",
@@ -92,6 +93,9 @@ function createPodcastStore(filename) {
           const { result, ...job } = get(id);
           return { ...job, segmentCount: result?.segments?.length ?? 0 };
         });
+    },
+    hasPending() {
+      return Boolean(db.prepare("SELECT 1 FROM podcast_jobs WHERE status='queued' LIMIT 1").get());
     },
     claim() {
       db.exec("BEGIN IMMEDIATE");

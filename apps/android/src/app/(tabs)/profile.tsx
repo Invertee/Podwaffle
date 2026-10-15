@@ -66,6 +66,8 @@ export default function ProfileScreen() {
     (state) => state.skipBackwardSeconds,
   );
   const skipForwardSeconds = useAuthStore((state) => state.skipForwardSeconds);
+  const autoSkipAds = useAuthStore((state) => state.autoSkipAds);
+  const setAutoSkipAds = useAuthStore((state) => state.setAutoSkipAds);
   const setSkipDurations = useAuthStore((state) => state.setSkipDurations);
   const hideGroupSpeakers = useAuthStore((state) => state.hideGroupSpeakers);
   const setHideGroupSpeakers = useAuthStore(
@@ -346,6 +348,24 @@ export default function ProfileScreen() {
         <Text style={styles.cardDescription}>
           Synced across the Android app, web player, and profile devices.
         </Text>
+        <View style={styles.settingRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.settingLabel}>Automatically skip adverts</Text>
+            <Text style={styles.subtitle}>
+              Uses ad regions on checked recordings. Feed fallback plays without
+              skipping.
+            </Text>
+          </View>
+          <Switch
+            value={autoSkipAds}
+            onValueChange={(value) =>
+              void setAutoSkipAds(value).catch((error) =>
+                Alert.alert("Settings", String(error)),
+              )
+            }
+            accessibilityLabel="Automatically skip adverts"
+          />
+        </View>
         <View style={styles.settingRow}>
           <Text style={styles.settingLabel}>Skip backward</Text>
           <View style={styles.numberField}>

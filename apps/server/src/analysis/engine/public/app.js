@@ -9,7 +9,7 @@
   let jobs = [];
   // Relative paths keep the management UI working behind Home Assistant ingress.
   async function api(route, options) {
-    const response = await fetch(`api/podcasts/${route}`, options);
+    const response = await fetch(`/api/v1/analysis/${route}`, options);
     const body = await response.json();
     if (!response.ok) {
       const error = new Error(body.error || `HTTP ${response.status}`);
@@ -25,8 +25,108 @@
     for (const row of $("jobs").children)
       row.classList.toggle("selected-job", row.dataset.jobId === id);
     const data = await api(`jobs/${encodeURIComponent(id)}`);
-    if (selected === id && request === inspectionRequest)
+    if (selected === id && request === inspectionRequest) {
       window.PodcastInspector.render(data);
+      renderMarkerEditor(data);
+    }
+  }
+  function renderMarkerEditor(data) {
+    let editor = $("markerEditor");
+    if (!editor) {
+      editor = document.createElement("section");
+      editor.id = "markerEditor";
+      editor.className = "card";
+      $("inspector").append(editor);
+    }
+    if (editor.dataset.job === data.job.id && editor.dataset.dirty === "true")
+      return;
+    editor.dataset.job = data.job.id;
+    editor.dataset.dirty = "false";
+    editor.oninput = () => {
+      editor.dataset.dirty = "true";
+    };
+    editor.replaceChildren();
+    if (!data.job.result || data.job.status !== "completed") return;
+    const heading = document.createElement("h3");
+    heading.textContent = "Edit advert regions";
+    editor.append(heading);
+    const note = document.createElement("p");
+    note.textContent =
+      "Adjust start and end times in seconds. Changes apply to this checked recording.";
+    editor.append(note);
+    const original = data.job.result.segments;
+    const rows = [];
+    function addRow(segment) {
+      const row = document.createElement("div");
+      row.className = "marker-edit-row";
+      const start = document.createElement("input"),
+        end = document.createElement("input");
+      for (const input of [start, end]) {
+        input.type = "number";
+        input.min = "0";
+        input.step = "0.1";
+        input.max = String(data.job.result.durationMs / 1000);
+      }
+      start.value = String(segment.startMs / 1000);
+      end.value = String(segment.endMs / 1000);
+      const startLabel = document.createElement("label");
+      startLabel.textContent = "Start (seconds) ";
+      startLabel.append(start);
+      const endLabel = document.createElement("label");
+      endLabel.textContent = "End (seconds) ";
+      endLabel.append(end);
+      const remove = document.createElement("button");
+      remove.textContent = "Remove";
+      const item = { segment, start, end, removed: false };
+      rows.push(item);
+      remove.onclick = () => {
+        editor.dataset.dirty = "true";
+        item.removed = true;
+        row.remove();
+      };
+      row.append(startLabel, endLabel, remove);
+      editor.append(row);
+    }
+    original
+      .filter((segment) => segment.kind === "advertisement")
+      .forEach(addRow);
+    const add = document.createElement("button");
+    add.textContent = "Add advert region";
+    add.onclick = () => {
+      editor.dataset.dirty = "true";
+      addRow({
+        startMs: 0,
+        endMs: Math.min(30000, data.job.result.durationMs),
+        kind: "advertisement",
+        title: "Advert",
+        confidence: 1,
+        source: "rules",
+        evidence: "Edited by listener",
+        boundaryStatus: "approximate",
+      });
+    };
+    const save = document.createElement("button");
+    save.textContent = "Save advert regions";
+    save.onclick = action(async () => {
+      const segments = [
+        ...original.filter((segment) => segment.kind !== "advertisement"),
+        ...rows
+          .filter((row) => !row.removed)
+          .map((row) => ({
+            ...row.segment,
+            startMs: Math.round(Number(row.start.value) * 1000),
+            endMs: Math.round(Number(row.end.value) * 1000),
+          })),
+      ].sort((a, b) => a.startMs - b.startMs);
+      await api(`jobs/${encodeURIComponent(data.job.id)}/segments`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ commandId: crypto.randomUUID(), segments }),
+      });
+      editor.dataset.dirty = "false";
+      await inspect(data.job.id);
+    });
+    editor.append(add, save);
   }
   const action = (task) => async () => {
     try {
@@ -96,6 +196,23 @@
       $("jobs").append(row);
     }
   }
+  async function refreshStorage() {
+    const storage = await api("storage");
+    $("cacheLimit").value = storage.limitMb;
+    $("cacheUsage").textContent =
+      `${storage.count} ${storage.count === 1 ? "episode" : "episodes"} · ${(storage.bytes / 1024 ** 2).toFixed(0)} MB. Audio and model files are excluded from Home Assistant backups.`;
+  }
+  $("saveCache").onclick = action(async () => {
+    await api("storage", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limitMb: Number($("cacheLimit").value) }),
+    });
+    await refreshStorage();
+  });
+  void refreshStorage().catch((e) => {
+    $("error").textContent = e.message;
+  });
   async function refresh() {
     if (busy) return;
     busy = true;
