@@ -62,18 +62,26 @@
           assessment,
           markers: matched,
           verdict,
+          threshold:
+            verdict === "promotion"
+              ? (diagnostics.minimumPromotionConfidence ??
+                diagnostics.minimumAdvertConfidence ??
+                0.55)
+              : (diagnostics.minimumAdvertConfidence ?? 0.55),
           state: failed ? "failed" : verdict,
           suspected: isAdvert(verdict) || matched.length > 0,
           belowThreshold: Boolean(
             assessment &&
             !failed &&
             isAdvert(verdict) &&
-            !matched.some(
-              (m) =>
-                m.source === "jev" &&
-                m.kind === verdict &&
-                rangeKey(m) === rangeKey(fragment),
-            ),
+            (assessment.markerDecision
+              ? !assessment.markerDecision.accepted
+              : !matched.some(
+                  (m) =>
+                    m.source === "jev" &&
+                    m.kind === verdict &&
+                    rangeKey(m) === rangeKey(fragment),
+                )),
           ),
         };
       })
@@ -94,6 +102,11 @@
       sampledMs: unionDuration(coverage),
       advertMs: unionDuration(markers),
       threshold: diagnostics.minimumAdvertConfidence ?? 0.55,
+      promotionThreshold:
+        diagnostics.minimumPromotionConfidence ??
+        diagnostics.minimumAdvertConfidence ??
+        0.55,
+      effectiveSettings: diagnostics.effectiveSettings,
     };
   }
   function filterRows(rows, query, filter) {

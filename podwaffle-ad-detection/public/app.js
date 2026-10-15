@@ -21,7 +21,7 @@
   async function inspect(id) {
     selected = id;
     const request = ++inspectionRequest;
-    history.replaceState(null, "", `#${new URLSearchParams({ job: id })}`);
+    window.PodcastDashboard.setJob(id);
     for (const row of $("jobs").children)
       row.classList.toggle("selected-job", row.dataset.jobId === id);
     const data = await api(`jobs/${encodeURIComponent(id)}`);
@@ -104,6 +104,7 @@
         api("status"),
         api("models"),
         api("logs"),
+        window.PodcastDashboard.loadSettings(api),
       ]);
       $("error").textContent = "";
       $("health").textContent =
@@ -180,8 +181,9 @@
         }),
       });
       selected = result.job.id;
+      window.PodcastDashboard.showTab("episodes");
       $("episodeMessage").textContent =
-        "Episode queued. Progress, timeline and transcripts appear in the episode explorer above.";
+        "Episode queued. Progress, timeline and transcripts appear in the Episodes tab.";
       await refresh();
     } catch (error) {
       $("episodeMessage").textContent = error.message;
@@ -199,6 +201,8 @@
       verdict.textContent = `${assessment.verdict.replace("_", " ")} · ${Math.round(assessment.confidence * 100)}% classification confidence`;
       const explanation = document.createElement("p");
       explanation.textContent = assessment.reason;
+      if (assessment.markerDecision)
+        explanation.textContent += ` ${assessment.markerDecision.reason}`;
       card.append(verdict, explanation);
       if (assessment.probabilities) {
         const probabilities = document.createElement("p");
@@ -240,7 +244,7 @@
       });
       showTest(result);
       $("transcriptMessage").textContent =
-        `${result.elapsedMs}ms · ${result.usage.requests} API requests · ${result.usage.inputTokens ?? "unknown"} input tokens · ${result.segments.length} markers above the ${Math.round(result.minimumAdvertConfidence * 100)}% threshold · ${result.failedCount} failed excerpts`;
+        `${result.elapsedMs}ms · ${result.usage.requests} API requests · ${result.usage.inputTokens ?? "unknown"} input tokens · ${result.segments.length} markers saved · Advert threshold ${Math.round(result.minimumAdvertConfidence * 100)}% · Promotion threshold ${Math.round(result.minimumPromotionConfidence * 100)}% · ${result.failedCount} failed excerpts`;
     } catch (error) {
       $("transcriptMessage").textContent = error.message;
       showTest(error.body || { error: error.message });

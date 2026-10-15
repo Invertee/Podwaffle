@@ -125,6 +125,18 @@ stop additional requests for that classification run. No alternate provider is u
 
 The dashboard offers:
 
+- **Models & detection tab:** model setup plus saved audio and Jev controls.
+  Choose independent audio and Jev presets, or custom pause detection and separate
+  advert/promotion confidence thresholds. Add a minimum selected-label probability
+  (0 disables this check) and choose whether to save promotions. The audio sample
+  budget controls the initial samples; phrase hits can add up to 240 seconds. More
+  sampling can increase cloud usage. Confidence and label probability are distinct
+  Jev outputs. These filters do not change its original decision or phrase fallback.
+  Presets use 75% / 55% / 35% confidence; following the episode is the default.
+  Changes apply after **Save detection settings** without a restart. Unsaved edits
+  survive tab changes and automatic refreshes. Restore defaults fills the form;
+  save to apply them.
+- **Service log tab:** service stages and errors, separate from episode inspection.
 - **Episode explorer:** choose **Inspect** for a job to see sampled coverage,
   excerpt decisions and saved advert/promotion ranges on a clickable timeline.
   Search transcripts, filter suspected ads, editorial speech, uncertainty or failed
@@ -132,10 +144,14 @@ The dashboard offers:
   transcript boundaries to Jev confidence, probabilities, validated response fields,
   elapsed time and request count. Failed/skipped requests show safe provider details
   where available; phrase-rule markers retain their source and evidence. Dashed Jev
-  candidates did not meet that job's confidence threshold. Unsampled audio has no
+  candidates were excluded by that job's saved confidence/probability thresholds
+  or promotion toggle, with an explanation. The explorer shows the actual audio
+  settings and advert/promotion thresholds captured for that job. Unsampled audio has no
   verdict. Automatic refresh preserves the selection and filters.
 - **Test an episode:** submit an audio URL, sponsor phrases, guidance, sensitivity
-  and edge focus; inspect the queued job's full request, result and logs.
+  and edge focus in the Testing tab; inspect the queued job's full request, result
+  and logs in Episodes. The submitted sensitivity applies where saved settings
+  follow the episode; explicit saved audio/Jev presets or custom values override it.
 - **Test Jev with a transcript:** paste text, times, optional episode context and
   guidance; see labels, probabilities, threshold, latency, API request count and
   returned token usage. Nothing is saved by the sidecar. Provider retention is
@@ -150,6 +166,21 @@ job. It never accepts a client-supplied API key or endpoint. All failed requests
 return HTTP 502, disabled Jev returns 503, invalid input 400, concurrent tests 409.
 Missing token usage stays unknown. Usage reports only counts returned by successful
 HTTP responses; billable timed-out requests may not be included.
+
+`GET /api/podcasts/settings` returns `{settings, defaults}` without model access
+keys. `PUT /api/podcasts/settings` accepts the complete `{settings}` object returned
+by GET, validates it and saves it in the sidecar SQLite database. API confidence
+and probability values use 0–1; the dashboard displays percentages. Saved values
+override startup sample-budget configuration until changed again; default sample
+budget comes from the startup configuration. This endpoint does not change the
+classifier, model credentials or inference endpoint.
+
+Each new queued request captures the saved settings. Existing queued/running jobs,
+manual retries and duplicate request keys keep their original snapshot. Settings
+are also captured at the start of direct transcript tests. Legacy queued jobs
+without a snapshot retain the original episode-sensitivity/startup-budget behaviour.
+Use Podwaffle's **Reanalyse** or submit a new job to evaluate changed settings on an
+episode. Historical results are never re-filtered by current settings.
 
 ## Retention and validation
 

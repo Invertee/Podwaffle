@@ -1,17 +1,20 @@
 "use strict";
 const express = require("express");
-const {
-  validateRequest,
-  validateSegments,
-  applySensitivity,
-  sensitivityThreshold,
-} = require("./podcast-analysis");
+const { validateRequest, validateSegments } = require("./podcast-analysis");
 const { classifyJev } = require("./classifier");
 const { scheduleStatus } = require("./schedule");
+const {
+  defaultDetectionSettings,
+  validateDetectionSettings,
+  resolveDetectionSettings,
+  applyJevPolicy,
+} = require("./detection-settings");
 
 function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
   const router = express.Router();
   let testing = false;
+  const defaults = defaultDetectionSettings(config);
+  const currentSettings = () => store.detectionSettings(defaults);
   router.use((_req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -27,11 +30,20 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
       remoteClassification: config.classifier === "jev",
       jevConfigured:
         config.classifier === "jev" && Boolean(config.podcastJevKey),
-      sampleBudgetSeconds: config.podcastSampleSeconds,
+      sampleBudgetSeconds: currentSettings().sampleBudgetSeconds,
       schedule: scheduleStatus(config.schedule),
       jobs: store.list(),
     }),
   );
+  router.get("/settings", (_req, res) =>
+    res.json({ settings: currentSettings(), defaults }),
+  );
+  router.put("/settings", (req, res) => {
+    const settings = validateDetectionSettings(req.body?.settings);
+    store.saveDetectionSettings(settings);
+    logger.info("Detection settings updated");
+    res.json({ settings, defaults });
+  });
   // Uses the same classifier as queued audio jobs, without audio/model setup.
   // Nothing is stored; credentials are taken only from server configuration.
   router.post("/classify", async (req, res) => {
@@ -55,6 +67,11 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
       podcastDescription: body.podcastDescription,
       episodeDescription: body.episodeDescription,
     });
+    const detectionSettings = currentSettings();
+    const effectiveSettings = resolveDetectionSettings(
+      detectionSettings,
+      request.sensitivity,
+    );
     if (
       !Array.isArray(body.fragments) ||
       !body.fragments.length ||
@@ -113,6 +130,7 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
         ]),
         validateSegments,
       );
+      const filtered = applyJevPolicy(result, effectiveSettings.jev);
       res.status(result.successfulCount ? 200 : 502).json({
         ...(result.successfulCount
           ? {}
@@ -125,9 +143,12 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
         returnedModels: result.returnedModels,
         providerErrors: result.providerErrors,
         elapsedMs: Date.now() - start,
-        minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
-        segments: applySensitivity(result.segments, request.sensitivity),
-        assessments: result.assessments,
+        minimumAdvertConfidence: effectiveSettings.jev.advertConfidence,
+        minimumPromotionConfidence: effectiveSettings.jev.promotionConfidence,
+        detectionSettings,
+        effectiveSettings,
+        segments: filtered.segments,
+        assessments: filtered.assessments,
         successfulCount: result.successfulCount,
         failedCount: result.failedFragments.length,
         warnings: result.failureReasons,
@@ -147,7 +168,7 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
     res.status(202).json({ job: store.get(job.id) });
   });
   router.post("/jobs", (req, res) => {
-    const result = store.enqueue(validateRequest(req.body));
+    const result = store.enqueue(validateRequest(req.body), currentSettings());
     if (!result.deduplicated) {
       store.log(result.job.id, "info", "Podcast analysis queued");
       logger.info("Podcast analysis queued", { jobId: result.job.id });

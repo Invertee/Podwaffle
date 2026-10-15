@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Organise the dashboard into Episodes, Models & detection, Testing and Service log tabs, with keyboard navigation and links that retain the active tab and selected job.
+- Save independent audio and Jev sensitivity settings without restarting: pause detection presets/custom silence level and duration, initial sample budget, separate advert/promotion confidence thresholds, minimum selected-label probability and promotion inclusion.
+- Persist settings in the sidecar database and capture them when each new job is queued. Retries and duplicate submissions keep their original settings; direct transcript tests use the settings saved when the test starts.
+- Show the settings used for each episode and explain excluded Jev candidates while preserving original model decisions and response fields.
+
 ## 0.3.0
 
 - Replace the JSON-only job inspector with an episode timeline and searchable transcript explorer.

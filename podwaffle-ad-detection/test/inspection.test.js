@@ -123,3 +123,26 @@ test("timeline timestamps support full eight-hour episodes", () => {
   assert.equal(formatTime(61000), "01:01");
   assert.equal(formatTime(28800000), "8:00:00");
 });
+
+test("excluded promotions retain their decision and use their own captured threshold", () => {
+  const model = buildInspection({
+    fragments: [fragment(0, 5000, "Join the members club")],
+    diagnostics: {
+      minimumAdvertConfidence: 0.9,
+      minimumPromotionConfidence: 0.6,
+      classifierAssessments: [
+        {
+          ...decision(0, 5000, "promotion", 0.95),
+          markerDecision: {
+            accepted: false,
+            reason: "Promotion markers disabled",
+          },
+        },
+      ],
+    },
+  });
+  assert.equal(model.rows[0].belowThreshold, true);
+  assert.equal(model.rows[0].verdict, "promotion");
+  assert.equal(model.rows[0].threshold, 0.6);
+  assert.equal(model.promotionThreshold, 0.6);
+});

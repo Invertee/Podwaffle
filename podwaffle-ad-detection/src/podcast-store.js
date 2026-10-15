@@ -15,6 +15,8 @@ function createPodcastStore(filename) {
       id INTEGER PRIMARY KEY, job_id TEXT NOT NULL, created_at TEXT NOT NULL,
       level TEXT NOT NULL, message TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS podcast_job_log_idx ON podcast_job_logs(job_id,id);
+    CREATE TABLE IF NOT EXISTS podcast_detection_settings (
+      id INTEGER PRIMARY KEY CHECK(id=1), settings_json TEXT NOT NULL);
     UPDATE podcast_jobs SET status='queued',stage='recovered',progress=0
       WHERE status='processing';`);
   function get(id) {
@@ -37,12 +39,28 @@ function createPodcastStore(filename) {
   }
   return {
     get,
-    enqueue(request) {
+    detectionSettings(defaults) {
+      const row = db
+        .prepare(
+          "SELECT settings_json FROM podcast_detection_settings WHERE id=1",
+        )
+        .get();
+      return row ? JSON.parse(row.settings_json) : { ...defaults };
+    },
+    saveDetectionSettings(settings) {
+      db.prepare(
+        "INSERT INTO podcast_detection_settings(id,settings_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET settings_json=excluded.settings_json",
+      ).run(JSON.stringify(settings));
+    },
+    enqueue(request, detectionSettings) {
       const existing = db
         .prepare("SELECT id,request_json FROM podcast_jobs WHERE request_key=?")
         .get(request.requestKey);
       if (existing) {
-        if (existing.request_json !== JSON.stringify(request)) {
+        // Saved detection controls are server-owned and must not break a caller's retry.
+        const { detectionSettings: capturedSettings, ...originalRequest } =
+          JSON.parse(existing.request_json);
+        if (JSON.stringify(originalRequest) !== JSON.stringify(request)) {
           const error = new Error(
             "requestKey already used for different input",
           );
@@ -57,7 +75,9 @@ function createPodcastStore(filename) {
       ).run(
         id,
         request.requestKey,
-        JSON.stringify(request),
+        JSON.stringify(
+          detectionSettings ? { ...request, detectionSettings } : request,
+        ),
         new Date().toISOString(),
       );
       return { job: get(id), deduplicated: false };

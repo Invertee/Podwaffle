@@ -5,6 +5,11 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { classifyJev } = require("./classifier");
+const {
+  defaultDetectionSettings,
+  resolveDetectionSettings,
+  applyJevPolicy,
+} = require("./detection-settings");
 
 function validateRequest(body) {
   const fail = (message) => {
@@ -315,6 +320,12 @@ function validateSegments(segments, durationMs) {
 }
 
 async function analyse(request, config, signal, progress, execute = run) {
+  const detectionSettings =
+    request.detectionSettings || defaultDetectionSettings(config);
+  const effectiveSettings = resolveDetectionSettings(
+    detectionSettings,
+    request.sensitivity,
+  );
   if (!config.podcastWhisperModel)
     throw new Error(
       "Set PODCAST_WHISPER_MODEL to the English tiny.en or base.en model file",
@@ -359,11 +370,7 @@ async function analyse(request, config, signal, progress, execute = run) {
     )
       throw new Error("Unsupported audio duration (maximum 8 hours)");
     progress("acoustic scan", 20);
-    const acoustic = {
-      low: { noise: "-40dB", duration: "0.8" },
-      balanced: { noise: "-35dB", duration: "0.6" },
-      high: { noise: "-30dB", duration: "0.35" },
-    }[request.sensitivity];
+    const acoustic = effectiveSettings.audio;
     const scan = await execute(
       config.ffmpegPath,
       [
@@ -373,7 +380,7 @@ async function analyse(request, config, signal, progress, execute = run) {
         input,
         "-vn",
         "-af",
-        `silencedetect=n=${acoustic.noise}:d=${acoustic.duration}`,
+        `silencedetect=n=${acoustic.silenceThresholdDb}dB:d=${acoustic.minimumSilenceSeconds}`,
         "-f",
         "null",
         "-",
@@ -451,7 +458,7 @@ async function analyse(request, config, signal, progress, execute = run) {
     const windows = sampleWindows(
       durationMs,
       boundaries,
-      config.podcastSampleSeconds,
+      acoustic.sampleBudgetSeconds,
       request.edgeFocusMinutes,
     );
     const fragments = [];
@@ -555,13 +562,14 @@ async function analyse(request, config, signal, progress, execute = run) {
               Math.round(85 + (13 * complete) / Math.max(1, total)),
             ),
         );
-        classifierAssessments = jev.assessments;
+        const filtered = applyJevPolicy(jev, effectiveSettings.jev);
+        classifierAssessments = filtered.assessments;
         classifierUsage = jev.usage;
         classifierReturnedModels = jev.returnedModels;
         classifierErrors = jev.providerErrors;
         const failureSummary = jev.failureReasons.slice(0, 3).join(" ");
         if (jev.successfulCount > 0 || fragments.length === 0) {
-          segments.push(...applySensitivity(jev.segments, request.sensitivity));
+          segments.push(...filtered.segments);
           if (jev.failedFragments.length) {
             segments.push(
               ...classifyRules(jev.failedFragments, request.phrases),
@@ -608,7 +616,10 @@ async function analyse(request, config, signal, progress, execute = run) {
         acousticBoundariesMs: boundaries.slice(0, 2000),
         warnings,
         sensitivity: request.sensitivity,
-        minimumAdvertConfidence: sensitivityThreshold(request.sensitivity),
+        minimumAdvertConfidence: effectiveSettings.jev.advertConfidence,
+        minimumPromotionConfidence: effectiveSettings.jev.promotionConfidence,
+        detectionSettings,
+        effectiveSettings,
         classifierAssessments,
         ...(classifierUsage
           ? { classifierUsage, classifierReturnedModels, classifierErrors }

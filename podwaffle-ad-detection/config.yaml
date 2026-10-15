@@ -1,5 +1,5 @@
 name: Podwaffle Ad Detection
-version: "0.3.0"
+version: "0.4.0"
 slug: podwaffle_ad_detection
 description: English podcast analysis with local Whisper and DigitalOcean Jev classification
 url: https://github.com/Invertee/Podwaffle

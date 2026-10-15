@@ -361,6 +361,44 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   );
   assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
   const requests = [];
+  const { defaultDetectionSettings } = require("../src/detection-settings");
+  const captured = {
+    ...defaultDetectionSettings(config),
+    audioSensitivity: "custom",
+    silenceThresholdDb: -29,
+    minimumSilenceSeconds: 0.25,
+    sampleBudgetSeconds: 30,
+    jevSensitivity: "custom",
+    advertConfidence: 0.95,
+    promotionConfidence: 0.7,
+  };
+  let scanFilter;
+  const tuned = await analyse(
+    { ...validateRequest(request), detectionSettings: captured },
+    jevConfig,
+    new AbortController().signal,
+    () => {},
+    async (binary, args, signal) => {
+      if (args.includes("-af")) scanFilter = args[args.indexOf("-af") + 1];
+      return execute(binary, args, signal);
+    },
+  );
+  assert.equal(scanFilter, "silencedetect=n=-29dB:d=0.25");
+  assert.deepEqual(tuned.diagnostics.detectionSettings, captured);
+  assert.equal(
+    tuned.diagnostics.effectiveSettings.audio.sampleBudgetSeconds,
+    30,
+  );
+  assert.equal(tuned.diagnostics.minimumAdvertConfidence, 0.95);
+  assert.equal(tuned.segments.filter((s) => s.source === "jev").length, 0);
+  assert.equal(
+    tuned.diagnostics.classifierAssessments[0].verdict,
+    "advertisement",
+  );
+  assert.equal(
+    tuned.diagnostics.classifierAssessments[0].markerDecision.accepted,
+    false,
+  );
   global.fetch = async (url) => {
     requests.push(url);
     return url === request.enclosureUrl

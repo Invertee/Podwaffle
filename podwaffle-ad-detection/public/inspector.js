@@ -87,7 +87,7 @@
         );
         bar.style.left = `${(100 * (Math.max(startMs, range.startMs) - startMs)) / span}%`;
         bar.style.width = `${(100 * (Math.min(endMs, range.endMs) - Math.max(startMs, range.startMs))) / span}%`;
-        bar.title = `${rangeText(range)} · ${labels[state] || label}${range.belowThreshold ? " · Below threshold" : ""}`;
+        bar.title = `${rangeText(range)} · ${labels[state] || label}${range.belowThreshold ? " · Excluded by settings" : ""}`;
         if (range.belowThreshold) bar.classList.add("below-threshold");
         if (onSelect) {
           bar.type = "button";
@@ -141,7 +141,7 @@
       $("excerptFilter").value,
     );
     $("excerptCount").textContent =
-      `${visibleRows.length} of ${model.rows.length} excerpts · Dashed ranges are Jev candidates below the saved-marker threshold.`;
+      `${visibleRows.length} of ${model.rows.length} excerpts · Dashed ranges are Jev candidates excluded by this job’s saved settings.`;
     const scrollTop = $("excerptList").scrollTop;
     $("excerptList").replaceChildren(
       ...visibleRows.map((row) => {
@@ -197,7 +197,7 @@
     $("excerptVerdict").className =
       `verdict state-${row?.state || selectedMarker?.kind || "unclassified"}`;
     $("excerptVerdict").textContent = row
-      ? `${labels[row.state] || row.verdict}${assessment && row.state !== "failed" ? ` · ${percent(assessment.confidence)} classification confidence` : ""}${row.belowThreshold ? " · Below threshold" : ""}`
+      ? `${labels[row.state] || row.verdict}${assessment && row.state !== "failed" ? ` · ${percent(assessment.confidence)} classification confidence` : ""}${row.belowThreshold ? " · Excluded by settings" : ""}`
       : selectedMarker
         ? `${labels[selectedMarker.kind]} · ${rangeText(selectedMarker)}`
         : "No transcript at this position";
@@ -216,9 +216,10 @@
     $("excerptReason").textContent =
       [
         assessment?.reason,
-        row?.belowThreshold
-          ? `Jev selected a candidate below this job’s ${percent(model.threshold)} threshold; no Jev marker was saved for it.`
-          : "",
+        assessment?.markerDecision?.reason ||
+          (row?.belowThreshold
+            ? `Jev selected a candidate below this job’s ${percent(row.threshold)} threshold; no Jev marker was saved for it.`
+            : ""),
         markerNotes,
       ]
         .filter(Boolean)
@@ -324,7 +325,10 @@
           "Suspected ad markers",
           `${model.markers.length} · ${formatTime(model.advertMs)}`,
         ],
-        ["Jev marker threshold", percent(model.threshold)],
+        [
+          "Jev confidence thresholds",
+          `Ads ${percent(model.threshold)} · Promotions ${percent(model.promotionThreshold)}`,
+        ],
       ];
       $("inspectionStats").replaceChildren(
         ...stats.map(([label, value]) => {
@@ -338,6 +342,15 @@
           element("li", warning),
         ),
       );
+      if (model.effectiveSettings) {
+        const { audio, jev } = model.effectiveSettings;
+        $("inspectionWarnings").append(
+          element(
+            "li",
+            `Settings used · Audio: ${audio.silenceThresholdDb} dB, minimum pause ${audio.minimumSilenceSeconds}s, initial budget ${audio.sampleBudgetSeconds}s. Jev: minimum label probability ${percent(jev.minimumLabelProbability)}; promotions ${jev.includePromotions ? "enabled" : "disabled"}.`,
+          ),
+        );
+      }
       $("markerSummary").textContent = model.markers.length
         ? "Saved advert and promotion ranges · Boundaries are approximate"
         : "No advert or promotion markers saved. Review uncertain decisions and unsampled gaps below.";

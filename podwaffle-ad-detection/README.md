@@ -40,11 +40,14 @@ Transcript tests work before Whisper downloads and are not stored by the sidecar
 Keep the unauthenticated dashboard/API on a trusted network.
 
 Use **Inspect** beside any episode in **Analysis jobs** for its interactive timeline.
+The dashboard has **Episodes**, **Models & detection**, **Testing** and **Service
+log** tabs; episode inspection stays in Episodes, while setup and test forms live
+in their own tabs.
 The three lanes show sampled audio, excerpt decisions and saved advert/promotion
 markers. Select a range to read the matching transcript and Jev response, or search
 and filter excerpts. Zoom to one or five minutes around the selection for short
 ranges in long episodes. Dashed candidates fall below the saved-marker confidence
-threshold; failed requests and phrase-rule fallback remain visible. Unsampled gaps
+threshold or other saved Jev filters; failed requests and phrase-rule fallback remain visible. Unsampled gaps
 have no classification. Selection and filters survive automatic refreshes; the URL
 links directly to the selected job.
 
@@ -54,12 +57,35 @@ fields are omitted. Older jobs show their saved decisions without inventing resp
 data. Transcripts and these response details expire after seven days; saved markers
 and sampled coverage remain available.
 
+In **Models & detection**, save audio and Jev sensitivity independently. Both
+default to following the episode's Low / Balanced / High sensitivity. Audio can
+instead use its own preset or custom silence threshold (-80 to -10 dB) and minimum
+pause (0.1 to 5 seconds). The initial sample budget is 30–3,600 seconds, plus up to
+240 seconds of adjacent phrase-hit samples. More sampling can increase processing
+time and cloud usage. Audio sensitivity controls sample boundaries, not Whisper's
+recognition settings.
+
+Jev supports presets or separate custom advert/promotion confidence thresholds
+(0–100%), an additional minimum selected-label probability (0 disables it), and a
+promotion-marker toggle. These filter saved Jev markers without changing returned
+model decisions or phrase-rule fallback. Excluded candidates remain inspectable
+with their exclusion reason. Settings save immediately to SQLite and survive
+restarts. They apply to new jobs and transcript tests, including jobs from
+Podwaffle; queued jobs, retries and completed results keep their captured settings.
+Use a new analysis request to apply new settings to an existing episode.
+
+Saved sample budgets override the startup `sample_seconds` / `PODCAST_SAMPLE_SECONDS`
+value. **Restore defaults** loads the startup defaults into the form; save to apply
+them. Refreshing or switching tabs preserves unsaved form edits.
+
 | Method | Path                           | Purpose                                               |
 | ------ | ------------------------------ | ----------------------------------------------------- |
 | GET    | `/api/podcasts/status`         | Latest 200 jobs and classifier configuration (no key) |
 | POST   | `/api/podcasts/jobs`           | Queue audio analysis; request key deduplicates        |
 | GET    | `/api/podcasts/jobs/:id`       | Result, request and job logs                          |
 | POST   | `/api/podcasts/classify`       | Ad hoc Jev test from timestamped transcript excerpts  |
+| GET    | `/api/podcasts/settings`       | Saved detection settings and startup defaults         |
+| PUT    | `/api/podcasts/settings`       | Validate and save `{settings: {...}}` for future work |
 | POST   | `/api/podcasts/jobs/:id/retry` | Retry a failed job                                    |
 | GET    | `/api/podcasts/logs`           | Rotating service log                                  |
 | GET    | `/api/podcasts/models`         | Whisper setup, progress and checksums                 |

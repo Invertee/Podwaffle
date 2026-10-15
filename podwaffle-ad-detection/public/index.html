@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="styles.css" />
     <script src="inspection.js" defer></script>
     <script src="inspector.js" defer></script>
+    <script src="dashboard.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -14,7 +15,7 @@
       <header>
         <div>
           <p class="eyebrow">PODWAFFLE / ANALYSIS SIDECAR</p>
-          <h1>Episode inspection</h1>
+          <h1>Ad detection</h1>
           <p>
             Local speech-to-text · DigitalOcean Jev · Suggestions only — no
             automatic skipping
@@ -23,328 +24,545 @@
         <button id="refresh">Refresh</button>
       </header>
       <p id="error" role="alert"></p>
-      <section aria-labelledby="jobsTitle">
-        <div class="section-heading">
-          <div>
-            <h2 id="jobsTitle">Analysis jobs</h2>
-            <p class="muted">
-              Latest 200 episodes · Updates every five seconds
-            </p>
-          </div>
-          <label class="job-search"
-            >Find an episode<input
-              id="jobSearch"
-              type="search"
-              placeholder="Search title or status"
-          /></label>
-        </div>
-        <div class="table-wrap job-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Queued</th>
-                <th>Episode</th>
-                <th>Status</th>
-                <th>Stage</th>
-                <th>Progress</th>
-                <th>Markers</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="jobs"></tbody>
-          </table>
-        </div>
-      </section>
-      <section id="inspector" aria-labelledby="detailTitle">
-        <p class="eyebrow">EPISODE EXPLORER</p>
-        <h2 id="detailTitle">Select an episode to inspect</h2>
-        <p id="jobMeta" class="muted">
-          Choose Inspect above to explore its timeline, transcript and Jev
-          decisions.
-        </p>
-        <p id="inspectionNotice" role="status"></p>
-        <div id="inspectionContent" hidden>
-          <div id="inspectionStats" class="inspection-stats"></div>
-          <ul id="inspectionWarnings" class="inspection-warnings"></ul>
-          <div class="section-heading timeline-heading">
+      <nav
+        class="dashboard-tabs"
+        role="tablist"
+        aria-label="Ad detection dashboard"
+      >
+        <button
+          id="tab-episodes"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-episodes"
+          data-tab="episodes"
+        >
+          Episodes
+        </button>
+        <button
+          id="tab-models"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-models"
+          data-tab="models"
+          tabindex="-1"
+        >
+          Models & detection
+        </button>
+        <button
+          id="tab-testing"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-testing"
+          data-tab="testing"
+          tabindex="-1"
+        >
+          Testing
+        </button>
+        <button
+          id="tab-logs"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-logs"
+          data-tab="logs"
+          tabindex="-1"
+        >
+          Service log
+        </button>
+      </nav>
+      <div id="panel-episodes" role="tabpanel" aria-labelledby="tab-episodes">
+        <section aria-labelledby="jobsTitle">
+          <div class="section-heading">
             <div>
-              <h3>Episode timeline</h3>
+              <h2 id="jobsTitle">Analysis jobs</h2>
               <p class="muted">
-                Select a coloured range or move the position slider to inspect
-                that moment.
+                Latest 200 episodes · Updates every five seconds
               </p>
             </div>
-            <label
-              >View<select id="timelineZoom">
-                <option value="0">Full episode</option>
-                <option value="300000">5 minutes around selection</option>
-                <option value="60000">1 minute around selection</option>
-              </select></label
-            >
-          </div>
-          <div class="timeline-legend" aria-label="Timeline colours">
-            <span class="legend-sample">Sampled audio</span
-            ><span class="legend-advertisement">Advert</span
-            ><span class="legend-promotion">Promotion</span
-            ><span class="legend-not_ad">Not an ad</span
-            ><span class="legend-uncertain">Uncertain</span
-            ><span class="legend-failed">Failed request</span
-            ><span class="legend-unclassified">Unsampled / unclassified</span>
-          </div>
-          <div id="timeline" class="timeline"></div>
-          <div id="timelineTicks" class="timeline-ticks"></div>
-          <label class="position-control" for="timeCursor"
-            >Episode position <output id="positionLabel">00:00</output
-            ><input
-              id="timeCursor"
-              aria-label="Episode position"
-              type="range"
-              min="0"
-              max="1"
-              step="100"
-              value="0"
-          /></label>
-          <p id="markerSummary" class="muted"></p>
-          <div
-            id="markerList"
-            class="marker-list"
-            aria-label="Suspected advert ranges"
-          ></div>
-          <div class="excerpt-toolbar">
-            <label
-              >Search transcripts<input
-                id="excerptSearch"
+            <label class="job-search"
+              >Find an episode<input
+                id="jobSearch"
                 type="search"
-                placeholder="Words, phrases or verdicts"
+                placeholder="Search title or status"
+            /></label>
+          </div>
+          <div class="table-wrap job-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Queued</th>
+                  <th>Episode</th>
+                  <th>Status</th>
+                  <th>Stage</th>
+                  <th>Progress</th>
+                  <th>Markers</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="jobs"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="inspector" aria-labelledby="detailTitle">
+          <p class="eyebrow">EPISODE EXPLORER</p>
+          <h2 id="detailTitle">Select an episode to inspect</h2>
+          <p id="jobMeta" class="muted">
+            Choose Inspect above to explore its timeline, transcript and Jev
+            decisions.
+          </p>
+          <p id="inspectionNotice" role="status"></p>
+          <div id="inspectionContent" hidden>
+            <div id="inspectionStats" class="inspection-stats"></div>
+            <ul id="inspectionWarnings" class="inspection-warnings"></ul>
+            <div class="section-heading timeline-heading">
+              <div>
+                <h3>Episode timeline</h3>
+                <p class="muted">
+                  Select a coloured range or move the position slider to inspect
+                  that moment.
+                </p>
+              </div>
+              <label
+                >View<select id="timelineZoom">
+                  <option value="0">Full episode</option>
+                  <option value="300000">5 minutes around selection</option>
+                  <option value="60000">1 minute around selection</option>
+                </select></label
+              >
+            </div>
+            <div class="timeline-legend" aria-label="Timeline colours">
+              <span class="legend-sample">Sampled audio</span
+              ><span class="legend-advertisement">Advert</span
+              ><span class="legend-promotion">Promotion</span
+              ><span class="legend-not_ad">Not an ad</span
+              ><span class="legend-uncertain">Uncertain</span
+              ><span class="legend-failed">Failed request</span
+              ><span class="legend-unclassified">Unsampled / unclassified</span>
+            </div>
+            <div id="timeline" class="timeline"></div>
+            <div id="timelineTicks" class="timeline-ticks"></div>
+            <label class="position-control" for="timeCursor"
+              >Episode position <output id="positionLabel">00:00</output
+              ><input
+                id="timeCursor"
+                aria-label="Episode position"
+                type="range"
+                min="0"
+                max="1"
+                step="100"
+                value="0"
+            /></label>
+            <p id="markerSummary" class="muted"></p>
+            <div
+              id="markerList"
+              class="marker-list"
+              aria-label="Suspected advert ranges"
+            ></div>
+            <div class="excerpt-toolbar">
+              <label
+                >Search transcripts<input
+                  id="excerptSearch"
+                  type="search"
+                  placeholder="Words, phrases or verdicts"
+              /></label>
+              <label
+                >Show<select id="excerptFilter">
+                  <option value="all">All excerpts</option>
+                  <option value="suspected">Suspected ads & promotions</option>
+                  <option value="not_ad">Not an ad</option>
+                  <option value="uncertain">Uncertain</option>
+                  <option value="failed">Failed requests</option>
+                  <option value="unclassified">Unclassified</option>
+                </select></label
+              >
+            </div>
+            <p id="excerptCount" class="muted"></p>
+            <div class="excerpt-explorer">
+              <div
+                id="excerptList"
+                class="excerpt-list"
+                role="group"
+                aria-label="Transcript excerpts"
+              ></div>
+              <article class="excerpt-detail" aria-labelledby="excerptTitle">
+                <div class="section-heading">
+                  <h3 id="excerptTitle">Transcript excerpt</h3>
+                  <div class="excerpt-navigation">
+                    <button
+                      id="previousExcerpt"
+                      type="button"
+                      aria-label="Previous excerpt"
+                    >
+                      ←</button
+                    ><button
+                      id="nextExcerpt"
+                      type="button"
+                      aria-label="Next excerpt"
+                    >
+                      →
+                    </button>
+                  </div>
+                </div>
+                <p id="excerptVerdict"></p>
+                <h4>Transcript sent for classification</h4>
+                <p id="excerptText" class="transcript-text"></p>
+                <h4>Decision</h4>
+                <p id="excerptReason"></p>
+                <div id="excerptProbabilities" class="probabilities"></div>
+                <p id="excerptResponseMeta" class="muted"></p>
+                <details open>
+                  <summary>Jev response</summary>
+                  <p class="muted response-note">
+                    Validated classification, returned model and token usage.
+                    Other provider fields are omitted. Notes above are
+                    application summaries.
+                  </p>
+                  <pre id="excerptResponse"></pre>
+                </details>
+              </article>
+            </div>
+          </div>
+          <details>
+            <summary>Request, complete result & job logs</summary>
+            <pre id="details">Select Inspect on a job.</pre>
+          </details>
+          <p class="muted retention-note">
+            Transcripts and per-excerpt responses expire after seven days.
+            Timelines and saved markers remain; sampled excerpts may cover only
+            part of an advert.
+          </p>
+        </section>
+      </div>
+      <div
+        id="panel-models"
+        role="tabpanel"
+        aria-labelledby="tab-models"
+        hidden
+      >
+        <section aria-labelledby="detectionTitle">
+          <p class="eyebrow">DETECTION CONTROLS</p>
+          <h2 id="detectionTitle">Audio & Jev sensitivity</h2>
+          <p class="muted">
+            Saved settings apply to new episodes from Podwaffle and dashboard
+            tests. Queued and completed jobs keep their captured settings. No
+            restart is needed.
+          </p>
+          <form id="detectionForm" class="detection-form">
+            <fieldset>
+              <legend>Audio analysis</legend>
+              <p class="muted">
+                Control the pauses used to place audio samples. This does not
+                change Whisper’s speech recognition model.
+              </p>
+              <label
+                >Audio sensitivity<select name="audioSensitivity">
+                  <option value="episode">
+                    Use each episode’s sensitivity
+                  </option>
+                  <option value="low">Low — longer, quieter pauses</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="high">High — shorter, louder pauses</option>
+                  <option value="custom">Custom pause detection</option>
+                </select></label
+              >
+              <div id="customAudio" class="custom-controls" hidden>
+                <label
+                  >Silence threshold (dB)<input
+                    name="silenceThresholdDb"
+                    type="number"
+                    min="-80"
+                    max="-10"
+                    step="0.1"
+                    required
+                /></label>
+                <p class="field-help">
+                  Audio below this level counts as quiet. A higher value
+                  includes louder pauses. Custom mode only.
+                </p>
+                <label
+                  >Minimum pause (seconds)<input
+                    name="minimumSilenceSeconds"
+                    type="number"
+                    min="0.1"
+                    max="5"
+                    step="0.01"
+                    required
+                /></label>
+                <p class="field-help">
+                  A shorter pause creates more potential boundaries. Custom mode
+                  only.
+                </p>
+              </div>
+              <label
+                >Initial audio sample budget (seconds)<input
+                  name="sampleBudgetSeconds"
+                  type="number"
+                  min="30"
+                  max="3600"
+                  step="1"
+                  required
+              /></label>
+              <p class="field-help">
+                30–3,600 seconds per episode, plus up to 240 seconds around
+                phrase hits. More audio can increase processing time and Jev
+                usage.
+              </p>
+            </fieldset>
+            <fieldset>
+              <legend>Jev marker thresholds</legend>
+              <p class="muted">
+                Control which Jev decisions become saved markers. The model’s
+                original decisions and confidence remain visible in the
+                explorer.
+              </p>
+              <label
+                >Jev sensitivity<select name="jevSensitivity">
+                  <option value="episode">
+                    Use each episode’s sensitivity
+                  </option>
+                  <option value="low">Low — 75% confidence</option>
+                  <option value="balanced">Balanced — 55% confidence</option>
+                  <option value="high">High — 35% confidence</option>
+                  <option value="custom">Custom confidence thresholds</option>
+                </select></label
+              >
+              <div id="customJev" class="custom-controls" hidden>
+                <label
+                  >Minimum advert confidence (%)<input
+                    name="advertConfidence"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    required
+                /></label>
+                <label
+                  >Minimum promotion confidence (%)<input
+                    name="promotionConfidence"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    required
+                /></label>
+                <p class="field-help">
+                  Custom mode only. Higher thresholds save fewer candidates.
+                </p>
+              </div>
+              <label
+                >Minimum selected-label probability (%)<input
+                  name="minimumLabelProbability"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  required
+              /></label>
+              <p class="field-help">
+                An additional check in every sensitivity mode. Set to 0 to
+                disable. Label probability and classification confidence are
+                separate Jev outputs.
+              </p>
+              <label class="checkbox-label"
+                ><input name="includePromotions" type="checkbox" />Save
+                promotion markers as well as adverts</label
+              >
+              <p class="field-help">
+                These controls apply to Jev. Phrase-rule fallback keeps its
+                existing markers and source.
+              </p>
+            </fieldset>
+            <p id="settingsPreview" class="muted full-width"></p>
+            <div class="settings-actions full-width">
+              <button id="saveDetection" type="submit" disabled>
+                Save detection settings</button
+              ><button id="revertDetection" type="button" disabled>
+                Revert changes</button
+              ><button id="defaultDetection" type="button" disabled>
+                Restore defaults
+              </button>
+            </div>
+          </form>
+          <p id="settingsMessage" role="status">Loading saved settings…</p>
+        </section>
+        <section>
+          <h2>Model setup</h2>
+          <p id="health" role="status">Connecting…</p>
+          <progress id="download" max="100" value="0" hidden></progress>
+          <p id="modelStatus">Loading model status…</p>
+          <p id="whisperStatus">Whisper: checking…</p>
+          <button id="downloadWhisper">Download / verify Whisper</button>
+          <p id="jevStatus">Jev: checking…</p>
+          <p id="classifierWarning" role="status"></p>
+          <p class="muted">
+            Whisper runs locally and stays in persistent storage across updates.
+            Jev runs through DigitalOcean Serverless Inference and needs no
+            local classifier download or runtime.
+          </p>
+          <button id="prepare">Retry / verify model setup</button>
+          <details>
+            <summary>Model revisions & checksums</summary>
+            <pre id="models"></pre>
+          </details>
+          <p class="muted">
+            Choose rules or Jev in the add-on Configuration tab, then restart.
+            Jev sends transcript excerpts, phrase hints, detection guidance and
+            bounded episode context to DigitalOcean. Audio stays local.
+          </p>
+        </section>
+      </div>
+      <div
+        id="panel-testing"
+        role="tabpanel"
+        aria-labelledby="tab-testing"
+        hidden
+      >
+        <section>
+          <h2>Test an episode</h2>
+          <p class="muted">
+            Run boundary detection, Whisper transcription and the configured
+            classifier. Jobs use the same queue as Podwaffle and the saved
+            detection settings. The episode sensitivity below is used where a
+            saved setting follows the episode.
+          </p>
+          <form id="episodeForm" class="test-form">
+            <label
+              >Episode title<input
+                name="title"
+                required
+                maxlength="500"
+                placeholder="Episode to test"
+            /></label>
+            <label class="full-width"
+              >Audio URL<input
+                name="enclosureUrl"
+                type="url"
+                required
+                placeholder="https://…/episode.mp3"
             /></label>
             <label
-              >Show<select id="excerptFilter">
-                <option value="all">All excerpts</option>
-                <option value="suspected">Suspected ads & promotions</option>
-                <option value="not_ad">Not an ad</option>
-                <option value="uncertain">Uncertain</option>
-                <option value="failed">Failed requests</option>
-                <option value="unclassified">Unclassified</option>
+              >Sponsor phrases (one per line)<textarea
+                name="phrases"
+                rows="3"
+                placeholder="our sponsor&#10;promo code"
+              ></textarea>
+            </label>
+            <label
+              >Jev detection guidance (optional)<textarea
+                name="llmPrompt"
+                rows="3"
+                maxlength="2000"
+                placeholder="Show-specific advert patterns"
+              ></textarea>
+            </label>
+            <label
+              >Sensitivity<select name="sensitivity">
+                <option value="low">Low</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="high">High</option>
               </select></label
             >
-          </div>
-          <p id="excerptCount" class="muted"></p>
-          <div class="excerpt-explorer">
-            <div
-              id="excerptList"
-              class="excerpt-list"
-              role="group"
-              aria-label="Transcript excerpts"
-            ></div>
-            <article class="excerpt-detail" aria-labelledby="excerptTitle">
-              <div class="section-heading">
-                <h3 id="excerptTitle">Transcript excerpt</h3>
-                <div class="excerpt-navigation">
-                  <button
-                    id="previousExcerpt"
-                    type="button"
-                    aria-label="Previous excerpt"
-                  >
-                    ←</button
-                  ><button
-                    id="nextExcerpt"
-                    type="button"
-                    aria-label="Next excerpt"
-                  >
-                    →
-                  </button>
-                </div>
-              </div>
-              <p id="excerptVerdict"></p>
-              <h4>Transcript sent for classification</h4>
-              <p id="excerptText" class="transcript-text"></p>
-              <h4>Decision</h4>
-              <p id="excerptReason"></p>
-              <div id="excerptProbabilities" class="probabilities"></div>
-              <p id="excerptResponseMeta" class="muted"></p>
-              <details open>
-                <summary>Jev response</summary>
-                <p class="muted response-note">
-                  Validated classification, returned model and token usage.
-                  Other provider fields are omitted. Notes above are application
-                  summaries.
-                </p>
-                <pre id="excerptResponse"></pre>
-              </details>
-            </article>
-          </div>
-        </div>
-        <details>
-          <summary>Request, complete result & job logs</summary>
-          <pre id="details">Select Inspect on a job.</pre>
-        </details>
-        <p class="muted retention-note">
-          Transcripts and per-excerpt responses expire after seven days.
-          Timelines and saved markers remain; sampled excerpts may cover only
-          part of an advert.
-        </p>
-      </section>
-      <section>
-        <h2>Model setup</h2>
-        <p id="health" role="status">Connecting…</p>
-        <progress id="download" max="100" value="0" hidden></progress>
-        <p id="modelStatus">Loading model status…</p>
-        <p id="whisperStatus">Whisper: checking…</p>
-        <button id="downloadWhisper">Download / verify Whisper</button>
-        <p id="jevStatus">Jev: checking…</p>
-        <p id="classifierWarning" role="status"></p>
-        <p class="muted">
-          Whisper runs locally and stays in persistent storage across updates.
-          Jev runs through DigitalOcean Serverless Inference and needs no local
-          classifier download or runtime.
-        </p>
-        <button id="prepare">Retry / verify model setup</button>
-        <details>
-          <summary>Model revisions & checksums</summary>
-          <pre id="models"></pre>
-        </details>
-        <p class="muted">
-          Choose rules or Jev in the add-on Configuration tab, then restart. Jev
-          sends transcript excerpts, phrase hints, detection guidance and
-          bounded episode context to DigitalOcean. Audio stays local.
-        </p>
-      </section>
-      <section>
-        <h2>Test an episode</h2>
-        <p class="muted">
-          Run boundary detection, Whisper transcription and the configured
-          classifier. Jobs use the same queue as Podwaffle.
-        </p>
-        <form id="episodeForm" class="test-form">
-          <label
-            >Episode title<input
-              name="title"
-              required
-              maxlength="500"
-              placeholder="Episode to test"
-          /></label>
-          <label class="full-width"
-            >Audio URL<input
-              name="enclosureUrl"
-              type="url"
-              required
-              placeholder="https://…/episode.mp3"
-          /></label>
-          <label
-            >Sponsor phrases (one per line)<textarea
-              name="phrases"
-              rows="3"
-              placeholder="our sponsor&#10;promo code"
-            ></textarea>
-          </label>
-          <label
-            >Jev detection guidance (optional)<textarea
-              name="llmPrompt"
-              rows="3"
-              maxlength="2000"
-              placeholder="Show-specific advert patterns"
-            ></textarea>
-          </label>
-          <label
-            >Sensitivity<select name="sensitivity">
-              <option value="low">Low</option>
-              <option value="balanced" selected>Balanced</option>
-              <option value="high">High</option>
-            </select></label
-          >
-          <label
-            >First / last minutes to prioritise<input
-              name="edgeFocusMinutes"
-              type="number"
-              min="0"
-              max="15"
-              step="1"
-              value="5"
-              required
-          /></label>
-          <button type="submit" id="submitEpisode">Queue episode test</button>
-        </form>
-        <p id="episodeMessage" role="status"></p>
-      </section>
-      <section>
-        <h2>Test Jev with a transcript</h2>
-        <p class="muted">
-          Paste a speech excerpt to test classification without downloading
-          audio or running Whisper. This sends text to DigitalOcean and uses
-          your configured model access key. Test results are shown here without
-          being saved.
-        </p>
-        <form id="transcriptForm" class="test-form">
-          <label class="full-width"
-            >Transcript excerpt<textarea
-              name="text"
-              rows="5"
-              maxlength="4000"
-              required
-              placeholder="This episode is brought to you by…"
-            ></textarea>
-          </label>
-          <label
-            >Start time (seconds)<input
-              name="startSeconds"
-              type="number"
-              min="0"
-              max="28799"
-              step="0.001"
-              value="0"
-              required
-          /></label>
-          <label
-            >End time (seconds)<input
-              name="endSeconds"
-              type="number"
-              min="0.001"
-              max="28800"
-              step="0.001"
-              value="30"
-              required
-          /></label>
-          <label
-            >Episode context (optional)<textarea
-              name="episodeDescription"
-              rows="2"
-              maxlength="8000"
-              placeholder="What the episode is about"
-            ></textarea>
-          </label>
-          <label
-            >Jev detection guidance (optional)<textarea
-              name="llmPrompt"
-              rows="2"
-              maxlength="2000"
-              placeholder="Show-specific advert patterns"
-            ></textarea>
-          </label>
-          <label
-            >Sensitivity<select name="sensitivity">
-              <option value="low">Low</option>
-              <option value="balanced" selected>Balanced</option>
-              <option value="high">High</option>
-            </select></label
-          >
-          <button type="submit" id="submitTranscript" disabled>
-            Classify with Jev
-          </button>
-        </form>
-        <p id="transcriptMessage" role="status"></p>
-        <div id="testDecisions"></div>
-        <details>
-          <summary>Full test response</summary>
-          <pre id="testResponse">
+            <label
+              >First / last minutes to prioritise<input
+                name="edgeFocusMinutes"
+                type="number"
+                min="0"
+                max="15"
+                step="1"
+                value="5"
+                required
+            /></label>
+            <button type="submit" id="submitEpisode">Queue episode test</button>
+          </form>
+          <p id="episodeMessage" role="status"></p>
+        </section>
+        <section>
+          <h2>Test Jev with a transcript</h2>
+          <p class="muted">
+            Paste a speech excerpt to test classification without downloading
+            audio or running Whisper. This sends text to DigitalOcean and uses
+            your configured model access key. Test results are shown here
+            without being saved.
+          </p>
+          <p class="muted">
+            Uses the saved Jev thresholds from Models & detection. Save any
+            changes there before testing.
+          </p>
+          <form id="transcriptForm" class="test-form">
+            <label class="full-width"
+              >Transcript excerpt<textarea
+                name="text"
+                rows="5"
+                maxlength="4000"
+                required
+                placeholder="This episode is brought to you by…"
+              ></textarea>
+            </label>
+            <label
+              >Start time (seconds)<input
+                name="startSeconds"
+                type="number"
+                min="0"
+                max="28799"
+                step="0.001"
+                value="0"
+                required
+            /></label>
+            <label
+              >End time (seconds)<input
+                name="endSeconds"
+                type="number"
+                min="0.001"
+                max="28800"
+                step="0.001"
+                value="30"
+                required
+            /></label>
+            <label
+              >Episode context (optional)<textarea
+                name="episodeDescription"
+                rows="2"
+                maxlength="8000"
+                placeholder="What the episode is about"
+              ></textarea>
+            </label>
+            <label
+              >Jev detection guidance (optional)<textarea
+                name="llmPrompt"
+                rows="2"
+                maxlength="2000"
+                placeholder="Show-specific advert patterns"
+              ></textarea>
+            </label>
+            <label
+              >Sensitivity<select name="sensitivity">
+                <option value="low">Low</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="high">High</option>
+              </select></label
+            >
+            <button type="submit" id="submitTranscript" disabled>
+              Classify with Jev
+            </button>
+          </form>
+          <p id="transcriptMessage" role="status"></p>
+          <div id="testDecisions"></div>
+          <details>
+            <summary>Full test response</summary>
+            <pre id="testResponse">
 Run a transcript test to see the response.</pre>
-        </details>
-      </section>
-      <section>
-        <details>
-          <summary>Service log</summary>
+          </details>
+        </section>
+      </div>
+      <div id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+        <section>
+          <h2>Service log</h2>
+          <p class="muted">
+            Recent processing stages and service errors. Updates every five
+            seconds.
+          </p>
           <pre id="logs">Loading…</pre>
-        </details>
-      </section>
+        </section>
+      </div>
       <footer>
         No authentication. Keep this service on a trusted network; do not expose
         its port to the internet.
