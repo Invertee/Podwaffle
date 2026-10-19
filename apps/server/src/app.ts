@@ -31,6 +31,7 @@ import { createProfileRouter } from "./api/profile.js";
 import type { PushService } from "./push/service.js";
 import { MAX_NOTIFICATION_PLAINTEXT_BYTES } from "./push/encryption.js";
 import type { OperationalStatusReporter } from "./operational-status.js";
+import { QueueExpiryService } from "./playback/queue-expiry.js";
 
 export const BUILD_VERSION = process.env.PODWAFFLE_VERSION ?? "0.1.0";
 export const API_VERSION = "v1" as const;
@@ -45,6 +46,7 @@ export interface AppDependencies {
   >;
   push: PushService;
   operationalStatus: OperationalStatusReporter;
+  queueExpiry?: QueueExpiryService;
   webDistPath?: string;
   analysis?: IntegratedAnalysis;
   mediaCache?: EpisodeMediaCache;
@@ -227,6 +229,12 @@ export function createApp(dependencies: AppDependencies): Express {
 
   const authenticated = express.Router();
   authenticated.use(requireAuth(database));
+  const queueExpiry =
+    dependencies.queueExpiry ?? new QueueExpiryService(database, sync);
+  authenticated.use((request, _response, next) => {
+    queueExpiry.expireProfile(request.auth!.profile.id);
+    next();
+  });
 
   authenticated.get("/me", (request, response) => {
     const { profile, device } = request.auth!;

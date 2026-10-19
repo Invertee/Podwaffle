@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   stripHtml,
@@ -7,6 +7,7 @@ import {
 } from "@podwaffle/contracts";
 import { api } from "../api/client";
 import { player, usePlayer } from "../player/local-player";
+import { Icon } from "./Icon";
 import "../styles/analysis.css";
 
 function timestamp(ms: number): string {
@@ -14,7 +15,123 @@ function timestamp(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
+export function PodcastDownloadOptionsButton({
+  podcastId,
+  podcastTitle,
+}: {
+  podcastId: string;
+  podcastTitle: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const dialogId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="icon-button download-options-button"
+        title="Download Options"
+        aria-label={`Download Options for ${podcastTitle}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? dialogId : undefined}
+        onClick={(event) => {
+          event.currentTarget.focus();
+          setOpen(true);
+        }}
+      >
+        <Icon name="download" />
+      </button>
+      {open && (
+        <PodcastDownloadOptionsModal
+          podcastId={podcastId}
+          podcastTitle={podcastTitle}
+          dialogId={dialogId}
+          trigger={trigger}
+          close={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function PodcastDownloadOptionsModal({
+  podcastId,
+  podcastTitle,
+  dialogId,
+  trigger,
+  close,
+}: {
+  podcastId: string;
+  podcastTitle: string;
+  dialogId: string;
+  trigger: RefObject<HTMLButtonElement | null>;
+  close: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const node = dialog.current;
+    node?.showModal();
+    return () => {
+      node?.close();
+      trigger.current?.focus();
+    };
+  }, [trigger]);
+  return (
+    <dialog
+      ref={dialog}
+      id={dialogId}
+      className="analysis-modal download-options-modal"
+      aria-labelledby={`${dialogId}-title`}
+      aria-describedby={`${dialogId}-podcast`}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        )
+          close();
+      }}
+    >
+      <div className="download-options-layout">
+        <header className="download-options-header">
+          <span className="download-options-icon">
+            <Icon name="download" />
+          </span>
+          <div className="download-options-copy">
+            <h2 id={`${dialogId}-title`} className="download-options-heading">
+              Download Options
+            </h2>
+            <p id={`${dialogId}-podcast`} className="download-options-podcast">
+              {podcastTitle}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-button download-options-close"
+            aria-label="Close Download Options"
+            onClick={close}
+          >
+            <Icon name="close" />
+          </button>
+        </header>
+        <div className="download-options-content">
+          <PodcastAnalysisSettings podcastId={podcastId} />
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
   const queryClient = useQueryClient();
   const settings = useQuery({
     queryKey: ["analysis-settings", podcastId],
@@ -56,11 +173,7 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
     setDraft({ ...value, ...changes });
   }
   return (
-    <details className="analysis-settings">
-      <summary>
-        Chapters & advert analysis{" "}
-        <span>{settings.data?.settings.enabled ? "Enabled" : "Off"}</span>
-      </summary>
+    <div className="analysis-settings">
       {settings.isLoading ? (
         <p>Loading settings…</p>
       ) : settings.error ? (
@@ -78,7 +191,7 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
               Checked recordings are retained and automatically downloaded to
               Android on Wi-Fi.
             </p>
-            <label>
+            <label className="analysis-toggle">
               <input
                 type="checkbox"
                 checked={value.enabled}
@@ -176,7 +289,7 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
           </>
         )
       )}
-    </details>
+    </div>
   );
 }
 

@@ -169,6 +169,8 @@ interface PodwaffleNativeModule {
   }): Promise<NativeNotificationDisplayResult>;
   bind(): Promise<NativePlaybackState>;
   getState(): Promise<NativePlaybackState>;
+  getPendingCompletions(): Promise<NativeEpisodeCompletion[]>;
+  acknowledgeCompletion(episodeId: string): Promise<void>;
   setQueue(input: NativeQueueSnapshot): Promise<void>;
   playEpisode(
     input: NativeEpisodeMedia,
@@ -213,6 +215,12 @@ const nativeModule =
   requireNativeModule<PodwaffleNativeModule>("PodwaffleMedia");
 
 export const PodwaffleMediaModule = {
+  getPendingCompletions(): Promise<NativeEpisodeCompletion[]> {
+    return nativeModule.getPendingCompletions();
+  },
+  acknowledgeCompletion(episodeId: string): Promise<void> {
+    return nativeModule.acknowledgeCompletion(episodeId);
+  },
   configure(config: PodwaffleMediaConfig): Promise<void> {
     return nativeModule.configure(config);
   },

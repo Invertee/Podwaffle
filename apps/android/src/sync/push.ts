@@ -4,7 +4,6 @@ import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 
 import { api } from "../api/client";
-import { playbackController } from "../playback/controller";
 import {
   PodwaffleMediaModule,
   type NativeNotificationDisplayResult,
@@ -20,8 +19,7 @@ import {
   recordPushDiagnostic,
   type PushDiagnosticLevel,
 } from "./pushDiagnostics";
-import { syncRuntime } from "./runtime";
-import { downloadAnalysedEpisodes } from "./analysisDownloads";
+import { synchronizeFromPush } from "./pushSync";
 
 const PUSH_WAKE_TASK = "podwaffle.push-wake.v1";
 const MESSAGE_CHANNEL_ID = "podwaffle-messages";
@@ -39,7 +37,7 @@ async function logPush(
 
 function objectKeys(value: unknown): string[] {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? Object.keys(value as Record<string, unknown>).sort()
+    ? Object.keys(value).sort()
     : [];
 }
 
@@ -157,7 +155,7 @@ async function handlePush(value: unknown, source: PushSource): Promise<void> {
   await logPush(`push.${source}.sync_started`, {
     kind: typeof data.kind === "string" ? data.kind : "unknown",
   });
-  await synchronizeFromPush();
+  await synchronizeFromPush(data.kind);
   await logPush(`push.${source}.sync_completed`, {
     kind: typeof data.kind === "string" ? data.kind : "unknown",
   });
@@ -181,32 +179,6 @@ Notifications.setNotificationHandler({
     });
   },
 });
-
-async function synchronizeFromPush(): Promise<void> {
-  const initial = useAuthStore.getState();
-  if (initial.status === "restoring") await initial.restore();
-  const current = useAuthStore.getState();
-  if (current.status !== "authenticated" || !current.credentials) {
-    await logPush(
-      "push.sync.skipped_not_authenticated",
-      { status: current.status },
-      "warning",
-    );
-    return;
-  }
-  // A playback wake-up should claim the durable command before doing the more
-  // expensive full-profile refresh. This keeps background controls responsive.
-  await syncRuntime.processPendingCommands();
-  await current.refresh();
-  await downloadAnalysedEpisodes().catch((error: unknown) =>
-    logPush(
-      "push.analysis_downloads.failed",
-      pushErrorMessage(error),
-      "warning",
-    ),
-  );
-  await playbackController.flushPendingPlayback();
-}
 
 TaskManager.defineTask(
   PUSH_WAKE_TASK,

@@ -404,8 +404,15 @@ export function createCatalogRouter(
               );
             }
           }
+          const currentPlayback = playbackState(
+            db,
+            profileId,
+            request.auth!.device.id,
+          );
           const episode =
-            !command.completed && priorEpisode.played
+            !command.completed &&
+            priorEpisode.played &&
+            currentPlayback.episode?.id !== episodeId
               ? priorEpisode
               : setEpisodeProgress(
                   db,
@@ -419,9 +426,20 @@ export function createCatalogRouter(
                 );
           if (!priorEpisode.played && episode.played)
             recordEpisodeCompletion(db, profileId);
-          const queue = episode.played
-            ? advanceQueueAfterCompletion(db, profileId, episodeId)
-            : listQueue(db, profileId);
+          const playback = playbackState(
+            db,
+            profileId,
+            request.auth!.device.id,
+          );
+          const reachedEnd =
+            command.completed ||
+            (episode.durationMs !== null &&
+              episode.durationMs > 0 &&
+              episode.positionMs >= episode.durationMs);
+          const queue =
+            reachedEnd || (episode.played && playback.episode?.id !== episodeId)
+              ? advanceQueueAfterCompletion(db, profileId, episodeId)
+              : listQueue(db, profileId);
           return {
             result: { episode, queue },
             payload: { episode, queue },

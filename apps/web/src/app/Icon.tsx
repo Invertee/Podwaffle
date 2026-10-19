@@ -6,6 +6,7 @@ export type IconName =
   | "close"
   | "device"
   | "discover"
+  | "download"
   | "history"
   | "info"
   | "list"
@@ -54,6 +55,7 @@ export function Icon({
         <path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9 4.9-2.1Z" />
       </>
     ),
+    download: <path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" />,
     history: (
       <>
         <path d="M4.8 7.5H2v-3" />

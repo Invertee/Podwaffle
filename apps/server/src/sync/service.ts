@@ -190,6 +190,14 @@ export class SyncService {
       ),
       subscriptions: listSubscriptions(this.database.db, profileId),
       queue: listQueue(this.database.db, profileId),
+      queueLastActivityAt:
+        (
+          this.database.db
+            .prepare(
+              "SELECT last_activity_at FROM queue_activity WHERE profile_id = ?",
+            )
+            .get(profileId) as { last_activity_at: string } | undefined
+        )?.last_activity_at ?? null,
       playback: playbackState(this.database.db, profileId, currentDeviceId),
     };
   }

@@ -269,7 +269,44 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   t.after(() => {
     global.fetch = originalFetch;
   });
-  const execute = async (binary, args) => {
+  const decoded = [];
+  let acousticStatsAvailable = false;
+  let rejectAcousticFilter = false;
+  const scans = [];
+  const execute = async (binary, args, _signal, options) => {
+    if (args.includes("-af")) {
+      const filter = args[args.indexOf("-af") + 1];
+      scans.push(filter);
+      if (filter.includes("aspectralstats")) {
+        if (rejectAcousticFilter) throw new Error("unsupported filter");
+        if (acousticStatsAvailable) {
+          for (const [name, key, value] of [
+            [
+              "rms",
+              "lavfi.astats.Overall.RMS_level",
+              (index) => (index < 20 ? -30 : -16),
+            ],
+            [
+              "centroid",
+              "lavfi.aspectralstats.1.centroid",
+              (index) => (index < 20 ? 0.1 : 0.4),
+            ],
+            ["flux", "lavfi.aspectralstats.1.flux", () => 0.01],
+          ]) {
+            fs.writeFileSync(
+              path.join(options.cwd, `acoustic-${name}.txt`),
+              Array.from(
+                { length: 40 },
+                (_, index) =>
+                  `frame:${index} pts:${index * 4096} pts_time:${index * 0.256}\n${key}=${value(index)}`,
+              ).join("\n"),
+            );
+          }
+        }
+      }
+    }
+    if (args.includes("-ss"))
+      decoded.push(Number(args[args.indexOf("-ss") + 1]) * 1000);
     if (binary === "probe")
       return {
         stdout: JSON.stringify({
@@ -282,6 +319,8 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
       };
     if (binary === "whisper") {
       assert.equal(args[args.indexOf("-l") + 1], "en");
+      assert.ok(args.includes("-ojf"));
+      assert.ok(!args.includes("-nt"));
       fs.writeFileSync(
         `${args[args.indexOf("-of") + 1]}.json`,
         JSON.stringify({
@@ -311,11 +350,67 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   assert.equal(retained.length, 1);
   assert.deepEqual(retained[0].bytes, audio);
   assert.deepEqual(retained[0].fingerprint, result.fingerprint);
-  assert.ok(result.fragments.some((f) => f.startMs >= 61000));
+  assert.ok(
+    result.fragments.every((fragment) =>
+      decoded.includes(fragment.startMs - 1000),
+    ),
+  );
+  assert.ok(
+    result.diagnostics.sampleWindows.some((window) => window.endMs === 90000),
+  );
   assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
   assert.equal(fs.readFileSync(model, "utf8"), "test model placeholder");
-  global.fetch = async (url) =>
-    url === request.enclosureUrl
+  assert.equal(result.diagnostics.boundaryDetection.volumeToneAvailable, false);
+  acousticStatsAvailable = true;
+  const progress = [];
+  const acousticResult = await analyse(
+    validateRequest(request),
+    config,
+    new AbortController().signal,
+    (_stage, percentage) => progress.push(percentage),
+    execute,
+  );
+  assert.equal(
+    acousticResult.diagnostics.boundaryDetection.volumeToneAvailable,
+    true,
+  );
+  assert.ok(
+    acousticResult.diagnostics.acousticBoundaryCandidates.some(
+      (candidate) =>
+        candidate.types.includes("volume") && candidate.types.includes("tone"),
+    ),
+  );
+  assert.ok(
+    progress.every(
+      (value, index) => index === 0 || value >= progress[index - 1],
+    ),
+  );
+  assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
+  acousticStatsAvailable = false;
+  rejectAcousticFilter = true;
+  const pauseResult = await analyse(
+    validateRequest(request),
+    config,
+    new AbortController().signal,
+    () => {},
+    execute,
+  );
+  assert.equal(
+    pauseResult.diagnostics.boundaryDetection.volumeToneAvailable,
+    false,
+  );
+  assert.ok(
+    pauseResult.diagnostics.warnings.some((warning) =>
+      warning.includes("pauses only"),
+    ),
+  );
+  assert.ok(scans.some((filter) => filter.startsWith("silencedetect=")));
+  assert.deepEqual(fs.readdirSync(config.podcastCacheDir), []);
+  rejectAcousticFilter = false;
+  let jevRequests = 0;
+  global.fetch = async (url) => {
+    if (url !== request.enclosureUrl) jevRequests++;
+    return url === request.enclosureUrl
       ? new Response(audio)
       : Response.json({
           model: "typesafe-jev-1.13.0",
@@ -334,6 +429,7 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
           },
           usage: { input_tokens: 100, output_tokens: 0 },
         });
+  };
   const jevConfig = {
     ...config,
     classifier: "jev",
@@ -350,16 +446,13 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
   );
   assert.equal(classified.provider, "jev");
   assert.equal(classified.classifierModel, jevConfig.podcastJevModel);
-  assert.equal(
-    classified.diagnostics.classifierUsage.requests,
-    classified.fragments.length,
-  );
+  assert.equal(classified.diagnostics.classifierUsage.requests, jevRequests);
   assert.equal(
     classified.diagnostics.classifierUsage.inputTokens,
-    classified.fragments.length * 100,
+    classified.diagnostics.classifierUsage.requests * 100,
   );
   const candidates = classified.segments.filter((s) => s.source === "jev");
-  assert.equal(candidates.length, classified.fragments.length);
+  assert.ok(candidates.length > 0);
   assert.ok(
     candidates.every((s) =>
       classified.fragments.some(
@@ -391,7 +484,8 @@ test("analysis pipeline hashes the fetched bytes, maps English snippets and clea
       return execute(binary, args, signal);
     },
   );
-  assert.equal(scanFilter, "silencedetect=n=-29dB:d=0.25");
+  assert.ok(scanFilter.includes("silencedetect=n=-29dB:d=0.25"));
+  assert.ok(scanFilter.includes("aspectralstats"));
   assert.deepEqual(tuned.diagnostics.detectionSettings, captured);
   assert.equal(
     tuned.diagnostics.effectiveSettings.audio.sampleBudgetSeconds,

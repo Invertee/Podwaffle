@@ -4,11 +4,17 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { classifyJev } = require("./classifier");
+const {
+  acousticFilter,
+  readAcousticFrames,
+  silenceBoundaries,
+  detectBoundaries,
+} = require("./audio-boundaries");
+const { speechUnits, alignSampleWindows } = require("./speech-segmentation");
+const { classifyAndRefine } = require("./advert-refinement");
 const {
   defaultDetectionSettings,
   resolveDetectionSettings,
-  applyJevPolicy,
 } = require("./detection-settings");
 
 function validateRequest(body) {
@@ -91,12 +97,13 @@ function validateRequest(body) {
   };
 }
 
-function run(binary, args, signal) {
+function run(binary, args, signal, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       windowsHide: true,
       signal,
       stdio: ["ignore", "pipe", "pipe"],
+      cwd: options.cwd,
     });
     let stdout = "",
       stderr = "";
@@ -245,8 +252,48 @@ function parseWhisper(json, window) {
       return [];
     const startMs = Math.max(window.startMs, window.startMs + from);
     const endMs = Math.min(window.endMs, window.startMs + to);
+    const words = [];
+    for (const token of item.tokens ?? []) {
+      const word = String(token.text ?? "");
+      if (words.length && /^[.,!?;:'"\u2019\u201d)\]]+$/.test(word)) {
+        words.at(-1).text += word;
+        continue;
+      }
+      const tokenFrom = Number(token.offsets?.from),
+        tokenTo = Number(token.offsets?.to);
+      if (
+        !word.trim() ||
+        /^(?:<\||\[_)/.test(word) ||
+        !Number.isFinite(tokenFrom) ||
+        !Number.isFinite(tokenTo) ||
+        tokenFrom < 0 ||
+        tokenTo <= tokenFrom
+      )
+        continue;
+      const wordStart = Math.max(startMs, window.startMs + tokenFrom);
+      const wordEnd = Math.min(endMs, window.startMs + tokenTo);
+      if (wordEnd <= wordStart) continue;
+      const previous = words.at(-1);
+      if (previous && !/^\s/.test(word)) {
+        previous.text += word;
+        previous.endMs = Math.max(previous.endMs, wordEnd);
+      } else
+        words.push({ startMs: wordStart, endMs: wordEnd, text: word.trim() });
+    }
+    const normalise = (value) =>
+      value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    const completeWordTiming =
+      words.length &&
+      normalise(words.map((word) => word.text).join("")) === normalise(text);
     return endMs > startMs
-      ? [{ startMs, endMs, text: text.slice(0, 4000) }]
+      ? [
+          {
+            startMs,
+            endMs,
+            text: text.slice(0, 4000),
+            ...(completeWordTiming ? { words } : {}),
+          },
+        ]
       : [];
   });
 }
@@ -320,6 +367,13 @@ function validateSegments(segments, durationMs) {
 }
 
 async function analyse(request, config, signal, progress, execute = run) {
+  const reportProgress = progress;
+  let highestProgress = 0;
+  progress = (stage, percentage) =>
+    reportProgress(
+      stage,
+      (highestProgress = Math.max(highestProgress, percentage)),
+    );
   const detectionSettings =
     request.detectionSettings || defaultDetectionSettings(config);
   const effectiveSettings = resolveDetectionSettings(
@@ -371,28 +425,51 @@ async function analyse(request, config, signal, progress, execute = run) {
       throw new Error("Unsupported audio duration (maximum 8 hours)");
     progress("acoustic scan", 20);
     const acoustic = effectiveSettings.audio;
-    const scan = await execute(
-      config.ffmpegPath,
-      [
-        "-nostdin",
-        "-hide_banner",
-        "-i",
-        input,
-        "-vn",
-        "-af",
-        `silencedetect=n=${acoustic.silenceThresholdDb}dB:d=${acoustic.minimumSilenceSeconds}`,
-        "-f",
-        "null",
-        "-",
-      ],
-      signal,
-    );
-    const boundaries = [...scan.stderr.matchAll(/silence_end: ([\d.]+)/g)].map(
-      (m) => Math.round(Number(m[1]) * 1000),
-    );
     const warnings = [
       "Experimental suggestions; unsampled audio may contain adverts. Media identity has not been verified against client playback.",
     ];
+    const scanArgs = (filter) => [
+      "-nostdin",
+      "-hide_banner",
+      "-i",
+      input,
+      "-vn",
+      "-af",
+      filter,
+      "-f",
+      "null",
+      "-",
+    ];
+    let scan;
+    let frames = [];
+    try {
+      scan = await execute(
+        config.ffmpegPath,
+        scanArgs(acousticFilter(acoustic)),
+        signal,
+        { cwd: directory },
+      );
+      frames = await readAcousticFrames(directory, durationMs, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      scan = await execute(
+        config.ffmpegPath,
+        scanArgs(
+          `silencedetect=n=${acoustic.silenceThresholdDb}dB:d=${acoustic.minimumSilenceSeconds}`,
+        ),
+        signal,
+      );
+    }
+    if (!frames.length)
+      warnings.push(
+        "Volume/tone statistics were unavailable; acoustic boundaries use pauses only for this job.",
+      );
+    const boundaryCandidates = detectBoundaries(
+      frames,
+      silenceBoundaries(scan.stderr, durationMs),
+      acoustic,
+    );
+    const boundaries = boundaryCandidates.map((boundary) => boundary.timeMs);
     let segments = (probe.chapters ?? []).map((c) => ({
       startMs: Math.round(Number(c.start_time) * 1000),
       endMs: Math.min(durationMs, Math.round(Number(c.end_time) * 1000)),
@@ -455,17 +532,20 @@ async function analyse(request, config, signal, progress, execute = run) {
       durationMs,
     );
     if (config.classifierWarning) warnings.push(config.classifierWarning);
-    const windows = sampleWindows(
-      durationMs,
-      boundaries,
-      acoustic.sampleBudgetSeconds,
-      request.edgeFocusMinutes,
+    const windows = alignSampleWindows(
+      sampleWindows(
+        durationMs,
+        boundaries,
+        acoustic.sampleBudgetSeconds,
+        request.edgeFocusMinutes,
+      ),
+      boundaryCandidates,
     );
-    const fragments = [];
-    const transcribe = async (window, index, total) => {
+    const units = [];
+    const transcribe = async (window, index, total, refining = false) => {
       progress(
         `transcribing sample ${index + 1}/${total}`,
-        Math.round(25 + (55 * index) / total),
+        refining ? 90 : Math.round(25 + (55 * index) / total),
       );
       const wav = path.join(directory, "sample.wav"),
         output = path.join(directory, "transcript");
@@ -504,10 +584,10 @@ async function analyse(request, config, signal, progress, execute = run) {
           "en",
           "-t",
           String(config.podcastWhisperThreads ?? 2),
-          "-oj",
+          "-ojf",
           "-of",
           output,
-          "-nt",
+          "-np",
         ],
         signal,
       );
@@ -516,83 +596,31 @@ async function analyse(request, config, signal, progress, execute = run) {
         window,
       );
     };
-    for (let i = 0; i < windows.length; i++)
-      fragments.push(...(await transcribe(windows[i], i, windows.length)));
-    // Additional adjacent samples provide context around phrase hits; bounded to 8 windows.
-    const hits = classifyRules(fragments, request.phrases);
-    const extra = [];
-    for (const hit of hits)
-      for (const startMs of [Math.max(0, hit.startMs - 30000), hit.endMs]) {
-        const window = {
-          startMs,
-          endMs: Math.min(durationMs, startMs + 30000),
-        };
-        if (
-          extra.length < 8 &&
-          window.endMs > startMs &&
-          ![...windows, ...extra].some(
-            (w) => Math.abs(w.startMs - startMs) < 15000,
-          )
-        )
-          extra.push(window);
-      }
-    for (let i = 0; i < extra.length; i++)
-      fragments.push(...(await transcribe(extra[i], i, extra.length)));
-    windows.push(...extra);
-    fragments.sort((a, b) => a.startMs - b.startMs);
-    progress("classifying", 85);
-    let provider = "rules",
-      classifierAssessments = [],
-      classifierUsage,
-      classifierReturnedModels,
-      classifierErrors;
-    if (config.classifier === "jev") {
-      try {
-        const jev = await classifyJev(
-          fragments,
-          request,
-          durationMs,
-          config,
-          signal,
-          validateSegments,
-          fetch,
-          (complete, total) =>
-            progress(
-              `classifying excerpt ${complete}/${total}`,
-              Math.round(85 + (13 * complete) / Math.max(1, total)),
-            ),
-        );
-        const filtered = applyJevPolicy(jev, effectiveSettings.jev);
-        classifierAssessments = filtered.assessments;
-        classifierUsage = jev.usage;
-        classifierReturnedModels = jev.returnedModels;
-        classifierErrors = jev.providerErrors;
-        const failureSummary = jev.failureReasons.slice(0, 3).join(" ");
-        if (jev.successfulCount > 0 || fragments.length === 0) {
-          segments.push(...filtered.segments);
-          if (jev.failedFragments.length) {
-            segments.push(
-              ...classifyRules(jev.failedFragments, request.phrases),
-            );
-            warnings.push(
-              `Jev classification failed for ${jev.failedFragments.length} of ${fragments.length} excerpts (${failureSummary}); phrase detection was used for those excerpts.`,
-            );
-          }
-          provider = "jev";
-        } else {
-          warnings.push(
-            `Jev classification failed for every excerpt (${failureSummary}); phrase detector used instead.`,
-          );
-        }
-      } catch (error) {
-        if (signal.aborted) throw error;
-        warnings.push(
-          `${error instanceof Error ? error.message : "Jev classifier unavailable"}; phrase detector used instead. Check the DigitalOcean model access key and connection.`,
-        );
-      }
+    for (let i = 0; i < windows.length; i++) {
+      units.push(
+        ...speechUnits(await transcribe(windows[i], i, windows.length)),
+      );
     }
+    const classified = await classifyAndRefine({
+      units,
+      boundaries: boundaryCandidates,
+      windows,
+      durationMs,
+      request,
+      config,
+      signal,
+      progress,
+      transcribe: (window, index, total) =>
+        transcribe(window, index, total, true),
+      validate: validateSegments,
+      classifyRules,
+      policy: effectiveSettings.jev,
+      sampleBudgetSeconds: acoustic.sampleBudgetSeconds,
+      warnings,
+    });
+    const { provider, fragments } = classified;
+    segments.push(...classified.segments);
     if (provider === "rules") {
-      segments.push(...classifyRules(fragments, request.phrases));
       warnings.push(
         "Phrase-only detection: ranges mark matched speech, not complete advert breaks. Topic chapters require publisher metadata. Jev classifies adverts and promotions only.",
       );
@@ -616,16 +644,20 @@ async function analyse(request, config, signal, progress, execute = run) {
       diagnostics: {
         sampleWindows: windows,
         acousticBoundariesMs: boundaries.slice(0, 2000),
-        warnings,
+        warnings: [...new Set(warnings)],
         sensitivity: request.sensitivity,
         minimumAdvertConfidence: effectiveSettings.jev.advertConfidence,
         minimumPromotionConfidence: effectiveSettings.jev.promotionConfidence,
         detectionSettings,
         effectiveSettings,
-        classifierAssessments,
-        ...(classifierUsage
-          ? { classifierUsage, classifierReturnedModels, classifierErrors }
-          : {}),
+        ...classified.diagnostics,
+        acousticBoundaryCandidates: boundaryCandidates.slice(0, 2000),
+        boundaryDetection: {
+          version: 2,
+          volumeToneAvailable: frames.length > 0,
+          frameCount: frames.length,
+          speechTimestamps: true,
+        },
       },
       transcriptExpired: false,
     };

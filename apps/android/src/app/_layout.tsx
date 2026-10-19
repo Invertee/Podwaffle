@@ -198,6 +198,7 @@ function RuntimeBinder() {
 
   useEffect(() => {
     if (status !== "authenticated" || !credentials) return;
+    void playbackController.flushPendingPlayback().catch(() => undefined);
     void playbackController.ensureNotificationPermission().then((granted) => {
       if (granted) return;
       Alert.alert(
@@ -240,7 +241,10 @@ function RuntimeBinder() {
   useEffect(() => {
     if (status !== "authenticated" || !credentials) return;
     const check = () => {
-      if (AppState.currentState === "active") void refreshNativeCastSession();
+      if (AppState.currentState === "active") {
+        void refreshNativeCastSession();
+        void playbackController.expireIdleQueue().catch(() => undefined);
+      }
     };
     check();
     const timer = setInterval(check, 10_000);

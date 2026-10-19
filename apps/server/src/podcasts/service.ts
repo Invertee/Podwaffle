@@ -492,12 +492,18 @@ export function setEpisodeProgress(
         .prepare("SELECT episode_id FROM playback_state WHERE profile_id = ?")
         .get(profileId) as { episode_id: string | null } | undefined)
     : undefined;
-  // The database advances the queue only at the stored end position. Treat the
-  // final three percent as complete so played state and queue agree.
+  // Played status is a library preference; it must not cut off the final three
+  // percent of the audio. Only a real end observation advances active playback.
   const storedPositionMs =
-    complete && effectiveDuration !== null
+    forceComplete && effectiveDuration !== null
       ? Math.max(positionMs, effectiveDuration)
       : positionMs;
+  if (
+    forceComplete ||
+    (effectiveDuration !== null && positionMs >= effectiveDuration)
+  ) {
+    pruneCompletedQueueItems(db, profileId);
+  }
   db.prepare(
     `INSERT INTO episode_state(
       profile_id, episode_id, position_ms, duration_ms, played, played_at,
@@ -505,8 +511,9 @@ export function setEpisodeProgress(
     ) VALUES (?, ?, ?, ?, ?, ?, 'none', ?, ?)
     ON CONFLICT(profile_id, episode_id) DO UPDATE SET
       position_ms=excluded.position_ms, duration_ms=COALESCE(excluded.duration_ms, episode_state.duration_ms),
-      played=CASE WHEN episode_state.manual_play_state='unplayed' THEN 0 ELSE excluded.played END,
-      played_at=CASE WHEN episode_state.manual_play_state='unplayed' THEN NULL ELSE excluded.played_at END,
+      played=CASE WHEN ? THEN 1 WHEN episode_state.manual_play_state='unplayed' THEN 0 ELSE excluded.played END,
+      played_at=CASE WHEN ? THEN excluded.played_at WHEN episode_state.manual_play_state='unplayed' OR excluded.played=0 THEN NULL ELSE COALESCE(episode_state.played_at, excluded.played_at) END,
+      manual_play_state=CASE WHEN ? THEN 'none' ELSE episode_state.manual_play_state END,
       last_played_at=excluded.last_played_at, updated_at=excluded.updated_at`,
   ).run(
     profileId,
@@ -517,9 +524,17 @@ export function setEpisodeProgress(
     complete ? now : null,
     now,
     now,
+    forceComplete ? 1 : 0,
+    forceComplete ? 1 : 0,
+    forceComplete ? 1 : 0,
   );
   const updated = getEpisode(db, profileId, episodeId)!;
-  if (complete && updated.played && playbackBefore?.episode_id === episodeId) {
+  if (
+    complete &&
+    (forceComplete ||
+      (effectiveDuration !== null && positionMs >= effectiveDuration)) &&
+    playbackBefore?.episode_id === episodeId
+  ) {
     // The completion trigger selects the next queue item. Its saved progress is
     // authoritative, including for an episode played on another device.
     db.prepare(
@@ -555,13 +570,44 @@ export function listHistory(db: DatabaseSync, profileId: string): Episode[] {
   }));
 }
 
+function pruneCompletedQueueItems(db: DatabaseSync, profileId: string): void {
+  db.prepare(
+    `DELETE FROM queue_items
+    WHERE profile_id = ?
+      AND EXISTS (
+        SELECT 1 FROM episode_state AS state
+        WHERE state.profile_id = queue_items.profile_id
+          AND state.episode_id = queue_items.episode_id
+          AND state.played = 1 AND state.played_at >= queue_items.added_at
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM playback_state AS playback
+        WHERE playback.profile_id = queue_items.profile_id
+          AND playback.episode_id = queue_items.episode_id
+          AND playback.state <> 'stopped'
+      )`,
+  ).run(profileId);
+}
+
 export function listQueue(db: DatabaseSync, profileId: string): QueueItem[] {
   const rows = db
     .prepare(
       `SELECT q.id AS queue_id, q.sort_index, q.added_at, episode_data.*
        FROM queue_items q
        JOIN (${episodeSelect}) AS episode_data ON episode_data.id = q.episode_id
-       WHERE q.profile_id = ? ORDER BY q.sort_index`,
+       WHERE q.profile_id = ?
+         AND (
+           COALESCE(episode_data.played, 0) = 0
+           OR episode_data.played_at IS NULL
+           OR q.added_at > episode_data.played_at
+           OR EXISTS (
+             SELECT 1 FROM playback_state AS playback
+             WHERE playback.profile_id = q.profile_id
+               AND playback.episode_id = q.episode_id
+               AND playback.state <> 'stopped'
+           )
+         )
+       ORDER BY q.sort_index`,
     )
     .all(profileId, profileId) as unknown as Array<
     EpisodeRow & { queue_id: string; sort_index: number; added_at: string }
@@ -680,6 +726,7 @@ export function advanceQueueAfterCompletion(
   profileId: string,
   episodeId: string,
 ): QueueItem[] {
+  pruneCompletedQueueItems(db, profileId);
   const current = db
     .prepare(
       `SELECT id FROM queue_items

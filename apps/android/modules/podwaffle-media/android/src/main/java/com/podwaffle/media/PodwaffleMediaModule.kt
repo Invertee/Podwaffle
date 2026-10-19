@@ -98,6 +98,15 @@ class PodwaffleMediaModule : Module() {
             }
         }
 
+        AsyncFunction("getPendingCompletions") {
+            PlaybackCompletionJournal(context).pending()
+        }
+
+        AsyncFunction("acknowledgeCompletion") { episodeId: String ->
+            PlaybackCompletionJournal(context).acknowledge(episodeId)
+            true
+        }
+
         AsyncFunction("setQueue") { input: Map<String, Any?> ->
             val snapshot = QueueSnapshot.fromMap(input)
             withServiceOnMain { service ->

@@ -12,6 +12,7 @@ import { FeedScheduler } from "./podcasts/scheduler.js";
 import { PushService } from "./push/service.js";
 import { OperationalStatusReporter } from "./operational-status.js";
 import { CastProgressWatchdog } from "./playback/cast-watchdog.js";
+import { QueueExpiryService } from "./playback/queue-expiry.js";
 import { AnalysisDispatcher } from "./analysis/service.js";
 import { IntegratedAnalysis } from "./analysis/engine.js";
 import { EpisodeMediaCache } from "./analysis/media.js";
@@ -22,6 +23,7 @@ export interface Runtime {
   webSockets: PodwaffleWebSocketServer;
   feedScheduler: FeedScheduler;
   castWatchdog: CastProgressWatchdog;
+  queueExpiry: QueueExpiryService;
   push: PushService;
   operationalStatus: OperationalStatusReporter;
   server: Server;
@@ -74,6 +76,7 @@ export async function createRuntime(
     (profileId, ownerId, command) =>
       webSockets.sendPlaybackCommand(profileId, ownerId, command),
   );
+  const queueExpiry = new QueueExpiryService(database, sync);
   const app = createApp({
     config,
     database,
@@ -83,6 +86,7 @@ export async function createRuntime(
     operationalStatus,
     analysis,
     mediaCache,
+    queueExpiry,
     ...(options.webDistPath === undefined
       ? {}
       : { webDistPath: options.webDistPath }),
@@ -96,6 +100,7 @@ export async function createRuntime(
   feedScheduler.start();
   analysisDispatcher.start();
   castWatchdog.start();
+  queueExpiry.start();
   return {
     database,
     sync,
@@ -103,11 +108,13 @@ export async function createRuntime(
     operationalStatus,
     feedScheduler,
     castWatchdog,
+    queueExpiry,
     push,
     server,
     analysis,
     mediaCache,
     close: async () => {
+      queueExpiry.stop();
       castWatchdog.stop();
       feedScheduler.stop();
       await analysisDispatcher.stop();

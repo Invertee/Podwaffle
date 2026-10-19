@@ -51,6 +51,16 @@ used), and any failed item with server/browser logs.
 
 ## Android cancellation and expiry regression checks
 
+- [ ] Leave a queue idle for 72 hours (or advance the test clock). The entire queue clears and the player becomes idle without changing saved progress or played status. Restarting the server/app must preserve the deadline.
+- [ ] Keep playing locally or over Cast, seek, or change the queue before the deadline. Inactivity restarts from that action. Repeated paused receiver/status reports alone must not postpone expiry.
+- [ ] Open a podcast and use the top-right download icon. Download Options contains the analysis switch and sensitivity settings; Android Back, the close button, and tapping outside dismiss it. The episode list no longer shows these settings inline.
+
+- [ ] Queue three episodes and play them locally, then repeat over Cast with the phone backgrounded. Each episode plays once; completed items disappear and never return after reconnecting or restarting the app.
+- [ ] At 97%, the current episode becomes played and leaves In Progress, while its final audio continues. Queue advancement happens at the actual end, including the final item and episodes with no feed duration.
+- [ ] Finish an episode with server access interrupted, restart the app, then reconnect. Its completion is recovered and the old queue entry does not return.
+- [ ] Rapidly remove several upcoming rows. Each disappears immediately. Remove the current local/Cast item while other rows remain: playback stops and stays idle until Play is explicitly pressed. Repeat with only one row and with Clear queue.
+- [ ] Delay a completion response, remove the current item, then allow the response through. It must not restart playback. Intentionally requeue/replay a completed episode and confirm that it can play again.
+
 - [ ] With local playback running, open Cast and tap outside the chooser. The spinner clears immediately, local playback resumes at the same position, and the chooser can be reopened. Repeat using Android Back.
 - [ ] Repeat with paused playback and with no episode loaded. Cancellation must not start playback or reset the position.
 - [ ] Select a receiver normally; chooser dismissal after selection must not cancel the connection. Test a failed connection and retry.

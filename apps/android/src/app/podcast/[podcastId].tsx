@@ -15,7 +15,7 @@ import {
 import { api } from "../../api/client";
 import { cachedQuery } from "../../api/queryCache";
 import { EpisodeCard } from "../../components/EpisodeCard";
-import { PodcastAnalysisSettings } from "../../components/PodcastAnalysisSettings";
+import { DownloadOptionsModal } from "../../components/DownloadOptionsModal";
 import { Icon } from "../../components/Icon";
 import { useEpisodeActions } from "../../hooks/useEpisodeActions";
 import { useAuthStore } from "../../stores/auth";
@@ -41,6 +41,7 @@ export default function PodcastScreen() {
     state.snapshot?.subscriptions.find((item) => item.id === podcastId),
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadOptionsVisible, setDownloadOptionsVisible] = useState(false);
 
   const podcast = useQuery({
     queryKey: ["android-podcast", podcastId],
@@ -101,7 +102,18 @@ export default function PodcastScreen() {
         <Text style={styles.screenTitle} numberOfLines={1}>
           {item?.title ?? "Podcast"}
         </Text>
-        <View style={styles.headerSpacer} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.downloadButton,
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setDownloadOptionsVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Download Options"
+          accessibilityHint="Manage analysis and automatic downloads for this podcast"
+        >
+          <Icon name="download" size={22} color={colors.accent} />
+        </Pressable>
       </View>
 
       <FlatList
@@ -138,7 +150,6 @@ export default function PodcastScreen() {
                 {description}
               </Text>
             ) : null}
-            <PodcastAnalysisSettings podcastId={podcastId} />
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>Episodes</Text>
               <Text style={styles.count}>{episodes.data?.length ?? 0}</Text>
@@ -175,6 +186,12 @@ export default function PodcastScreen() {
           )
         }
       />
+      <DownloadOptionsModal
+        visible={downloadOptionsVisible}
+        podcastId={podcastId}
+        podcastTitle={item?.title ?? "Podcast"}
+        onClose={() => setDownloadOptionsVisible(false)}
+      />
     </View>
   );
 }
@@ -182,7 +199,7 @@ export default function PodcastScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgPrimary },
   screenHeader: {
-    height: 52,
+    minHeight: 56,
     paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
@@ -191,8 +208,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
   },
   backButton: {
-    width: 38,
-    height: 38,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.full,
@@ -205,7 +222,14 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.semibold,
     textAlign: "center",
   },
-  headerSpacer: { width: 38 },
+  downloadButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.full,
+    backgroundColor: colors.accentDim,
+  },
   content: { padding: spacing.md, paddingBottom: spacing.lg },
   centered: {
     flex: 1,

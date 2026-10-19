@@ -134,6 +134,7 @@ class PodwaffleMediaService : MediaSessionService() {
 
     private var localItems: List<MediaItem> = emptyList()
     private var remoteItems: List<MediaItem> = emptyList()
+    private val completionJournal by lazy { PlaybackCompletionJournal(this) }
     private var castConnecting = false
     private var pendingCastEpisodeId: String? = null
     private var pendingCastPositionMs = 0L
@@ -330,22 +331,26 @@ class PodwaffleMediaService : MediaSessionService() {
                         IllegalStateException("No saved playback is available"),
                     )
                 }
-                localItems = media.map { (downloadStore?.enrich(it) ?: it.copy(localDownloadPath = null)).toMediaItem(useDownload = true) }
-                remoteItems = media.map { it.toMediaItem(useDownload = false) }
+                localItems = completionJournal.excludeCompleted(media.map { (downloadStore?.enrich(it) ?: it.copy(localDownloadPath = null)).toMediaItem(useDownload = true) })
+                remoteItems = completionJournal.excludeCompleted(media.map { it.toMediaItem(useDownload = false) })
+                if (localItems.isEmpty()) return Futures.immediateFailedFuture(
+                    IllegalStateException("No unfinished playback is available"),
+                )
                 val savedId = playbackPreferences.getString("mediaId", null)
                 val savedIndex = playbackPreferences.getInt("index", 0)
-                val index = media.indexOfFirst { it.episodeId == savedId }
+                val index = localItems.indexOfFirst { it.mediaId == savedId }
                     .takeIf { it >= 0 }
-                    ?: savedIndex.coerceIn(0, media.lastIndex)
-                val position = playbackPreferences.getLong("position", 0L)
-                    .coerceAtLeast(0L)
+                    ?: savedIndex.coerceIn(0, localItems.lastIndex)
+                val position = if (localItems[index].mediaId == savedId) {
+                    playbackPreferences.getLong("position", 0L).coerceAtLeast(0L)
+                } else EpisodeMedia.fromMediaItem(localItems[index])?.resumePositionMs ?: 0L
                 localPlayer?.playbackParameters = PlaybackParameters(
                     playbackPreferences.getFloat("rate", 1f).coerceIn(0.5f, 4f),
                 )
                 lastMediaItem = localItems.getOrNull(index)
                 lastObservedMediaId = lastMediaItem?.mediaId
                 lastObservedPositionMs = position
-                lastObservedDurationMs = media.getOrNull(index)?.durationMs
+                lastObservedDurationMs = EpisodeMedia.fromMediaItem(lastMediaItem)?.durationMs
                 Futures.immediateFuture(
                     MediaSession.MediaItemsWithStartPosition(
                         localItems,
@@ -460,6 +465,13 @@ class PodwaffleMediaService : MediaSessionService() {
                 notifyStateChanged()
                 if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     notifyQueueChanged()
+                }
+                // The final item has no AUTO transition to another item.
+                // Record its end natively even when React Native is suspended.
+                if (player.playbackState == Player.STATE_ENDED &&
+                    (player !== castPlayer || (!castStartupGuardActive() &&
+                        (player.duration > 0L && player.currentPosition >= player.duration - 2_000L)))) {
+                    player.currentMediaItem?.let(::notifyItemEnded)
                 }
             }
 
@@ -689,8 +701,8 @@ class PodwaffleMediaService : MediaSessionService() {
         remote: List<MediaItem>,
         requestedIndex: Int,
     ) {
-        localItems = local
-        remoteItems = remote
+        localItems = completionJournal.excludeCompleted(local)
+        remoteItems = completionJournal.excludeCompleted(remote)
         reconcileCastSessionState()
         if (
             shouldDeferNativePlaybackMutationForCastRecovery(
@@ -716,17 +728,24 @@ class PodwaffleMediaService : MediaSessionService() {
         }
 
         val currentId = player.currentMediaItem?.mediaId
+        if (currentId == null) {
+            // Queue edits cache upcoming items without loading one into an idle
+            // player. An explicit play request selects the next active item.
+            notifyQueueChanged()
+            notifyStateChanged()
+            return
+        }
         val currentPosition = player.currentPosition.coerceAtLeast(0L)
         val candidateIds = candidates.map { it.mediaId }
         if (
             canReconcileActiveCastQueueWithoutReload(
-                player === castPlayer && isCasting(),
+                player === localPlayer || (player === castPlayer && isCasting()),
                 currentId,
                 player.currentMediaItemIndex,
                 candidateIds,
             )
         ) {
-            // Do not reload/prepare the active Cast item for a queue-only change.
+            // Do not reload/prepare the active item for a queue-only change.
             // CastPlayer.setMediaItems() sends a receiver queue load which can
             // briefly pause playback and, on some receivers, detach the sender.
             // The playback invariant keeps the current episode at queue index 0,
@@ -802,6 +821,9 @@ class PodwaffleMediaService : MediaSessionService() {
         startPositionMs: Long,
         autoplay: Boolean = true,
     ) {
+        // This is an explicit play request, so replaying a completed episode is
+        // permitted. Passive queue refreshes never clear completion evidence.
+        completionJournal.allowReplay(local.mediaId)
         upsertQueueItem(localItems, local).also { localItems = it }
         upsertQueueItem(remoteItems, remote).also { remoteItems = it }
         reconcileCastSessionState()
@@ -864,7 +886,8 @@ class PodwaffleMediaService : MediaSessionService() {
         }
         localItems = emptyList()
         remoteItems = emptyList()
-        lastCompletedMediaId = null
+        lastMediaItem = null
+        lastObservedMediaId = null
         clearPersistedPlayback()
         notifyQueueChanged()
         notifyStateChanged()
@@ -1070,6 +1093,14 @@ class PodwaffleMediaService : MediaSessionService() {
 
     fun notifyCastStateChanged() {
         val state = getCastState()
+        val snapshot = currentCastSnapshot()
+        if (!castReconnectExpected && !castStartupGuardActive() &&
+            snapshot.connected && snapshot.playerState == "idle" &&
+            snapshot.idleReason == "finished") {
+            val endedId = snapshot.episode?.episodeId
+            (lastMediaItem?.takeIf { it.mediaId == endedId }
+                ?: remoteItems.firstOrNull { it.mediaId == endedId })?.let(::notifyItemEnded)
+        }
         if (!castStartupGuardActive()) {
             castProgressReporter.report(currentCastSnapshot(), castPlayer?.playbackParameters?.speed ?: 1f)
         }
@@ -1735,7 +1766,6 @@ class PodwaffleMediaService : MediaSessionService() {
         lastCompletedMediaId = media.episodeId
         // Retain played downloads for one day before scheduled cleanup.
         PodwaffleCachePolicy.markPlayed(this, media.episodeId)
-        persistPlayback()
         val extras = item.mediaMetadata.extras
         val observed = item.mediaId == lastObservedMediaId
         val observedDurationMs = if (observed) {
@@ -1758,6 +1788,23 @@ class PodwaffleMediaService : MediaSessionService() {
         } else {
             extras?.getString("source") ?: "stream"
         }
+        val completedQueueId = media.queueItemId ?: localItems
+            .firstOrNull { it.mediaId == media.episodeId }
+            ?.let(EpisodeMedia::fromMediaItem)?.queueItemId
+        completionJournal.record(media.episodeId, completedQueueId, positionMs, durationMs, source)
+        localItems = localItems.filterNot { it.mediaId == media.episodeId }
+        remoteItems = remoteItems.filterNot { it.mediaId == media.episodeId }
+        val player = activePlayer
+        // Remove completed history from the live playlist as well as the saved
+        // lists; otherwise a later handoff can load it back onto the receiver.
+        if (player?.currentMediaItem?.mediaId != media.episodeId) {
+            for (index in (player?.mediaItemCount ?: 0) - 1 downTo 0) {
+                if (player?.getMediaItemAt(index)?.mediaId == media.episodeId) {
+                    player?.removeMediaItem(index)
+                }
+            }
+        }
+        persistPlayback()
         val advancedToNext = activePlayer?.currentMediaItem?.mediaId
             ?.let { it != media.episodeId }
             ?: false
@@ -1841,17 +1888,25 @@ class PodwaffleMediaService : MediaSessionService() {
                 }
             }
             if (media.isEmpty()) return
-            val restoredMedia = media.map { item ->
+            val restoredMedia = completionJournal.excludeCompleted(
+                media.map { it.toMediaItem(useDownload = false) },
+            ).mapNotNull(EpisodeMedia::fromMediaItem).map { item ->
                 downloadStore?.enrich(item) ?: item.copy(localDownloadPath = null)
             }
             localItems = restoredMedia.map { it.toMediaItem(useDownload = true) }
             remoteItems = restoredMedia.map { it.toMediaItem(useDownload = false) }
+            if (restoredMedia.isEmpty()) {
+                clearPersistedPlayback()
+                return
+            }
             val savedId = playbackPreferences.getString("mediaId", null)
             val savedIndex = playbackPreferences.getInt("index", 0)
-            val index = media.indexOfFirst { it.episodeId == savedId }
+            val index = restoredMedia.indexOfFirst { it.episodeId == savedId }
                 .takeIf { it >= 0 }
-                ?: savedIndex.coerceIn(0, media.lastIndex)
-            val position = playbackPreferences.getLong("position", 0L).coerceAtLeast(0L)
+                ?: savedIndex.coerceIn(0, restoredMedia.lastIndex)
+            val position = if (restoredMedia[index].episodeId == savedId) {
+                playbackPreferences.getLong("position", 0L).coerceAtLeast(0L)
+            } else restoredMedia[index].resumePositionMs
             val rate = playbackPreferences.getFloat("rate", 1f).coerceIn(0.5f, 4f)
             localPlayer?.apply {
                 setMediaItems(localItems, index, position)
@@ -1862,7 +1917,7 @@ class PodwaffleMediaService : MediaSessionService() {
             lastMediaItem = localItems.getOrNull(index)
             lastObservedMediaId = lastMediaItem?.mediaId
             lastObservedPositionMs = position
-            lastObservedDurationMs = media.getOrNull(index)?.durationMs
+            lastObservedDurationMs = restoredMedia.getOrNull(index)?.durationMs
 
             persistedCastAuthority = savedCastAuthority
             if (persistedCastAuthority) {
@@ -1893,7 +1948,7 @@ class PodwaffleMediaService : MediaSessionService() {
                     mediaLoaded = true,
                     playerState = if (wasPlaying) "playing" else "paused",
                     positionMs = position,
-                    durationMs = media.getOrNull(index)?.durationMs,
+                    durationMs = restoredMedia.getOrNull(index)?.durationMs,
                     episode = restoredMedia.getOrNull(index),
                 )
             }

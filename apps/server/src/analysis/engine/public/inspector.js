@@ -351,6 +351,15 @@
           ),
         );
       }
+      if (result.diagnostics?.boundaryDetection?.version >= 2) {
+        const { boundaryDetection, refinement } = result.diagnostics;
+        $("inspectionWarnings").append(
+          element(
+            "li",
+            `Speech excerpts use timestamps and ${boundaryDetection.volumeToneAvailable ? "pauses, volume and tone changes" : "pauses"}.${refinement ? ` Advert edge refinement: ${refinement.usedSeconds}s of ${refinement.budgetSeconds}s extra audio used.` : ""}`,
+          ),
+        );
+      }
       $("markerSummary").textContent = model.markers.length
         ? "Saved advert and promotion ranges · Boundaries are approximate"
         : "No advert or promotion markers saved. Review uncertain decisions and unsampled gaps below.";

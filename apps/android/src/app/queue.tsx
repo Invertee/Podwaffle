@@ -1,5 +1,4 @@
 import type { QueueItem } from "@podwaffle/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -31,27 +30,34 @@ import {
   spacing,
 } from "../styles/tokens";
 
+const EMPTY_QUEUE: QueueItem[] = [];
+
 export default function QueueScreen() {
   const router = useRouter();
-  const credentials = useAuthStore((state) => state.credentials);
-  const cachedQueue = useAuthStore((state) => state.snapshot?.queue ?? []);
+  const cachedQueue = useAuthStore(
+    (state) => state.snapshot?.queue ?? EMPTY_QUEUE,
+  );
   const nativePlayback = useNativeMediaStore((state) => state.state);
   const currentEpisodeId = nativePlayback?.episodeId ?? null;
   const [orderedQueue, setOrderedQueue] = useState(cachedQueue);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const operationInFlight = useRef(false);
-
-  const queue = useQuery({
-    queryKey: ["android-queue"],
-    queryFn: () => api.queue(credentials!.serverUrl, credentials!.token),
-    enabled: Boolean(credentials),
-    initialData: cachedQueue,
-  });
+  const [pendingRemovals, setPendingRemovals] = useState<Set<string>>(
+    new Set(),
+  );
+  const removalIds = useRef(new Set<string>());
+  const removalTail = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    setOrderedQueue(queue.data ?? []);
-  }, [queue.data]);
+    setOrderedQueue(
+      cachedQueue.filter((item) => !pendingRemovals.has(item.id)),
+    );
+  }, [cachedQueue, pendingRemovals]);
+
+  useEffect(() => {
+    void refreshProfile();
+  }, []);
 
   const durationSummary = useMemo(
     () => summarizeQueueDuration(orderedQueue, nativePlayback),
@@ -67,7 +73,7 @@ export default function QueueScreen() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await queue.refetch();
+      await refreshProfile();
     } finally {
       setRefreshing(false);
     }
@@ -82,7 +88,7 @@ export default function QueueScreen() {
     ) => Promise<unknown>,
     ignoreMissing = false,
   ) {
-    if (operationInFlight.current) return;
+    if (operationInFlight.current || removalIds.current.size > 0) return;
     operationInFlight.current = true;
     setBusyItemId(itemId);
     try {
@@ -91,7 +97,6 @@ export default function QueueScreen() {
         operation(serverUrl, token, revision),
       );
       await refreshProfile();
-      await queue.refetch();
     } catch (error) {
       if (
         ignoreMissing &&
@@ -102,7 +107,6 @@ export default function QueueScreen() {
         // after the first removal has already succeeded. Treat that as the desired
         // final state and reconcile instead of showing an error.
         await refreshProfile().catch(() => undefined);
-        await queue.refetch().catch(() => undefined);
         return;
       }
       Alert.alert(
@@ -117,8 +121,56 @@ export default function QueueScreen() {
     }
   }
 
+  function removeItem(item: QueueItem) {
+    if (operationInFlight.current || removalIds.current.has(item.id)) return;
+    removalIds.current.add(item.id);
+    setPendingRemovals(new Set(removalIds.current));
+    setOrderedQueue((items) => items.filter((row) => row.id !== item.id));
+    // Stop immediately, even when earlier removals are still reaching the server.
+    const stopping =
+      useNativeMediaStore.getState().state?.episodeId === item.episode.id
+        ? playbackController.clearPlayerForQueueRemoval()
+        : Promise.resolve();
+    const remove = async () => {
+      try {
+        await stopping;
+        const { serverUrl, token } = authenticatedConnection();
+        const result = await withProfileRevision((revision) =>
+          api.removeQueue(serverUrl, token, item.id, revision),
+        );
+        await useAuthStore
+          .getState()
+          .applyQueueMutation(result.queue, result.revision);
+        if (result.revision === useAuthStore.getState().snapshot?.revision) {
+          playbackController.applySharedPlayback(result.playback);
+        }
+        await playbackController.syncNativeQueue();
+      } catch (error) {
+        if (!(error instanceof ApiClientError && error.status === 404)) {
+          Alert.alert(
+            "Queue update failed",
+            error instanceof Error
+              ? error.message
+              : "The episode could not be removed.",
+          );
+        }
+        await refreshProfile().catch(() => undefined);
+      } finally {
+        removalIds.current.delete(item.id);
+        setPendingRemovals(new Set(removalIds.current));
+      }
+    };
+    removalTail.current = removalTail.current.then(remove, remove);
+  }
+
   async function move(from: number, to: number) {
-    if (from === to || busyItemId || operationInFlight.current) return;
+    if (
+      from === to ||
+      busyItemId ||
+      operationInFlight.current ||
+      removalIds.current.size > 0
+    )
+      return;
     operationInFlight.current = true;
     const prior = orderedQueue;
     const next = [...orderedQueue];
@@ -136,7 +188,6 @@ export default function QueueScreen() {
         ),
       );
       await refreshProfile();
-      await queue.refetch();
     } catch (error) {
       setOrderedQueue(prior);
       Alert.alert(
@@ -197,6 +248,9 @@ export default function QueueScreen() {
             {orderedQueue.length} episode{orderedQueue.length === 1 ? "" : "s"}
             {` · ${durationSummary}`}
           </Text>
+          <Text style={styles.expiryNote}>
+            Clears after 3 days of inactivity
+          </Text>
         </View>
         {orderedQueue.length > 0 ? (
           <Pressable
@@ -205,7 +259,7 @@ export default function QueueScreen() {
               pressed && styles.pressed,
               Boolean(busyItemId) && styles.disabled,
             ]}
-            disabled={Boolean(busyItemId)}
+            disabled={Boolean(busyItemId) || pendingRemovals.size > 0}
             onPress={confirmClear}
             accessibilityRole="button"
             accessibilityLabel="Clear queue"
@@ -217,55 +271,38 @@ export default function QueueScreen() {
         )}
       </View>
 
-      {queue.isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.accent} />
-        </View>
-      ) : (
-        <FlatList
-          data={orderedQueue}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={[
-            styles.content,
-            orderedQueue.length === 0 && styles.emptyContent,
-          ]}
-          refreshing={refreshing}
-          onRefresh={() => void manualRefresh()}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          renderItem={({ item, index }) => (
-            <QueueRow
-              item={item}
-              index={index}
-              count={orderedQueue.length}
-              active={currentEpisodeId === item.episode.id}
-              busy={busyItemId === item.id}
-              anyBusy={Boolean(busyItemId)}
-              onMove={(to) => void move(index, to)}
-              onRemove={() =>
-                void mutate(
-                  item.id,
-                  async (serverUrl, token, revision) => {
-                    if (currentEpisodeId === item.episode.id) {
-                      await playbackController.clearPlayerForQueueRemoval();
-                    }
-                    return api.removeQueue(serverUrl, token, item.id, revision);
-                  },
-                  true,
-                )
-              }
-            />
-          )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Icon name="queue" size={56} color={colors.accent} />
-              <Text style={styles.emptyTitle}>Queue is empty</Text>
-              <Text style={styles.emptyBody}>
-                Add episodes from a podcast or the In Progress screen.
-              </Text>
-            </View>
-          }
-        />
-      )}
+      <FlatList
+        data={orderedQueue}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={[
+          styles.content,
+          orderedQueue.length === 0 && styles.emptyContent,
+        ]}
+        refreshing={refreshing}
+        onRefresh={() => void manualRefresh()}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        renderItem={({ item, index }) => (
+          <QueueRow
+            item={item}
+            index={index}
+            count={orderedQueue.length}
+            active={currentEpisodeId === item.episode.id}
+            busy={busyItemId === item.id}
+            anyBusy={Boolean(busyItemId)}
+            onMove={(to) => void move(index, to)}
+            onRemove={() => removeItem(item)}
+          />
+        )}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Icon name="queue" size={56} color={colors.accent} />
+            <Text style={styles.emptyTitle}>Queue is empty</Text>
+            <Text style={styles.emptyBody}>
+              Add episodes from a podcast or the In Progress screen.
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -452,6 +489,7 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
     marginTop: 2,
   },
+  expiryNote: { color: colors.textMuted, fontSize: fontSizes.xs, marginTop: 2 },
   clearButton: {
     width: 38,
     height: 38,

@@ -21,6 +21,7 @@ import {
   snapshotWithoutPendingCompletions,
 } from "../playback/queueReconciliation";
 import { useDownloadsStore } from "./downloads";
+import { snapshotWithoutIdleQueue } from "../playback/queueExpiry";
 
 const CREDENTIALS_KEY = "podwaffle.credentials.v1";
 const NOTIFICATION_JOIN_CODE_KEY = "podwaffle.notification-join-code.v1";
@@ -73,6 +74,8 @@ interface AuthStore {
   refresh: () => Promise<void>;
   applyQueueMutation: (queue: QueueItem[], revision: number) => Promise<void>;
   removeQueueEpisodesLocally: (episodeIds: string[]) => Promise<void>;
+  recordQueueActivity: (at?: number) => Promise<void>;
+  expireQueueIfIdle: (now?: number) => Promise<boolean>;
   setSkipDurations: (
     backwardSeconds: number,
     forwardSeconds: number,
@@ -332,9 +335,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         );
       }
       nextSnapshot = await reconcilePendingCompletionSnapshot(nextSnapshot);
-      if (nextSnapshot) {
-        await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(nextSnapshot));
-      }
 
       const current = get();
       const settings =
@@ -347,6 +347,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             }
           : await readPlaybackSettings(session.profile.id);
       await configureNative(credentials, session, settings);
+      // Another refresh or queue mutation may have finished during these waits.
+      // Never replace it with an older server response.
+      const latest = get();
+      if (latest.credentials !== credentials) return;
+      if (
+        latest.snapshot &&
+        nextSnapshot &&
+        latest.snapshot.profile.id === nextSnapshot.profile.id &&
+        (latest.snapshot.revision > nextSnapshot.revision ||
+          (latest.snapshot.revision === nextSnapshot.revision &&
+            latest.snapshot !== snapshot))
+      ) {
+        nextSnapshot = latest.snapshot;
+      }
       set({
         status: "authenticated",
         connection: "online",
@@ -357,6 +371,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         ...settings,
         error: null,
       });
+      if (nextSnapshot) {
+        await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(nextSnapshot));
+      }
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 401) {
         await clearPersistedState();
@@ -388,7 +405,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       return;
     }
     const nextSnapshot = snapshotWithoutPendingCompletions(
-      { ...current, revision, queue },
+      {
+        ...current,
+        revision,
+        queue,
+        queueLastActivityAt: new Date().toISOString(),
+      },
       pending,
       null,
     );
@@ -409,6 +431,29 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (current?.profile.id === nextSnapshot.profile.id) {
       await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(current));
     }
+  },
+
+  recordQueueActivity: async (at = Date.now()) => {
+    const snapshot = get().snapshot;
+    if (!snapshot || snapshot.queue.length === 0) return;
+    const previous = Date.parse(snapshot.queueLastActivityAt ?? "");
+    if (Number.isFinite(previous) && at <= previous) return;
+    const next = {
+      ...snapshot,
+      queueLastActivityAt: new Date(at).toISOString(),
+    };
+    set({ snapshot: next });
+    await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next));
+  },
+
+  expireQueueIfIdle: async (now = Date.now()) => {
+    const snapshot = get().snapshot;
+    if (!snapshot) return false;
+    const next = snapshotWithoutIdleQueue(snapshot, now);
+    if (next === snapshot) return false;
+    set({ snapshot: next });
+    await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next));
+    return true;
   },
 
   setLiveSyncConnected: (liveSyncConnected) => set({ liveSyncConnected }),

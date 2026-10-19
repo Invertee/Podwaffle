@@ -76,6 +76,7 @@ object NativeConfigurationPersistence {
             .apply()
         PodwaffleCacheMaintenanceJobService.cancel(context.applicationContext)
         PodwaffleCachePolicy.clear(context.applicationContext)
+        PlaybackCompletionJournal(context).clear()
         NativeConfigurationStore.current = null
         PodwaffleAutoCatalog.clear(context)
     }

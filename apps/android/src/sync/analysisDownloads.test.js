@@ -29,9 +29,109 @@ jest.mock("../playback/media", () => ({
 const credentials = { serverUrl: "https://podwaffle.test", token: "device" };
 const apply = jest.fn();
 beforeEach(() => {
-  jest.clearAllMocks();
+  jest.resetAllMocks();
   useAuthStore.getState.mockReturnValue({ credentials });
   useDownloadsStore.getState.mockReturnValue({ apply });
+});
+
+it("checks again when another completion arrives during an earlier download lookup", async () => {
+  let resolveFirst;
+  api.analysedDownloads
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    )
+    .mockResolvedValueOnce([
+      {
+        id: "later",
+        enclosureUrl: "https://publisher.test/later.mp3",
+        analysedMedia: {
+          path: "/media/later",
+          sha256: "b".repeat(64),
+          adSegments: [],
+        },
+      },
+    ]);
+  PodwaffleMediaModule.addDownload.mockResolvedValue({
+    episodeId: "later",
+    state: "queued",
+  });
+  const first = downloadAnalysedEpisodes();
+  const later = downloadAnalysedEpisodes();
+  resolveFirst([]);
+  await Promise.all([first, later]);
+  expect(api.analysedDownloads).toHaveBeenCalledTimes(2);
+  expect(PodwaffleMediaModule.addDownload).toHaveBeenCalledWith(
+    expect.objectContaining({ episodeId: "later" }),
+    "automatic",
+  );
+});
+
+it("a fresh wake retries when the lookup already in flight fails", async () => {
+  let rejectFirst;
+  api.analysedDownloads
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+    )
+    .mockResolvedValueOnce([]);
+  const first = downloadAnalysedEpisodes();
+  const later = downloadAnalysedEpisodes();
+  const failed = expect(first).rejects.toThrow("temporary outage");
+  rejectFirst(new Error("temporary outage"));
+  await failed;
+  await expect(later).resolves.toBeUndefined();
+  expect(api.analysedDownloads).toHaveBeenCalledTimes(2);
+});
+
+it("continues other episodes after one native download fails", async () => {
+  const media = {
+    path: "/media/checked",
+    sha256: "a".repeat(64),
+    adSegments: [],
+  };
+  api.analysedDownloads.mockResolvedValue(
+    ["bad", "good"].map((id) => ({
+      id,
+      enclosureUrl: `https://publisher.test/${id}.mp3`,
+      analysedMedia: media,
+    })),
+  );
+  PodwaffleMediaModule.addDownload
+    .mockRejectedValueOnce(new Error("bad entry"))
+    .mockResolvedValueOnce({ episodeId: "good", state: "queued" });
+  await expect(downloadAnalysedEpisodes()).rejects.toThrow("bad entry");
+  expect(apply).toHaveBeenCalledWith({ episodeId: "good", state: "queued" });
+});
+
+it("does not use results from a server or profile that has been disconnected", async () => {
+  let resolve;
+  api.analysedDownloads.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const downloading = downloadAnalysedEpisodes();
+  useAuthStore.getState.mockReturnValue({
+    credentials: { ...credentials, serverUrl: "https://another.test" },
+  });
+  resolve([
+    {
+      id: "old",
+      analysedMedia: {
+        path: "/media/old",
+        sha256: "a".repeat(64),
+        adSegments: [],
+      },
+    },
+  ]);
+  await downloading;
+  expect(PodwaffleMediaModule.addDownload).not.toHaveBeenCalled();
 });
 it("keeps older servers compatible when automatic analysis downloads are unavailable", async () => {
   api.analysedDownloads.mockRejectedValue(new ApiClientError(404));

@@ -135,6 +135,45 @@ test("preserves successful decisions around a malformed excerpt response", async
   assert.equal(applySensitivity(result.segments, "high").length, 1);
 });
 
+test("keeps neighbouring speech separate from the classified range and redacts echoed context", async () => {
+  const excerpt = {
+    ...fragments[1],
+    contextBefore: "A private neighbouring sponsor offer.",
+    contextAfter: "Further private editorial speech.",
+  };
+  let payload;
+  const result = await classify(
+    async (_url, options) => {
+      payload = JSON.parse(options.body);
+      return Response.json(answer("not_ad"));
+    },
+    [excerpt],
+  );
+  const state = JSON.parse(payload.state);
+  assert.deepEqual(state.excerpt, fragments[1]);
+  assert.deepEqual(state.adjacentContext, {
+    before: excerpt.contextBefore,
+    after: excerpt.contextAfter,
+  });
+  assert.match(
+    payload.questions.classification.instructions,
+    /only to excerpt.text/,
+  );
+  assert.equal(result.assessments[0].verdict, "not_ad");
+  assert.deepEqual(result.segments, []);
+  for (const context of [excerpt.contextBefore, excerpt.contextAfter]) {
+    const echoed = await classify(
+      async () =>
+        Response.json({ message: `Rejected: ${context}` }, { status: 403 }),
+      [excerpt],
+    );
+    assert.equal(
+      echoed.providerErrors[0].message,
+      "Provider error echoed request content; message omitted.",
+    );
+  }
+});
+
 test("rejects missing answers, invalid confidence and malformed probability distributions", async () => {
   for (const change of [
     (body) => {

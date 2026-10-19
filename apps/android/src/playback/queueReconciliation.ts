@@ -15,10 +15,20 @@ export function pendingCompletionEpisodeIds(
   return completed;
 }
 
-export function staleCompletedQueueEpisodeIds(queue: QueueItem[]): Set<string> {
+export function staleCompletedQueueEpisodeIds(
+  queue: QueueItem[],
+  activeEpisodeId: string | null = null,
+): Set<string> {
   const completed = new Set<string>();
   for (const item of queue) {
     if (!item.episode.played || !item.episode.playedAt) continue;
+    // Reaching the played threshold must leave the final audio uninterrupted.
+    if (
+      item.episode.id === activeEpisodeId &&
+      (item.episode.durationMs === null ||
+        item.episode.positionMs < item.episode.durationMs)
+    )
+      continue;
     const addedAt = Date.parse(item.addedAt);
     const playedAt = Date.parse(item.episode.playedAt);
     if (
@@ -36,9 +46,13 @@ export function queueWithoutPendingCompletions(
   queue: QueueItem[],
   pending: PendingPlaybackUpdate[],
   completedEpisodeId: string | null,
+  activeEpisodeId: string | null = null,
 ): QueueItem[] {
   const completed = pendingCompletionEpisodeIds(pending, completedEpisodeId);
-  for (const episodeId of staleCompletedQueueEpisodeIds(queue)) {
+  for (const episodeId of staleCompletedQueueEpisodeIds(
+    queue,
+    activeEpisodeId,
+  )) {
     completed.add(episodeId);
   }
   return queue.filter((item) => !completed.has(item.episode.id));
@@ -72,7 +86,12 @@ export function snapshotWithoutPendingCompletions(
   completedEpisodeId: string | null,
 ): Snapshot {
   const completed = pendingCompletionEpisodeIds(pending, completedEpisodeId);
-  for (const episodeId of staleCompletedQueueEpisodeIds(snapshot.queue)) {
+  for (const episodeId of staleCompletedQueueEpisodeIds(
+    snapshot.queue,
+    snapshot.playback?.state !== "stopped"
+      ? (snapshot.playback?.episode?.id ?? null)
+      : null,
+  )) {
     completed.add(episodeId);
   }
   return snapshotWithoutCompletedEpisodes(snapshot, completed);

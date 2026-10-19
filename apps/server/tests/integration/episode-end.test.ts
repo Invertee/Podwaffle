@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("episode end handling", () => {
-  it("completes at 97%, resumes the next item, and becomes idle after the final item", async () => {
+  it("marks played at 97% without cutting off audio, advances at the end, and finally becomes idle", async () => {
     const created = await testRuntime();
     runtimes.push(created.runtime);
     const client = supertest.agent(created.baseUrl);
@@ -113,17 +113,40 @@ describe("episode end handling", () => {
       (await client.get("/api/v1/playback").expect(200)).body.playback,
     ).toMatchObject({ episode: { id: firstEpisodeId } });
 
-    const firstEnded = await client
+    const threshold = await client
       .post("/api/v1/playback/state")
       .send({
         episodeId: firstEpisodeId,
         positionMs: 58_200,
         durationMs: 60_000,
-        state: "paused",
+        state: "playing",
         playbackRate: 1,
       })
       .expect(200);
-    expect(firstEnded.body.episode.played).toBe(true);
+    expect(threshold.body.episode.played).toBe(true);
+    expect(threshold.body.playback).toMatchObject({
+      episode: { id: firstEpisodeId },
+      positionMs: 58_200,
+      state: "playing",
+    });
+    expect((await client.get("/api/v1/queue")).body.queue).toHaveLength(2);
+    expect(
+      (await client.get("/api/v1/episodes/in-progress").expect(200)).body
+        .episodes,
+    ).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: firstEpisodeId })]),
+    );
+
+    await client
+      .post("/api/v1/playback/state")
+      .send({
+        episodeId: firstEpisodeId,
+        positionMs: 60_000,
+        durationMs: 60_000,
+        state: "stopped",
+        playbackRate: 1,
+      })
+      .expect(200);
     expect(
       (
         (await client.get("/api/v1/queue").expect(200)).body.queue as Array<{

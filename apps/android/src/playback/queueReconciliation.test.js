@@ -80,6 +80,33 @@ function snapshot(queue, playbackEpisode = null) {
 }
 
 describe("queueWithoutPendingCompletions", () => {
+  it("keeps an active episode marked played at 97% until its actual end", () => {
+    const current = queueItem("current", 0, {
+      episode: episode("current", {
+        played: true,
+        playedAt: "2026-08-12T00:01:00.000Z",
+        positionMs: 58_200,
+      }),
+    });
+    const reconciled = snapshotWithoutPendingCompletions(
+      snapshot([current], current.episode),
+      [],
+      null,
+    );
+    expect(reconciled.queue).toEqual([current]);
+    expect(reconciled.playback.episode.id).toBe("current");
+    expect(
+      queueWithoutPendingCompletions([current], [], null, "current"),
+    ).toEqual([current]);
+    expect(
+      queueWithoutPendingCompletions(
+        [current],
+        [update("current", true)],
+        null,
+        "current",
+      ),
+    ).toEqual([]);
+  });
   it("removes durable and in-memory completions but keeps ordinary progress", () => {
     const queue = [
       queueItem("one", 0),

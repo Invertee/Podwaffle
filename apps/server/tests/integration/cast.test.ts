@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import supertest from "supertest";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +14,143 @@ afterEach(async () => {
 });
 
 describe("cross-client Google Cast control", () => {
+  it("repairs legacy near-finished rows while preserving active playback, explicit requeues, and manual unplayed choices", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    const joined = await join(owner);
+    const profileId = joined.body.session.profile.id;
+    const db = created.runtime.database.db;
+    const ids = ["stale", "requeued", "manual", "active"].map((suffix) =>
+      insertEpisode(created.runtime, `repair-${suffix}`),
+    );
+    for (const episodeId of ids) {
+      await owner
+        .post("/api/v1/queue/items")
+        .send({ commandId: randomUUID(), episodeId, position: "bottom" })
+        .expect(201);
+    }
+    await owner
+      .post("/api/v1/playback/lease")
+      .send({
+        episodeId: ids[3],
+        positionMs: 0,
+        durationMs: 600_000,
+        playbackRate: 1,
+      })
+      .expect(200);
+    for (const [index, episodeId] of ids.entries()) {
+      db.prepare(
+        `INSERT INTO episode_state(profile_id, episode_id, position_ms, duration_ms, played, manual_play_state, last_played_at, updated_at)
+        VALUES (?, ?, 582000, 600000, 0, ?, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')`,
+      ).run(profileId, episodeId!, index === 2 ? "unplayed" : "none");
+      db.prepare(
+        "UPDATE queue_items SET added_at = ? WHERE profile_id = ? AND episode_id = ?",
+      ).run(
+        index === 1 ? "2026-07-01T00:00:00Z" : "2026-01-01T00:00:00Z",
+        profileId,
+        episodeId!,
+      );
+    }
+    const repair = await readFile(
+      new URL(
+        "../../src/db/migrations/012_played_threshold_preserve_playback.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    db.exec(repair);
+    db.exec(repair);
+    const queue = (await owner.get("/api/v1/queue")).body.queue.map(
+      (item: { episode: { id: string } }) => item.episode.id,
+    );
+    expect(queue).toEqual([ids[3], ids[1], ids[2]]);
+    expect(
+      (await owner.get(`/api/v1/episodes/${ids[0]}`)).body.episode.played,
+    ).toBe(true);
+    expect(
+      (await owner.get(`/api/v1/episodes/${ids[2]}`)).body.episode.played,
+    ).toBe(false);
+    expect((await owner.get("/api/v1/playback")).body.playback).toMatchObject({
+      episode: { id: ids[3] },
+      positionMs: 0,
+    });
+    await owner
+      .post(`/api/v1/episodes/${ids[2]}/progress`)
+      .send({
+        commandId: randomUUID(),
+        positionMs: 600_000,
+        durationMs: 600_000,
+        completed: true,
+      })
+      .expect(200);
+    expect(
+      (await owner.get(`/api/v1/episodes/${ids[2]}`)).body.episode.played,
+    ).toBe(true);
+  });
+  it("marks Cast played at 97% while preserving the receiver and only advances on actual end", async () => {
+    const created = await testRuntime();
+    runtimes.push(created.runtime);
+    const owner = supertest.agent(created.baseUrl);
+    await join(owner);
+    const episodeId = insertEpisode(created.runtime, "threshold");
+    const nextId = insertEpisode(created.runtime, "threshold-next");
+    await owner
+      .post("/api/v1/queue/items")
+      .send({ commandId: randomUUID(), episodeId: nextId, position: "bottom" })
+      .expect(201);
+    const confirmed = {
+      episodeId,
+      positionMs: 580_000,
+      durationMs: 600_000,
+      state: "playing",
+      playbackRate: 1,
+      castSessionId: "threshold-cast",
+    };
+    await owner
+      .post("/api/v1/playback/cast")
+      .send({ commandId: randomUUID(), confirmed })
+      .expect(200);
+    const threshold = await owner
+      .post("/api/v1/playback/cast")
+      .send({
+        commandId: randomUUID(),
+        background: true,
+        confirmed: { ...confirmed, positionMs: 582_000 },
+      })
+      .expect(200);
+    expect(threshold.body.episode.played).toBe(true);
+    expect(threshold.body.playback).toMatchObject({
+      episode: { id: episodeId },
+      positionMs: 582_000,
+      state: "playing",
+      mode: "cast",
+      castSessionId: "threshold-cast",
+    });
+    expect(
+      (await owner.get("/api/v1/queue")).body.queue.map(
+        (item: { episode: { id: string } }) => item.episode.id,
+      ),
+    ).toEqual([episodeId, nextId]);
+    const ended = await owner
+      .post(`/api/v1/episodes/${episodeId}/progress`)
+      .send({
+        commandId: randomUUID(),
+        positionMs: 600_000,
+        durationMs: 600_000,
+        completed: true,
+      })
+      .expect(200);
+    expect(
+      ended.body.queue.map(
+        (item: { episode: { id: string } }) => item.episode.id,
+      ),
+    ).toEqual([nextId]);
+    expect((await owner.get("/api/v1/playback")).body.playback).toMatchObject({
+      episode: { id: nextId },
+      mode: "cast",
+    });
+  });
   it("watchdog is opt-in, throttled, and saves only confirmations from the same session", async () => {
     const created = await testRuntime();
     const { runtime } = created;

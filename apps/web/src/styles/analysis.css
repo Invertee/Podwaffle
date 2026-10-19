@@ -1,19 +1,12 @@
-.analysis-settings,
 .analysis-diagnostics {
   border: 1px solid #80808055;
   border-radius: 12px;
   padding: 16px;
   margin: 16px 0;
 }
-.analysis-settings summary,
 .analysis-diagnostics summary {
   cursor: pointer;
   font-weight: 600;
-}
-.analysis-settings summary span {
-  font-size: 0.8em;
-  opacity: 0.7;
-  margin-left: 12px;
 }
 .analysis-field {
   display: flex;
@@ -38,7 +31,13 @@
 }
 .analysis-settings input[type="checkbox"] {
   width: auto;
-  margin-right: 8px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.analysis-settings .analysis-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .analysis-modal {
   width: min(850px, calc(100vw - 32px));
@@ -76,6 +75,83 @@
   white-space: pre-line;
   max-height: 180px;
   overflow: auto;
+}
+.podcast-hero-copy {
+  flex: 1;
+  min-width: 0;
+}
+.podcast-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 0.55rem;
+}
+.podcast-hero .podcast-title-row h2 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.icon-button.download-options-button,
+.icon-button.download-options-close {
+  width: 44px;
+  min-height: 44px;
+}
+.icon-button.download-options-button {
+  color: var(--accent);
+  background: var(--surface-raised);
+}
+.download-options-modal {
+  width: min(640px, calc(100vw - 32px));
+  max-height: 85dvh;
+  padding: 0;
+  overflow: hidden;
+}
+.download-options-layout {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(85dvh - 2px);
+}
+.download-options-header {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  border-bottom: 1px solid var(--line, #80808055);
+}
+.download-options-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--surface-raised);
+}
+.download-options-icon svg {
+  width: 24px;
+  height: 24px;
+}
+.download-options-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.download-options-modal .download-options-heading {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.download-options-podcast {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.download-options-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
 }
 .analysis-notice {
   padding: 12px;
@@ -142,6 +218,13 @@
 }
 @media (max-width: 600px) {
   .analysis-modal {
+    padding: 16px;
+  }
+  .download-options-modal {
+    padding: 0;
+  }
+  .download-options-header,
+  .download-options-content {
     padding: 16px;
   }
   .analysis-segment {

@@ -16,7 +16,7 @@ import { PlayerBar } from "../player/PlayerBar";
 import { Icon, type IconName } from "./Icon";
 import {
   EpisodeAnalysisButton,
-  PodcastAnalysisSettings,
+  PodcastDownloadOptionsButton,
 } from "./EpisodeAnalysis";
 
 type Page =
@@ -485,18 +485,21 @@ export function Dashboard({ session }: { session: Session }) {
             </button>
             <div className="podcast-hero">
               {selected.artworkUrl && <img src={selected.artworkUrl} alt="" />}
-              <div>
+              <div className="podcast-hero-copy">
                 <p className="eyebrow">{selected.author}</p>
-                <h2>{selected.title}</h2>
+                <div className="podcast-title-row">
+                  <h2>{selected.title}</h2>
+                  <PodcastDownloadOptionsButton
+                    key={selected.id}
+                    podcastId={selected.id}
+                    podcastTitle={selected.title}
+                  />
+                </div>
                 {selected.description ? (
                   <p>{stripHtml(selected.description)}</p>
                 ) : null}
               </div>
             </div>
-            <PodcastAnalysisSettings
-              key={selected.id}
-              podcastId={selected.id}
-            />
             <EpisodeList
               episodes={episodes.data ?? []}
               revision={revision}

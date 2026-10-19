@@ -14,6 +14,21 @@ const LEASE_MS = 45_000;
 export const PLAYBACK_CONTROL_IDLE_MS = 30 * 60 * 1000;
 export const CAST_IDLE_MS = PLAYBACK_CONTROL_IDLE_MS;
 
+function assertQueueResumeAllowed(
+  db: DatabaseSync,
+  profileId: string,
+  episodeId: string | undefined,
+  takeover: boolean,
+): void {
+  if (takeover || !episodeId) return;
+  const expired = db
+    .prepare(
+      "SELECT 1 FROM queue_activity WHERE profile_id = ? AND expired_at IS NOT NULL AND expired_episode_id = ?",
+    )
+    .get(profileId, episodeId);
+  if (expired) throw new Error("PLAYBACK_TAKEOVER_REQUIRED");
+}
+
 function localDate(instant: string, timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -62,6 +77,12 @@ export function acquireLease(
     takeover?: boolean | undefined;
   },
 ): void {
+  assertQueueResumeAllowed(
+    db,
+    profileId,
+    input.episodeId,
+    input.takeover === true,
+  );
   const now = new Date();
   const existing = db
     .prepare(
@@ -124,6 +145,7 @@ export function startCast(
   confirmed: CastConfirmedState,
   takeover = false,
 ): void {
+  assertQueueResumeAllowed(db, profileId, confirmed.episodeId, takeover);
   const now = new Date();
   const existing = db
     .prepare(

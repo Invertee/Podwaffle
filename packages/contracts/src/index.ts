@@ -352,6 +352,7 @@ export interface Snapshot {
   devices: Device[];
   subscriptions: Subscription[];
   queue: QueueItem[];
+  queueLastActivityAt?: string | null;
   playback: PlaybackState | null;
 }
 

@@ -370,8 +370,9 @@ export class PushService {
     ) {
       // Each episode has its own durable REST catch-up entry. Do not collapse
       // different episodes into a single Firebase message.
-      return this.sendToRegistrations(
-        this.registrationsForProfile(profileId),
+      const registrations = this.registrationsForProfile(profileId);
+      const accepted = await this.sendToRegistrations(
+        registrations,
         {
           kind: "analysis-ready",
           episodeId: event.payload.episodeId,
@@ -381,6 +382,16 @@ export class PushService {
         undefined,
         7 * 24 * 60 * 60_000,
       );
+      log(accepted ? "info" : "warn", "push.analysis.download_requested", {
+        message: accepted
+          ? "Firebase accepted the offline episode download request"
+          : "Firebase did not accept the offline episode download request for any Android device",
+        profileId,
+        episodeId: event.payload.episodeId,
+        targeted: registrations.length,
+        accepted,
+      });
+      return accepted;
     }
     const activeDeviceId = (
       event.payload.playback as { activeDeviceId?: unknown } | undefined

@@ -1,7 +1,7 @@
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AnalysisSettings } from "@podwaffle/contracts";
-import { Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { colors, spacing } from "../styles/tokens";
@@ -35,7 +35,35 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
     },
   });
   const settings = query.data?.settings;
-  if (!settings) return null;
+  if (!settings)
+    return (
+      <View style={{ gap: spacing.sm, paddingVertical: spacing.lg }}>
+        {!online ? (
+          <Text style={{ color: colors.textSecondary }}>
+            Connect to the server to manage download options.
+          </Text>
+        ) : query.isError ? (
+          <>
+            <Text style={{ color: colors.warning }}>
+              Download options could not be loaded.
+            </Text>
+            <Pressable
+              onPress={() => void query.refetch()}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading download options"
+              style={{ paddingVertical: spacing.sm }}
+            >
+              <Text style={{ color: colors.accent }}>Try again</Text>
+            </Pressable>
+          </>
+        ) : (
+          <ActivityIndicator
+            color={colors.accent}
+            accessibilityLabel="Loading download options"
+          />
+        )}
+      </View>
+    );
   return (
     <View style={{ gap: spacing.sm, paddingVertical: spacing.md }}>
       <View
@@ -55,12 +83,22 @@ export function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
         Checked audio downloads automatically on Wi-Fi. Other episodes stream
         from the publisher.
       </Text>
+      {!online && (
+        <Text style={{ color: colors.textSecondary }}>
+          Connect to the server to change these options.
+        </Text>
+      )}
+      {!query.data?.configured && (
+        <Text style={{ color: colors.textSecondary }}>
+          Audio analysis is not configured on the server.
+        </Text>
+      )}
       {settings.enabled && (
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           {(["low", "balanced", "high"] as const).map((sensitivity) => (
             <Pressable
               key={sensitivity}
-              disabled={!online || save.isPending}
+              disabled={!online || save.isPending || !query.data?.configured}
               accessibilityRole="button"
               accessibilityState={{
                 selected: settings.sensitivity === sensitivity,
