@@ -121,6 +121,71 @@ it("opt-in queues only newly discovered episodes and isolates subscription setti
   ).toBe(1);
 });
 
+it("the ad detection interface lists this profile's series and captures shared tuning for new jobs", async () => {
+  const { agent, podcastId, runtime: rt } = await setup();
+  const subscriptions = await agent
+    .get("/api/v1/analysis/subscriptions")
+    .expect(200);
+  expect(subscriptions.body.subscriptions).toMatchObject([
+    { id: podcastId, title: "Test", settings: { enabled: false } },
+  ]);
+  const guest = supertest.agent(rt.server);
+  await join(guest, "Guest");
+  expect(
+    (await guest.get("/api/v1/analysis/subscriptions")).body.subscriptions,
+  ).toEqual([]);
+  const listed = subscriptions.body.subscriptions[0];
+  await agent
+    .put(`/api/v1/subscriptions/${podcastId}/analysis`)
+    .send({
+      ...command(),
+      settings: { ...listed.settings, enabled: true },
+    })
+    .expect(200);
+  expect(
+    (await agent.get("/api/v1/analysis/subscriptions")).body.subscriptions[0]
+      .settings.enabled,
+  ).toBe(true);
+
+  const original = (await agent.get("/api/v1/analysis/settings").expect(200))
+    .body.settings;
+  const shared = {
+    ...original,
+    minimumExcerptSeconds: 15,
+    maximumExcerptSeconds: 45,
+    jevSensitivity: "custom",
+    advertConfidence: 0.65,
+    phrases: ["Shared sponsor"],
+    llmPrompt: "Shared guidance",
+    edgeFocusMinutes: 1,
+  };
+  await agent
+    .put("/api/v1/analysis/settings")
+    .send({ settings: shared })
+    .expect(200);
+  const job = (
+    await agent
+      .post("/api/v1/analysis/jobs")
+      .send({
+        requestKey: "global-test",
+        episodeId: "global-test",
+        title: "Test",
+        enclosureUrl: "https://example.com/audio.mp3",
+        sensitivity: "high",
+      })
+      .expect(202)
+  ).body.job;
+  expect(job.request.detectionSettings).toEqual(shared);
+  await agent
+    .put("/api/v1/analysis/settings")
+    .send({ settings: original })
+    .expect(200);
+  expect(
+    (await agent.get(`/api/v1/analysis/jobs/${job.id}`)).body.job.request
+      .detectionSettings,
+  ).toEqual(shared);
+});
+
 it("retries local work with a stable request key, imports results, expires snippets and detects enclosure changes", async () => {
   const { runtime: rt, profileId, episodeId, config } = await setup();
   const id = enqueueAnalysis(rt.database.db, profileId, episodeId);

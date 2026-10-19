@@ -45,7 +45,17 @@ function createPodcastStore(filename) {
           "SELECT settings_json FROM podcast_detection_settings WHERE id=1",
         )
         .get();
-      return row ? JSON.parse(row.settings_json) : { ...defaults };
+      const settings = {
+        ...defaults,
+        ...(row ? JSON.parse(row.settings_json) : {}),
+      };
+      // Retire per-episode inheritance for new jobs without altering any job's
+      // saved snapshot. Existing explicit presets and custom values survive.
+      if (settings.audioSensitivity === "episode")
+        settings.audioSensitivity = "balanced";
+      if (settings.jevSensitivity === "episode")
+        settings.jevSensitivity = "balanced";
+      return settings;
     },
     saveDetectionSettings(settings) {
       db.prepare(
@@ -95,7 +105,11 @@ function createPodcastStore(filename) {
         });
     },
     hasPending() {
-      return Boolean(db.prepare("SELECT 1 FROM podcast_jobs WHERE status='queued' LIMIT 1").get());
+      return Boolean(
+        db
+          .prepare("SELECT 1 FROM podcast_jobs WHERE status='queued' LIMIT 1")
+          .get(),
+      );
     },
     claim() {
       db.exec("BEGIN IMMEDIATE");

@@ -15,6 +15,7 @@ const { classifyAndRefine } = require("./advert-refinement");
 const {
   defaultDetectionSettings,
   resolveDetectionSettings,
+  detectionRequest,
 } = require("./detection-settings");
 
 function validateRequest(body) {
@@ -376,6 +377,7 @@ async function analyse(request, config, signal, progress, execute = run) {
     );
   const detectionSettings =
     request.detectionSettings || defaultDetectionSettings(config);
+  request = detectionRequest(request, detectionSettings);
   const effectiveSettings = resolveDetectionSettings(
     detectionSettings,
     request.sensitivity,
@@ -615,6 +617,7 @@ async function analyse(request, config, signal, progress, execute = run) {
       validate: validateSegments,
       classifyRules,
       policy: effectiveSettings.jev,
+      audio: acoustic,
       sampleBudgetSeconds: acoustic.sampleBudgetSeconds,
       warnings,
     });
@@ -653,7 +656,7 @@ async function analyse(request, config, signal, progress, execute = run) {
         ...classified.diagnostics,
         acousticBoundaryCandidates: boundaryCandidates.slice(0, 2000),
         boundaryDetection: {
-          version: 2,
+          version: 3,
           volumeToneAvailable: frames.length > 0,
           frameCount: frames.length,
           speechTimestamps: true,

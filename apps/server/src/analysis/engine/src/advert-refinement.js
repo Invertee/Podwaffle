@@ -22,6 +22,7 @@ async function classifyAndRefine({
   validate,
   classifyRules,
   policy,
+  audio = {},
   sampleBudgetSeconds,
   warnings,
   fetcher = fetch,
@@ -33,7 +34,10 @@ async function classifyAndRefine({
   const providerErrors = [];
   let unavailable = false;
   const segmentExcerpts = () => {
-    const excerpts = buildExcerpts(units, boundaries);
+    const excerpts = buildExcerpts(units, boundaries, {
+      ...audio,
+      sampleWindows: windows,
+    });
     if (excerpts.length > 2000)
       warnings.push(
         "Speech excerpt limit reached; later sampled speech was not classified.",

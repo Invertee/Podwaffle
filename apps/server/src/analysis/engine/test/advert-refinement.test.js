@@ -7,9 +7,13 @@ const { classifyRules, validateSegments } = require("../src/podcast-analysis");
 
 const unit = (startMs, endMs, text) => ({ startMs, endMs, text });
 const speech = [
-  unit(0, 5000, "Welcome to our programme."),
-  unit(6000, 14000, "Our sponsor has an offer."),
-  unit(15000, 29000, "Purchase from our sponsor today."),
+  unit(0, 5000, "Welcome to our programme about the night sky."),
+  unit(6000, 14000, "Our sponsor has an offer for all our listeners."),
+  unit(
+    15000,
+    29000,
+    "Purchase from our sponsor today and save with this offer.",
+  ),
   unit(30000, 38000, "Use this discount code before the offer ends."),
   unit(40000, 42000, "Back to today's interview about astronomy."),
   unit(43000, 54000, "Our guest studies the night sky."),
@@ -65,6 +69,7 @@ async function fixture(overrides = {}) {
       includePromotions: true,
     },
     sampleBudgetSeconds: 60,
+    audio: { minimumExcerptSeconds: 5 },
     warnings,
     transcribe: async (window) => {
       transcribed.push(window);
@@ -101,10 +106,13 @@ test("extends an advert beyond the original sample and stops before editorial sp
   assert.ok(
     result.fragments.some((fragment) => fragment.text.includes("astronomy")),
   );
-  const editorial = classifiedText.find((state) =>
-    state.excerpt.text.includes("astronomy"),
+  const editorial = classifiedText.find(
+    (state) => state.excerpt.startMs === 40000,
   );
-  assert.ok(editorial.adjacentContext.before.includes("discount"));
+  assert.ok(
+    editorial.adjacentContext.before.includes("discount"),
+    JSON.stringify(classifiedText),
+  );
   assert.ok(!editorial.excerpt.text.includes("discount"));
   assert.ok(
     result.diagnostics.refinement.usedSeconds <=
@@ -179,14 +187,22 @@ test("aborting refinement cancels the job instead of saving partial fallback mar
 test("a successful editorial correction does not erase a separate failed part of an earlier advert", async () => {
   const { result } = await fixture({
     units: [
-      unit(0, 5000, "Welcome."),
-      unit(6000, 16000, "Our sponsor offers"),
+      unit(0, 5000, "Welcome to our programme about the night sky."),
+      unit(
+        6000,
+        16000,
+        "Our sponsor offers excellent savings to all our listeners",
+      ),
       unit(16000, 22000, "good deals"),
       unit(22000, 29000, "for listeners today."),
     ],
     transcribe: async () => [
       unit(16000, 22000, "Editorial now."),
-      unit(22000, 29000, "Still our sponsor."),
+      unit(
+        22000,
+        29000,
+        "Still our sponsor with a special offer for listeners.",
+      ),
     ],
     fetcher: async (_url, options) => {
       const { excerpt } = JSON.parse(JSON.parse(options.body).state);
@@ -200,6 +216,40 @@ test("a successful editorial correction does not erase a separate failed part of
     },
   });
   assert.equal(result.segments.length, 1);
-  assert.equal(result.segments[0].startMs, 22000);
+  assert.equal(result.segments[0].startMs, 22000, JSON.stringify(result));
   assert.equal(result.segments[0].endMs, 29000);
+});
+
+test("word-level sound changes keep a complete commercial pitch together for Jev", async () => {
+  const text =
+    "Our sponsor offers a discount on your first purchase with this promo code today for all listeners to the programme".split(
+      " ",
+    );
+  const units = text.map((word, index) =>
+    unit(index * 500, index * 500 + 400, word),
+  );
+  const seen = [];
+  const { result } = await fixture({
+    units,
+    audio: { minimumExcerptSeconds: 10, maximumExcerptSeconds: 30 },
+    boundaries: units.map((word) => ({
+      timeMs: word.startMs,
+      score: 0.9,
+      types: ["tone"],
+    })),
+    transcribe: async () => [],
+    fetcher: async (_url, options) => {
+      const { excerpt } = JSON.parse(JSON.parse(options.body).state);
+      seen.push(excerpt.text);
+      return answer(
+        excerpt.text.includes("sponsor") && excerpt.text.includes("promo code")
+          ? "advertisement"
+          : "not_ad",
+      );
+    },
+  });
+  assert.deepEqual(seen, [text.join(" ")]);
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].startMs, 0);
+  assert.equal(result.segments[0].endMs, units.at(-1).endMs);
 });

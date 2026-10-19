@@ -347,7 +347,7 @@
         $("inspectionWarnings").append(
           element(
             "li",
-            `Settings used · Audio: ${audio.silenceThresholdDb} dB, minimum pause ${audio.minimumSilenceSeconds}s, initial budget ${audio.sampleBudgetSeconds}s. Jev: minimum label probability ${percent(jev.minimumLabelProbability)}; promotions ${jev.includePromotions ? "enabled" : "disabled"}.`,
+            `Settings used · Audio: ${audio.silenceThresholdDb} dB, minimum pause ${audio.minimumSilenceSeconds}s, initial budget ${audio.sampleBudgetSeconds}s.${audio.minimumExcerptSeconds ? ` Excerpts: ${audio.minimumExcerptSeconds}–${audio.maximumExcerptSeconds}s.` : ""} Jev: minimum label probability ${percent(jev.minimumLabelProbability)}; promotions ${jev.includePromotions ? "enabled" : "disabled"}.`,
           ),
         );
       }

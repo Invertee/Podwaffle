@@ -138,17 +138,11 @@ function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
     queryFn: () => api.analysisSettings(podcastId),
   });
   const [draft, setDraft] = useState<AnalysisSettings | null>(null);
-  const [phrases, setPhrases] = useState("");
   const save = useMutation({
     mutationFn: () =>
       api.saveAnalysisSettings(podcastId, {
         enabled: draft?.enabled ?? settings.data?.settings.enabled ?? false,
-        phrases: draft
-          ? phrases
-              .split("\n")
-              .map((p) => p.trim())
-              .filter(Boolean)
-          : (settings.data?.settings.phrases ?? []),
+        phrases: settings.data?.settings.phrases ?? [],
         llmPrompt: draft?.llmPrompt ?? settings.data?.settings.llmPrompt ?? "",
         sensitivity:
           draft?.sensitivity ??
@@ -169,7 +163,6 @@ function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
   const value = draft ?? settings.data?.settings;
   function editSettings(changes: Partial<AnalysisSettings>) {
     if (!value) return;
-    if (!draft) setPhrases(value.phrases.join("\n"));
     setDraft({ ...value, ...changes });
   }
   return (
@@ -202,81 +195,17 @@ function PodcastAnalysisSettings({ podcastId }: { podcastId: string }) {
               />{" "}
               Analyse and download new episodes
             </label>
-            <label className="analysis-field">
-              Sponsor names and phrases (one per line, up to 50)
-              <textarea
-                value={draft ? phrases : value.phrases.join("\n")}
-                rows={4}
-                disabled={save.isPending}
-                placeholder={"our sponsor\npromo code\nA sponsor name"}
-                onChange={(event) => {
-                  setDraft(value);
-                  setPhrases(event.target.value);
-                }}
-              />
-            </label>
-            <label className="analysis-field">
-              Jev detection guidance (optional)
-              <textarea
-                value={value.llmPrompt}
-                rows={4}
-                maxLength={2000}
-                disabled={save.isPending}
-                placeholder="For example: Treat host-read promotions for the host's own paid products as adverts."
-                onChange={(event) =>
-                  editSettings({ llmPrompt: event.target.value })
-                }
-              />
-              <small>
-                Used by Jev when configured on the analyser. Describe
-                show-specific advert patterns. Times stay within transcript
-                excerpts.
-              </small>
-            </label>
-            <label className="analysis-field">
-              Detection sensitivity
-              <select
-                value={value.sensitivity}
-                disabled={save.isPending}
-                onChange={(event) =>
-                  editSettings({
-                    sensitivity: event.target
-                      .value as AnalysisSettings["sensitivity"],
-                  })
-                }
-              >
-                <option value="low">Low — fewer, stronger suggestions</option>
-                <option value="balanced">Balanced</option>
-                <option value="high">High — more possible suggestions</option>
-              </select>
-            </label>
-            <label className="analysis-field">
-              Focus on the first and last minutes
-              <input
-                type="number"
-                min={0}
-                max={15}
-                step={1}
-                value={value.edgeFocusMinutes}
-                disabled={save.isPending}
-                onChange={(event) =>
-                  editSettings({
-                    edgeFocusMinutes: Math.max(
-                      0,
-                      Math.min(15, Math.round(Number(event.target.value))),
-                    ),
-                  })
-                }
-              />
-              <small>
-                Prioritises sampling in both edge regions within the existing
-                audio budget. Set to 0 for normal whole-episode sampling.
-              </small>
-            </label>
             <p>
-              Phrases flag matching speech for review. These settings are
-              captured when a job is queued. Saving does not reprocess older
-              episodes; use the episode diagnostics to run analysis on demand.
+              Manage audio sensitivity, excerpt lengths, Jev thresholds and
+              shared guidance for every podcast in{" "}
+              <a
+                href="/analysis-ui/#tab=models"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Ad detection
+              </a>
+              . Series choices can also be managed there.
             </p>
             <button
               disabled={!draft || save.isPending}
@@ -471,10 +400,10 @@ function EpisodeAnalysisModal({
       <details className="analysis-diagnostics">
         <summary>Analysis diagnostics & testing tools</summary>
         <p>
-          Run an analysis using the saved podcast detection settings. This
-          downloads and transcribes audio on your Podwaffle server. When Jev is
-          selected there, transcript excerpts, episode context and detection
-          guidance are sent to DigitalOcean for classification.
+          Run an analysis using the shared Ad detection settings. This downloads
+          and transcribes audio on your Podwaffle server. When Jev is selected
+          there, transcript excerpts, episode context and detection guidance are
+          sent to DigitalOcean for classification.
         </p>
         <button
           disabled={

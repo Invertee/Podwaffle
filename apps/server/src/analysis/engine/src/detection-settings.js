@@ -21,11 +21,16 @@ const modes = ["episode", "low", "balanced", "high", "custom"];
 
 function defaultDetectionSettings(config = {}) {
   return {
-    audioSensitivity: "episode",
+    audioSensitivity: "balanced",
     silenceThresholdDb: -35,
     minimumSilenceSeconds: 0.6,
     sampleBudgetSeconds: config.podcastSampleSeconds ?? 900,
-    jevSensitivity: "episode",
+    minimumExcerptSeconds: 10,
+    maximumExcerptSeconds: 30,
+    edgeFocusMinutes: 5,
+    phrases: [],
+    llmPrompt: "",
+    jevSensitivity: "custom",
     advertConfidence: 0.55,
     promotionConfidence: 0.55,
     minimumLabelProbability: 0,
@@ -49,6 +54,9 @@ function validateDetectionSettings(input) {
     ["silenceThresholdDb", -80, -10],
     ["minimumSilenceSeconds", 0.1, 5],
     ["sampleBudgetSeconds", 30, 3600],
+    ["minimumExcerptSeconds", 5, 30],
+    ["maximumExcerptSeconds", 15, 60],
+    ["edgeFocusMinutes", 0, 15],
     ["advertConfidence", 0, 1],
     ["promotionConfidence", 0, 1],
     ["minimumLabelProbability", 0, 1],
@@ -65,10 +73,37 @@ function validateDetectionSettings(input) {
         `${name} must be ${name === "sampleBudgetSeconds" ? "an integer" : "a number"} from ${min} to ${max}`,
       );
   }
+  if (input.minimumExcerptSeconds > input.maximumExcerptSeconds)
+    fail("Minimum excerpt length must not exceed maximum excerpt length");
+  if (!Number.isSafeInteger(input.edgeFocusMinutes))
+    fail("edgeFocusMinutes must be an integer");
+  if (
+    !Array.isArray(input.phrases) ||
+    input.phrases.length > 50 ||
+    input.phrases.some(
+      (phrase) =>
+        typeof phrase !== "string" ||
+        !phrase.trim() ||
+        phrase.trim().length > 160,
+    )
+  )
+    fail("phrases must contain up to 50 phrases of 1..160 characters");
+  if (
+    typeof input.llmPrompt !== "string" ||
+    input.llmPrompt.trim().length > 2000
+  )
+    fail("llmPrompt must contain up to 2000 characters");
   if (typeof input.includePromotions !== "boolean")
     fail("includePromotions must be true or false");
   return Object.fromEntries(
-    Object.keys(defaults).map((key) => [key, input[key]]),
+    Object.keys(defaults).map((key) => [
+      key,
+      key === "phrases"
+        ? input.phrases.map((phrase) => phrase.trim())
+        : key === "llmPrompt"
+          ? input.llmPrompt.trim()
+          : input[key],
+    ]),
   );
 }
 
@@ -89,6 +124,8 @@ function resolveDetectionSettings(settings, episodeSensitivity = "balanced") {
       silenceThresholdDb: audio.silenceThresholdDb,
       minimumSilenceSeconds: audio.minimumSilenceSeconds,
       sampleBudgetSeconds: settings.sampleBudgetSeconds,
+      minimumExcerptSeconds: settings.minimumExcerptSeconds ?? 10,
+      maximumExcerptSeconds: settings.maximumExcerptSeconds ?? 30,
     },
     jev: {
       advertConfidence: jev?.confidence ?? settings.advertConfidence,
@@ -96,6 +133,19 @@ function resolveDetectionSettings(settings, episodeSensitivity = "balanced") {
       minimumLabelProbability: settings.minimumLabelProbability,
       includePromotions: settings.includePromotions,
     },
+  };
+}
+
+// New jobs use server-wide guidance. Older captured jobs retain their original
+// per-podcast guidance when these fields were not yet part of their snapshot.
+function detectionRequest(request, settings) {
+  return {
+    ...request,
+    ...Object.fromEntries(
+      ["phrases", "llmPrompt", "edgeFocusMinutes"]
+        .filter((name) => Object.hasOwn(settings, name))
+        .map((name) => [name, settings[name]]),
+    ),
   };
 }
 
@@ -146,4 +196,5 @@ module.exports = {
   validateDetectionSettings,
   resolveDetectionSettings,
   applyJevPolicy,
+  detectionRequest,
 };

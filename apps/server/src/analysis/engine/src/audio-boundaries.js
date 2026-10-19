@@ -107,18 +107,12 @@ function silenceBoundaries(log, durationMs) {
 
 function detectBoundaries(frames, pauses, audio) {
   const candidates = [...pauses];
-  const volumeThreshold =
-    audio.silenceThresholdDb <= -40
-      ? 10
-      : audio.silenceThresholdDb >= -30
-        ? 6
-        : 8;
-  const toneThreshold =
-    audio.silenceThresholdDb <= -40
-      ? 0.9
-      : audio.silenceThresholdDb >= -30
-        ? 0.45
-        : 0.65;
+  const sensitivity = Math.max(
+    0,
+    Math.min(1, (audio.silenceThresholdDb + 40) / 10),
+  );
+  const volumeThreshold = 10 - 4 * sensitivity;
+  const toneThreshold = 0.9 - 0.45 * sensitivity;
   // Compare roughly one second on each side. A click or a single stressed word
   // must not look like a persistent change of recording or background music.
   for (let index = 4; index < frames.length - 4; index++) {

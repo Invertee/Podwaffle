@@ -37,33 +37,53 @@ function deduplicateSpeech(units) {
   return result;
 }
 
-function buildExcerpts(units, boundaries, maximumMs = 25000) {
+function buildExcerpts(units, boundaries, options = {}) {
+  const minimumMs = (options.minimumExcerptSeconds ?? 10) * 1000;
+  const maximumMs = (options.maximumExcerptSeconds ?? 30) * 1000;
+  const pauseMs = (options.minimumSilenceSeconds ?? 0.6) * 1000;
   const ordered = deduplicateSpeech(units);
+  const cuts = [...boundaries].sort((a, b) => a.timeMs - b.timeMs);
+  const coverage = [];
+  for (const window of [...(options.sampleWindows ?? [])].sort(
+    (a, b) => a.startMs - b.startMs,
+  )) {
+    const previous = coverage.at(-1);
+    if (previous && window.startMs <= previous.endMs)
+      previous.endMs = Math.max(previous.endMs, window.endMs);
+    else coverage.push({ ...window });
+  }
+  const separated = (left, right) =>
+    right.startMs - left.endMs >= 8000 ||
+    (coverage.length > 0 &&
+      !coverage.some(
+        (window) =>
+          window.startMs <= left.endMs && window.endMs >= right.startMs,
+      ));
+  const tooShort = (excerpt) =>
+    excerpt.endMs - excerpt.startMs < minimumMs ||
+    excerpt.text.split(/\s+/).length < 8;
   const excerpts = [];
   let current = null;
   let boundaryIndex = 0;
   for (const unit of ordered) {
     while (
-      boundaryIndex < boundaries.length &&
-      boundaries[boundaryIndex].timeMs < (current?.endMs ?? unit.startMs) - 150
+      boundaryIndex < cuts.length &&
+      cuts[boundaryIndex].timeMs < (current?.endMs ?? unit.startMs) - 150
     )
       boundaryIndex++;
-    const boundary = boundaries[boundaryIndex];
+    const boundary = cuts[boundaryIndex];
     const naturalBreak =
       current &&
-      (unit.startMs - current.endMs >= 600 ||
+      (unit.startMs - current.endMs >= pauseMs ||
         (boundary &&
           boundary.timeMs <= unit.startMs + 150 &&
           boundary.timeMs >= current.endMs - 150 &&
           unit.startMs >= current.endMs));
-    const sentenceEnd =
-      current &&
-      current.endMs - current.startMs >= 8000 &&
-      /[.!?]["')\]]?$/.test(current.text);
+    const sentenceEnd = current && /[.!?]["')\]]?$/.test(current.text);
     if (
       current &&
-      (naturalBreak ||
-        sentenceEnd ||
+      (separated(current, unit) ||
+        (!tooShort(current) && (naturalBreak || sentenceEnd)) ||
         unit.endMs - current.startMs > maximumMs ||
         current.text.length + unit.text.length > 3800)
     ) {
@@ -77,16 +97,31 @@ function buildExcerpts(units, boundaries, maximumMs = 25000) {
     }
   }
   if (current) excerpts.push(current);
-  return excerpts.map((excerpt, index) => ({
+  // A sample ending just after a cut must not create a one-word classifier
+  // request. Fold short tails into neighbouring speech where the bounds allow.
+  const joined = [];
+  for (const excerpt of excerpts) {
+    const previous = joined.at(-1);
+    if (
+      previous &&
+      (tooShort(excerpt) || tooShort(previous)) &&
+      !separated(previous, excerpt) &&
+      excerpt.endMs - previous.startMs <= maximumMs &&
+      previous.text.length + excerpt.text.length + 1 <= 3800
+    ) {
+      previous.endMs = Math.max(previous.endMs, excerpt.endMs);
+      previous.text += ` ${excerpt.text}`;
+    } else joined.push({ ...excerpt });
+  }
+  return joined.map((excerpt, index) => ({
     ...excerpt,
     contextBefore:
-      index > 0 && excerpt.startMs - excerpts[index - 1].endMs <= 8000
-        ? excerpts[index - 1].text.slice(-500)
+      index > 0 && !separated(joined[index - 1], excerpt)
+        ? joined[index - 1].text.slice(-500)
         : "",
     contextAfter:
-      index + 1 < excerpts.length &&
-      excerpts[index + 1].startMs - excerpt.endMs <= 8000
-        ? excerpts[index + 1].text.slice(0, 500)
+      index + 1 < joined.length && !separated(excerpt, joined[index + 1])
+        ? joined[index + 1].text.slice(0, 500)
         : "",
   }));
 }

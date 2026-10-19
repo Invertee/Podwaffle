@@ -21,6 +21,25 @@ export function createAnalysisRouter(
   const router = express.Router(),
     db = database.db;
   router.get(
+    "/analysis/subscriptions",
+    requireScope("catalog:write"),
+    (req, res) => {
+      const profileId = req.auth!.profile.id;
+      const rows = db
+        .prepare(
+          `SELECT p.id,p.title FROM subscriptions s JOIN podcasts p ON p.id=s.podcast_id
+       WHERE s.profile_id=? ORDER BY p.title COLLATE NOCASE`,
+        )
+        .all(profileId) as unknown as Array<{ id: string; title: string }>;
+      res.json({
+        subscriptions: rows.map((row) => ({
+          ...row,
+          settings: analysisSettings(db, profileId, row.id),
+        })),
+      });
+    },
+  );
+  router.get(
     "/analysis/downloads",
     requireScope("catalog:write"),
     (req, res) => {

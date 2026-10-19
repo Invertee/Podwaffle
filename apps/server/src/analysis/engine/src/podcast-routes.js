@@ -8,6 +8,7 @@ const {
   validateDetectionSettings,
   resolveDetectionSettings,
   applyJevPolicy,
+  detectionRequest,
 } = require("./detection-settings");
 
 function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
@@ -40,6 +41,8 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
   );
   router.put("/settings", (req, res) => {
     const settings = validateDetectionSettings(req.body?.settings);
+    for (const name of ["audioSensitivity", "jevSensitivity"])
+      if (settings[name] === "episode") settings[name] = "balanced";
     store.saveDetectionSettings(settings);
     logger.info("Detection settings updated");
     res.json({ settings, defaults });
@@ -55,19 +58,22 @@ function podcastRouter(store, config, logger, { classify = classifyJev } = {}) {
     const body = req.body ?? {};
     const invalid = (message) =>
       Object.assign(new Error(message), { statusCode: 400 });
-    const request = validateRequest({
-      requestKey: "transcript-test",
-      episodeId: "transcript-test",
-      title: body.title ?? "Transcript test",
-      enclosureUrl: "https://example.invalid/transcript-test",
-      phrases: body.phrases,
-      llmPrompt: body.llmPrompt,
-      sensitivity: body.sensitivity,
-      podcastTitle: body.podcastTitle,
-      podcastDescription: body.podcastDescription,
-      episodeDescription: body.episodeDescription,
-    });
     const detectionSettings = currentSettings();
+    const request = detectionRequest(
+      validateRequest({
+        requestKey: "transcript-test",
+        episodeId: "transcript-test",
+        title: body.title ?? "Transcript test",
+        enclosureUrl: "https://example.invalid/transcript-test",
+        phrases: body.phrases,
+        llmPrompt: body.llmPrompt,
+        sensitivity: body.sensitivity,
+        podcastTitle: body.podcastTitle,
+        podcastDescription: body.podcastDescription,
+        episodeDescription: body.episodeDescription,
+      }),
+      detectionSettings,
+    );
     const effectiveSettings = resolveDetectionSettings(
       detectionSettings,
       request.sensitivity,

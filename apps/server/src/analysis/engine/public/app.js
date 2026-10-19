@@ -213,6 +213,58 @@
   void refreshStorage().catch((e) => {
     $("error").textContent = e.message;
   });
+  let subscriptionsLoaded = false;
+  async function loadSubscriptions() {
+    if (subscriptionsLoaded) return;
+    const container = $("analysisSubscriptions");
+    try {
+      const { subscriptions } = await api("subscriptions");
+      container.replaceChildren();
+      for (const subscription of subscriptions) {
+        const label = document.createElement("label");
+        label.className = "checkbox-label subscription-option";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = subscription.settings.enabled;
+        toggle.onchange = async () => {
+          toggle.disabled = true;
+          const enabled = toggle.checked;
+          $("subscriptionsMessage").textContent = "Saving…";
+          try {
+            const response = await fetch(
+              `/api/v1/subscriptions/${encodeURIComponent(subscription.id)}/analysis`,
+              {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  commandId: crypto.randomUUID(),
+                  settings: { ...subscription.settings, enabled },
+                }),
+              },
+            );
+            if (!response.ok)
+              throw new Error(`Could not save (HTTP ${response.status})`);
+            subscription.settings = (await response.json()).settings;
+            $("subscriptionsMessage").textContent =
+              `Saved ${subscription.title}.`;
+          } catch (error) {
+            toggle.checked = !enabled;
+            $("subscriptionsMessage").textContent = error.message;
+          } finally {
+            toggle.disabled = false;
+          }
+        };
+        label.append(toggle, document.createTextNode(subscription.title));
+        container.append(label);
+      }
+      subscriptionsLoaded = true;
+      $("subscriptionsMessage").textContent = subscriptions.length
+        ? "Choices are saved immediately for this profile."
+        : "Subscribe to podcasts in your library to enable automatic analysis.";
+    } catch (error) {
+      $("subscriptionsMessage").textContent = error.message;
+    }
+  }
   async function refresh() {
     if (busy) return;
     busy = true;
@@ -222,6 +274,7 @@
         api("models"),
         api("logs"),
         window.PodcastDashboard.loadSettings(api),
+        loadSubscriptions(),
       ]);
       $("error").textContent = "";
       $("health").textContent =
@@ -255,7 +308,10 @@
       busy = false;
     }
   }
-  $("refresh").onclick = refresh;
+  $("refresh").onclick = () => {
+    subscriptionsLoaded = false;
+    void refresh();
+  };
   $("jobSearch").oninput = renderJobs;
   $("prepare").onclick = action(async () => {
     await api("models/prepare", { method: "POST" });
@@ -270,10 +326,6 @@
     await refresh();
   });
   const field = (form, name) => form.elements.namedItem(name).value;
-  const settings = (form) => ({
-    llmPrompt: field(form, "llmPrompt"),
-    sensitivity: field(form, "sensitivity"),
-  });
   $("episodeForm").onsubmit = async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -289,12 +341,6 @@
           episodeId: key,
           title: field(form, "title"),
           enclosureUrl: field(form, "enclosureUrl"),
-          phrases: field(form, "phrases")
-            .split("\n")
-            .map((p) => p.trim())
-            .filter(Boolean),
-          edgeFocusMinutes: Number(field(form, "edgeFocusMinutes")),
-          ...settings(form),
         }),
       });
       selected = result.job.id;
@@ -356,7 +402,6 @@
             },
           ],
           episodeDescription: field(form, "episodeDescription"),
-          ...settings(form),
         }),
       });
       showTest(result);

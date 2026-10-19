@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.1.0 — Meaningful speech excerpts and shared detection controls
+
+- Group word timings into meaningful excerpts before Jev classification, preventing pauses and sound changes from producing hundreds of one-word requests. Defaults aim for 10–30 seconds and at least eight words before a natural cut, with short tails joined where possible and unsampled gaps preserved.
+- Add live-value sliders for audio sensitivity, minimum pause, excerpt lengths, advert/promotion confidence and label probability in Ad detection.
+- Centralise sponsor phrases, Jev guidance, sampling focus and series opt-in management in the Ad detection web interface. New jobs use shared tuning; captured jobs keep their settings. Retire per-podcast tuning controls in the web client.
+- Bump the server package to 0.2.0 and the Home Assistant app to 6.1.0.
+
 ## 6.0.0 — Integrated analysis and retained audio
 
 - Move advert analysis, model preparation, scheduling, diagnostics and sensitivity controls into the main server with an Ad detection sidebar tab; retire the separate add-on.

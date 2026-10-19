@@ -247,6 +247,23 @@ textarea {
   flex-wrap: wrap;
   gap: 10px;
 }
+.detection-form output {
+  float: right;
+  color: #eebb6b;
+  font-variant-numeric: tabular-nums;
+}
+.detection-form input[type="range"] {
+  padding: 0;
+  accent-color: #eebb6b;
+  cursor: pointer;
+}
+.subscription-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #2e4555;
+}
 .detection-form .full-width {
   grid-column: 1 / -1;
   margin: 0;

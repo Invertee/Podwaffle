@@ -14,6 +14,11 @@
     activeTab,
     loading = false,
     saving = false;
+  const audioPresets = {
+    low: [-40, 0.8],
+    balanced: [-35, 0.6],
+    high: [-30, 0.35],
+  };
   function setHash(key, value) {
     const params = new URLSearchParams(location.hash.slice(1));
     params.set(key, value);
@@ -52,37 +57,43 @@
 
   function updatePreview() {
     const audioMode = field("audioSensitivity").value;
-    const jevMode = field("jevSensitivity").value;
-    $("customAudio").hidden = audioMode !== "custom";
-    $("customJev").hidden = jevMode !== "custom";
-    for (const name of ["silenceThresholdDb", "minimumSilenceSeconds"])
-      field(name).disabled = saving || audioMode !== "custom";
-    for (const name of ["advertConfidence", "promotionConfidence"])
-      field(name).disabled = saving || jevMode !== "custom";
-    const audio =
-      audioMode === "episode"
-        ? "follows episode sensitivity"
-        : audioMode === "custom"
-          ? `${field("silenceThresholdDb").value} dB, pauses of ${field("minimumSilenceSeconds").value}s or longer`
-          : `${audioMode} pause detection`;
-    const confidence = { low: 75, balanced: 55, high: 35 }[jevMode];
-    const jev =
-      jevMode === "episode"
-        ? "follows episode sensitivity (75% / 55% / 35%)"
-        : jevMode === "custom"
-          ? `adverts ≥ ${field("advertConfidence").value}%, promotions ≥ ${field("promotionConfidence").value}% confidence`
-          : `≥ ${confidence}% confidence`;
+    for (const output of form.querySelectorAll("output[data-value]")) {
+      const name = output.dataset.value;
+      const unit = percentageFields.includes(name)
+        ? "%"
+        : name === "silenceThresholdDb"
+          ? " dB"
+          : "s";
+      output.value = `${field(name).value}${unit}`;
+      field(name).setAttribute("aria-valuetext", output.value);
+    }
+    const audio = `${field("silenceThresholdDb").value} dB, pauses ≥ ${field("minimumSilenceSeconds").value}s (${audioMode})`;
+    const jev = `adverts ≥ ${field("advertConfidence").value}%, promotions ≥ ${field("promotionConfidence").value}% confidence`;
     $("settingsPreview").textContent =
-      `Preview · Audio: ${audio}. Jev: ${jev}. Label probability ≥ ${field("minimumLabelProbability").value}%. Promotions ${field("includePromotions").checked ? "enabled" : "disabled"}.`;
+      `Preview · Audio: ${audio}. Excerpts: ${field("minimumExcerptSeconds").value}–${field("maximumExcerptSeconds").value}s. Jev: ${jev}. Label probability ≥ ${field("minimumLabelProbability").value}%. Promotions ${field("includePromotions").checked ? "enabled" : "disabled"}.`;
   }
   function fill(settings) {
     for (const [name, value] of Object.entries(settings)) {
       if (name === "includePromotions") field(name).checked = value;
+      else if (name === "phrases") field(name).value = value.join("\n");
       else
         field(name).value = percentageFields.includes(name)
           ? Math.round(value * 10000) / 100
           : value;
     }
+    const audio = audioPresets[settings.audioSensitivity];
+    if (audio) {
+      field("silenceThresholdDb").value = audio[0];
+      field("minimumSilenceSeconds").value = audio[1];
+    }
+    const confidence = { low: 75, balanced: 55, high: 35 }[
+      settings.jevSensitivity
+    ];
+    if (confidence !== undefined) {
+      field("advertConfidence").value = confidence;
+      field("promotionConfidence").value = confidence;
+    }
+    field("jevSensitivity").value = "custom";
     updatePreview();
   }
   function readSettings() {
@@ -91,14 +102,37 @@
         name,
         name === "includePromotions"
           ? field(name).checked
-          : ["audioSensitivity", "jevSensitivity"].includes(name)
-            ? field(name).value
-            : Number(field(name).value) /
-              (percentageFields.includes(name) ? 100 : 1),
+          : name === "phrases"
+            ? field(name)
+                .value.split("\n")
+                .map((phrase) => phrase.trim())
+                .filter(Boolean)
+            : ["audioSensitivity", "jevSensitivity", "llmPrompt"].includes(name)
+              ? field(name).value
+              : Number(field(name).value) /
+                (percentageFields.includes(name) ? 100 : 1),
       ]),
     );
   }
-  function changed() {
+  function changed(event) {
+    const name = event?.target?.name;
+    if (name === "audioSensitivity" && audioPresets[field(name).value]) {
+      const [threshold, pause] = audioPresets[field(name).value];
+      field("silenceThresholdDb").value = threshold;
+      field("minimumSilenceSeconds").value = pause;
+    }
+    if (["silenceThresholdDb", "minimumSilenceSeconds"].includes(name))
+      field("audioSensitivity").value = "custom";
+    if (
+      Number(field("minimumExcerptSeconds").value) >
+      Number(field("maximumExcerptSeconds").value)
+    ) {
+      const other =
+        name === "maximumExcerptSeconds"
+          ? "minimumExcerptSeconds"
+          : "maximumExcerptSeconds";
+      field(other).value = field(name).value;
+    }
     updatePreview();
     $("settingsMessage").textContent =
       "Unsaved changes. Save to apply them to new jobs and transcript tests.";

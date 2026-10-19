@@ -72,7 +72,7 @@ test("keeps punctuation without timestamps so sentence endings remain usable", (
   assert.deepEqual(parsed[0].words, [unit(0, 900, "Hello!")]);
 });
 
-test("makes variable excerpts at pauses and sound changes with separately bounded context", () => {
+test("groups short speech across pauses and sound changes without crossing long gaps", () => {
   const excerpts = buildExcerpts(
     [
       unit(0, 2000, "Welcome."),
@@ -86,15 +86,11 @@ test("makes variable excerpts at pauses and sound changes with separately bounde
   assert.deepEqual(
     excerpts.map((excerpt) => [excerpt.startMs, excerpt.endMs]),
     [
-      [0, 2000],
-      [3000, 7000],
-      [7100, 12000],
-      [13000, 17000],
+      [0, 17000],
       [60000, 65000],
     ],
   );
-  assert.equal(excerpts[1].contextBefore, "Welcome.");
-  assert.equal(excerpts[1].contextAfter, "Use this code.");
+  assert.equal(excerpts[0].contextAfter, "");
   assert.equal(excerpts.at(-1).contextBefore, "");
 });
 
@@ -118,11 +114,79 @@ test("aligns adjacent audio samples without creating coverage gaps or increasing
 
 test("a sound change can split continuous speech without requiring silence", () => {
   const excerpts = buildExcerpts(
-    [unit(0, 1000, "Welcome"), unit(1000, 2000, "sponsor")],
-    [{ timeMs: 1000, score: 0.9, types: ["volume"] }],
+    [
+      unit(0, 12000, "Welcome to our programme about the night sky."),
+      unit(12000, 24000, "Our sponsor has an offer for all our listeners."),
+    ],
+    [{ timeMs: 12000, score: 0.9, types: ["volume"] }],
   );
   assert.equal(excerpts.length, 2);
   assert.equal(excerpts[0].endMs, excerpts[1].startMs);
+});
+
+test("twenty minutes of word-level sound changes still produce meaningful bounded excerpts", () => {
+  const words = Array.from({ length: 4000 }, (_, index) =>
+    unit(index * 300, index * 300 + 250, `word${index}`),
+  );
+  const excerpts = buildExcerpts(
+    words,
+    words.map((word) => ({
+      timeMs: word.startMs,
+      score: 0.9,
+      types: ["tone"],
+    })),
+  );
+  assert.ok(excerpts.length <= 120, `${excerpts.length} excerpts`);
+  assert.ok(
+    excerpts.every(
+      (excerpt) =>
+        excerpt.endMs - excerpt.startMs >= 10000 &&
+        excerpt.endMs - excerpt.startMs <= 30000,
+    ),
+  );
+  assert.ok(excerpts.every((excerpt) => excerpt.text.split(/\s+/).length >= 8));
+  assert.equal(
+    excerpts.map((excerpt) => excerpt.text).join(" "),
+    words.map((word) => word.text).join(" "),
+  );
+});
+
+test("minimum excerpt length is configurable and small unsampled holes stay separate", () => {
+  const text = "Our guest discusses the science behind the night sky.";
+  const words = [unit(0, 10000, text), unit(12000, 22000, text)];
+  assert.equal(
+    buildExcerpts(words, [], { minimumExcerptSeconds: 20 }).length,
+    1,
+  );
+  const separated = buildExcerpts(words, [], {
+    minimumExcerptSeconds: 20,
+    sampleWindows: [
+      { startMs: 0, endMs: 11000 },
+      { startMs: 11500, endMs: 30000 },
+    ],
+  });
+  assert.equal(separated.length, 2);
+  assert.equal(separated[0].contextAfter, "");
+  assert.equal(separated[1].contextBefore, "");
+});
+
+test("folds a one-word tail back into its sample and keeps isolated short speech", () => {
+  const excerpts = buildExcerpts(
+    [
+      unit(0, 10000, "Our sponsor has a special offer for all listeners."),
+      unit(10000, 11000, "Today."),
+      unit(60000, 61000, "Goodbye."),
+    ],
+    [{ timeMs: 10000, score: 1, types: ["tone"] }],
+  );
+  assert.deepEqual(
+    excerpts.map((excerpt) => [excerpt.startMs, excerpt.endMs]),
+    [
+      [0, 11000],
+      [60000, 61000],
+    ],
+  );
+  assert.match(excerpts[0].text, /Today\.$/);
 });
 
 test("bounds extra sampling and does not keep retranscribing the same edges", () => {

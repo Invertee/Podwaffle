@@ -255,56 +255,100 @@
           <p class="eyebrow">DETECTION CONTROLS</p>
           <h2 id="detectionTitle">Audio & Jev sensitivity</h2>
           <p class="muted">
-            Saved settings apply to new episodes from Podwaffle and dashboard
-            tests. Queued and completed jobs keep their captured settings. No
-            restart is needed.
+            One set of controls for every podcast and dashboard test. Queued and
+            completed jobs keep their captured settings. Save changes here, then
+            run a fresh analysis to compare results. No restart is needed.
           </p>
           <form id="detectionForm" class="detection-form">
             <fieldset>
               <legend>Audio analysis</legend>
               <p class="muted">
-                Control the pauses used to place audio samples. This does not
-                change Whisper’s speech recognition model.
+                Adjust sound-change and pause detection. Speech is grouped into
+                meaningful excerpts before classification, even when the audio
+                contains many small changes.
               </p>
               <label
-                >Audio sensitivity<select name="audioSensitivity">
-                  <option value="episode">
-                    Use each episode’s sensitivity
-                  </option>
+                >Audio preset<select name="audioSensitivity">
                   <option value="low">Low — longer, quieter pauses</option>
                   <option value="balanced">Balanced</option>
                   <option value="high">High — shorter, louder pauses</option>
                   <option value="custom">Custom pause detection</option>
                 </select></label
               >
-              <div id="customAudio" class="custom-controls" hidden>
-                <label
-                  >Silence threshold (dB)<input
+              <div id="customAudio" class="custom-controls">
+                <label for="audioThreshold"
+                  >Audio sensitivity
+                  <output
+                    for="audioThreshold"
+                    data-value="silenceThresholdDb"
+                  ></output
+                  ><input
+                    id="audioThreshold"
                     name="silenceThresholdDb"
-                    type="number"
+                    type="range"
                     min="-80"
                     max="-10"
                     step="0.1"
                     required
                 /></label>
                 <p class="field-help">
-                  Audio below this level counts as quiet. A higher value
-                  includes louder pauses. Custom mode only.
+                  Left: fewer, stronger sound changes. Right: more boundaries
+                  and louder pauses. Moving a slider selects Custom.
                 </p>
-                <label
-                  >Minimum pause (seconds)<input
+                <label for="pauseLength"
+                  >Minimum pause
+                  <output
+                    for="pauseLength"
+                    data-value="minimumSilenceSeconds"
+                  ></output
+                  ><input
+                    id="pauseLength"
                     name="minimumSilenceSeconds"
-                    type="number"
+                    type="range"
                     min="0.1"
                     max="5"
                     step="0.01"
                     required
                 /></label>
                 <p class="field-help">
-                  A shorter pause creates more potential boundaries. Custom mode
-                  only.
+                  Longer pauses produce fewer potential boundaries.
                 </p>
               </div>
+              <label for="excerptMinimum"
+                >Minimum excerpt
+                <output
+                  for="excerptMinimum"
+                  data-value="minimumExcerptSeconds"
+                ></output
+                ><input
+                  id="excerptMinimum"
+                  name="minimumExcerptSeconds"
+                  type="range"
+                  min="5"
+                  max="30"
+                  step="1"
+                  required
+              /></label>
+              <label for="excerptMaximum"
+                >Maximum excerpt
+                <output
+                  for="excerptMaximum"
+                  data-value="maximumExcerptSeconds"
+                ></output
+                ><input
+                  id="excerptMaximum"
+                  name="maximumExcerptSeconds"
+                  type="range"
+                  min="15"
+                  max="60"
+                  step="1"
+                  required
+              /></label>
+              <p class="field-help">
+                Normally 10–30 seconds with at least eight words before a
+                natural cut. Isolated speech and sample edges can be shorter.
+                Unsampled gaps are never joined.
+              </p>
               <label
                 >Initial audio sample budget (seconds)<input
                   name="sampleBudgetSeconds"
@@ -316,8 +360,20 @@
               /></label>
               <p class="field-help">
                 30–3,600 seconds per episode, plus up to 240 seconds around
-                phrase hits. More audio can increase processing time and Jev
-                usage.
+                detected adverts. More audio can increase processing time and
+                Jev usage.
+              </p>
+              <label
+                >First / last minutes to prioritise<input
+                  name="edgeFocusMinutes"
+                  type="number"
+                  min="0"
+                  max="15"
+                  step="1"
+                  required
+              /></label>
+              <p class="field-help">
+                Set to 0 to spread sampling over the episode.
               </p>
             </fieldset>
             <fieldset>
@@ -327,44 +383,53 @@
                 original decisions and confidence remain visible in the
                 explorer.
               </p>
-              <label
-                >Jev sensitivity<select name="jevSensitivity">
-                  <option value="episode">
-                    Use each episode’s sensitivity
-                  </option>
-                  <option value="low">Low — 75% confidence</option>
-                  <option value="balanced">Balanced — 55% confidence</option>
-                  <option value="high">High — 35% confidence</option>
-                  <option value="custom">Custom confidence thresholds</option>
-                </select></label
-              >
-              <div id="customJev" class="custom-controls" hidden>
-                <label
-                  >Minimum advert confidence (%)<input
+              <input name="jevSensitivity" type="hidden" value="custom" />
+              <div id="customJev" class="custom-controls">
+                <label for="advertThreshold"
+                  >Minimum advert confidence
+                  <output
+                    for="advertThreshold"
+                    data-value="advertConfidence"
+                  ></output
+                  ><input
+                    id="advertThreshold"
                     name="advertConfidence"
-                    type="number"
+                    type="range"
                     min="0"
                     max="100"
                     step="1"
                     required
                 /></label>
-                <label
-                  >Minimum promotion confidence (%)<input
+                <label for="promotionThreshold"
+                  >Minimum promotion confidence
+                  <output
+                    for="promotionThreshold"
+                    data-value="promotionConfidence"
+                  ></output
+                  ><input
+                    id="promotionThreshold"
                     name="promotionConfidence"
-                    type="number"
+                    type="range"
                     min="0"
                     max="100"
                     step="1"
                     required
                 /></label>
                 <p class="field-help">
-                  Custom mode only. Higher thresholds save fewer candidates.
+                  Lower thresholds accept more of Jev’s advert decisions. They
+                  cannot turn a “Not an ad” decision into an advert.
                 </p>
               </div>
-              <label
-                >Minimum selected-label probability (%)<input
+              <label for="labelThreshold"
+                >Minimum selected-label probability
+                <output
+                  for="labelThreshold"
+                  data-value="minimumLabelProbability"
+                ></output
+                ><input
+                  id="labelThreshold"
                   name="minimumLabelProbability"
-                  type="number"
+                  type="range"
                   min="0"
                   max="100"
                   step="1"
@@ -384,6 +449,28 @@
                 existing markers and source.
               </p>
             </fieldset>
+            <fieldset class="full-width">
+              <legend>Shared detection guidance</legend>
+              <label
+                >Sponsor names and phrases (one per line, up to 50)<textarea
+                  name="phrases"
+                  rows="3"
+                  placeholder="our sponsor&#10;promo code"
+                ></textarea>
+              </label>
+              <label
+                >Jev detection guidance (optional)<textarea
+                  name="llmPrompt"
+                  rows="3"
+                  maxlength="2000"
+                  placeholder="Advert patterns to look for across podcasts"
+                ></textarea>
+              </label>
+              <p class="field-help">
+                Used for every new episode. These replace the older per-podcast
+                tuning controls.
+              </p>
+            </fieldset>
             <p id="settingsPreview" class="muted full-width"></p>
             <div class="settings-actions full-width">
               <button id="saveDetection" type="submit" disabled>
@@ -396,6 +483,15 @@
             </div>
           </form>
           <p id="settingsMessage" role="status">Loading saved settings…</p>
+        </section>
+        <section>
+          <h2>Automatic analysis & downloads</h2>
+          <p class="muted">
+            Choose series for this profile here. All use the shared detection
+            controls above. This applies to newly discovered episodes.
+          </p>
+          <div id="analysisSubscriptions"></div>
+          <p id="subscriptionsMessage" role="status">Loading series…</p>
         </section>
         <section>
           <h2>Model setup</h2>
@@ -434,8 +530,7 @@
           <p class="muted">
             Run boundary detection, Whisper transcription and the configured
             classifier. Jobs use the same queue as Podwaffle and the saved
-            detection settings. The episode sensitivity below is used where a
-            saved setting follows the episode.
+            detection settings from Models & detection.
           </p>
           <form id="episodeForm" class="test-form">
             <label
@@ -451,38 +546,6 @@
                 type="url"
                 required
                 placeholder="https://…/episode.mp3"
-            /></label>
-            <label
-              >Sponsor phrases (one per line)<textarea
-                name="phrases"
-                rows="3"
-                placeholder="our sponsor&#10;promo code"
-              ></textarea>
-            </label>
-            <label
-              >Jev detection guidance (optional)<textarea
-                name="llmPrompt"
-                rows="3"
-                maxlength="2000"
-                placeholder="Show-specific advert patterns"
-              ></textarea>
-            </label>
-            <label
-              >Sensitivity<select name="sensitivity">
-                <option value="low">Low</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="high">High</option>
-              </select></label
-            >
-            <label
-              >First / last minutes to prioritise<input
-                name="edgeFocusMinutes"
-                type="number"
-                min="0"
-                max="15"
-                step="1"
-                value="5"
-                required
             /></label>
             <button type="submit" id="submitEpisode">Queue episode test</button>
           </form>
@@ -538,21 +601,6 @@
                 placeholder="What the episode is about"
               ></textarea>
             </label>
-            <label
-              >Jev detection guidance (optional)<textarea
-                name="llmPrompt"
-                rows="2"
-                maxlength="2000"
-                placeholder="Show-specific advert patterns"
-              ></textarea>
-            </label>
-            <label
-              >Sensitivity<select name="sensitivity">
-                <option value="low">Low</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="high">High</option>
-              </select></label
-            >
             <button type="submit" id="submitTranscript" disabled>
               Classify with Jev
             </button>

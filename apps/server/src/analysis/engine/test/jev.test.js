@@ -478,7 +478,7 @@ test("transcript tests work before Whisper is ready, do not save transcripts or 
   const result = await response.json();
   assert.equal(result.assessments.length, 2);
   assert.equal(result.provider, "jev");
-  assert.equal(result.minimumAdvertConfidence, 0.75);
+  assert.equal(result.minimumAdvertConfidence, 0.55);
   assert.equal(result.usage.inputTokens, 246);
   assert.deepEqual(store.list(), []);
 });

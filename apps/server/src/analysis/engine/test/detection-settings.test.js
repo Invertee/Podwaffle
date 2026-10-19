@@ -9,21 +9,30 @@ const {
   validateDetectionSettings,
   resolveDetectionSettings,
   applyJevPolicy,
+  detectionRequest,
 } = require("../src/detection-settings");
 const { createPodcastStore } = require("../src/podcast-store");
 const { createApp } = require("../src/server");
 const { loadConfig } = require("../src/config");
 const { classifyJev } = require("../src/classifier");
 
-test("independent audio and Jev presets preserve episode sensitivity by default", () => {
+test("global audio and Jev controls are independent of episode sensitivity", () => {
   const defaults = defaultDetectionSettings({ podcastSampleSeconds: 300 });
   const original = resolveDetectionSettings(defaults, "low");
   assert.deepEqual(original.audio, {
-    silenceThresholdDb: -40,
-    minimumSilenceSeconds: 0.8,
+    silenceThresholdDb: -35,
+    minimumSilenceSeconds: 0.6,
     sampleBudgetSeconds: 300,
+    minimumExcerptSeconds: 10,
+    maximumExcerptSeconds: 30,
   });
-  assert.equal(original.jev.advertConfidence, 0.75);
+  assert.equal(original.jev.advertConfidence, 0.55);
+  const historical = resolveDetectionSettings(
+    { ...defaults, audioSensitivity: "episode", jevSensitivity: "episode" },
+    "low",
+  );
+  assert.equal(historical.audio.silenceThresholdDb, -40);
+  assert.equal(historical.jev.advertConfidence, 0.75);
   const split = resolveDetectionSettings(
     {
       ...defaults,
@@ -59,6 +68,14 @@ test("settings reject missing, unknown, non-numeric and out-of-range fields", ()
     { ...defaults, sampleBudgetSeconds: 31.5 },
     { ...defaults, silenceThresholdDb: -81 },
     { ...defaults, minimumSilenceSeconds: 0 },
+    { ...defaults, minimumExcerptSeconds: 4 },
+    { ...defaults, maximumExcerptSeconds: 61 },
+    { ...defaults, minimumExcerptSeconds: 30, maximumExcerptSeconds: 15 },
+    { ...defaults, edgeFocusMinutes: 2.5 },
+    { ...defaults, phrases: [" "] },
+    { ...defaults, phrases: ["x".repeat(161)] },
+    { ...defaults, phrases: Array(51).fill("sponsor") },
+    { ...defaults, llmPrompt: "x".repeat(2001) },
     { ...defaults, advertConfidence: 1.01 },
     { ...defaults, promotionConfidence: "0.6" },
     { ...defaults, minimumLabelProbability: NaN },
@@ -68,6 +85,55 @@ test("settings reject missing, unknown, non-numeric and out-of-range fields", ()
     assert.throws(() => validateDetectionSettings(input), { statusCode: 400 });
   }
   assert.deepEqual(validateDetectionSettings(defaults), defaults);
+});
+
+test("shared guidance overrides podcast tuning while historical snapshots retain it", () => {
+  const request = {
+    phrases: ["old sponsor"],
+    llmPrompt: "Old guidance",
+    edgeFocusMinutes: 12,
+    title: "Episode",
+  };
+  const shared = {
+    ...defaultDetectionSettings(),
+    phrases: ["shared sponsor"],
+    llmPrompt: "Shared guidance",
+    edgeFocusMinutes: 2,
+  };
+  assert.deepEqual(detectionRequest(request, shared), {
+    ...request,
+    phrases: shared.phrases,
+    llmPrompt: shared.llmPrompt,
+    edgeFocusMinutes: 2,
+  });
+  assert.deepEqual(
+    detectionRequest(request, { sampleBudgetSeconds: 900 }),
+    request,
+  );
+});
+
+test("legacy global settings gain excerpt controls and stop inheriting episode sensitivity", () => {
+  const store = createPodcastStore(":memory:");
+  try {
+    const defaults = defaultDetectionSettings();
+    store.saveDetectionSettings({
+      audioSensitivity: "episode",
+      jevSensitivity: "episode",
+      sampleBudgetSeconds: 120,
+      advertConfidence: 0.83,
+    });
+    const settings = store.detectionSettings(defaults);
+    assert.equal(settings.audioSensitivity, "balanced");
+    assert.equal(settings.jevSensitivity, "balanced");
+    assert.equal(settings.sampleBudgetSeconds, 120);
+    assert.equal(settings.advertConfidence, 0.83);
+    assert.equal(settings.minimumExcerptSeconds, 10);
+    assert.equal(settings.maximumExcerptSeconds, 30);
+    assert.deepEqual(settings.phrases, []);
+    assert.deepEqual(validateDetectionSettings(settings), settings);
+  } finally {
+    store.close();
+  }
 });
 
 test("Jev filtering applies separate inclusive confidence and probability thresholds without changing decisions", () => {
@@ -181,6 +247,7 @@ test("saved settings survive reopening and request-key deduplication retains the
 
 test("settings HTTP API persists safe values and applies them to jobs and transcript tests", async (t) => {
   const store = createPodcastStore(":memory:");
+  const classifiedRequests = [];
   const config = loadConfig(
     {},
     { classifier: "jev", jev_api_key: "private-config-key" },
@@ -191,8 +258,9 @@ test("settings HTTP API persists safe values and applies them to jobs and transc
     { info() {}, error() {}, tail: () => [] },
     { status: { ready: false } },
     {
-      classify: (...args) =>
-        classifyJev(...args, async () =>
+      classify: (...args) => {
+        classifiedRequests.push(args[1]);
+        return classifyJev(...args, async () =>
           Response.json({
             model: "test-jev",
             answers: {
@@ -209,7 +277,8 @@ test("settings HTTP API persists safe values and applies them to jobs and transc
               },
             },
           }),
-        ),
+        );
+      },
     },
   ).listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -226,7 +295,7 @@ test("settings HTTP API persists safe values and applies them to jobs and transc
       body: JSON.stringify(body),
     });
   const initial = await (await fetch(`${url}/settings`)).json();
-  assert.equal(initial.settings.audioSensitivity, "episode");
+  assert.equal(initial.settings.audioSensitivity, "balanced");
   const settings = {
     ...initial.settings,
     audioSensitivity: "custom",
@@ -237,6 +306,9 @@ test("settings HTTP API persists safe values and applies them to jobs and transc
     advertConfidence: 0.9,
     promotionConfidence: 0.7,
     minimumLabelProbability: 0.75,
+    phrases: ["shared sponsor"],
+    llmPrompt: "Shared guidance for every podcast.",
+    edgeFocusMinutes: 2,
   };
   assert.equal((await send("settings", { settings }, "PUT")).status, 200);
   const saved = await (await fetch(`${url}/settings`)).json();
@@ -281,6 +353,12 @@ test("settings HTTP API persists safe values and applies them to jobs and transc
   assert.equal(original.segments.length, 1);
   await send("settings", { settings }, "PUT");
   const filtered = await (await send("classify", transcript)).json();
+  assert.deepEqual(classifiedRequests.at(-1).phrases, settings.phrases);
+  assert.equal(classifiedRequests.at(-1).llmPrompt, settings.llmPrompt);
+  assert.equal(
+    classifiedRequests.at(-1).edgeFocusMinutes,
+    settings.edgeFocusMinutes,
+  );
   assert.equal(filtered.minimumAdvertConfidence, 0.9);
   assert.equal(filtered.minimumPromotionConfidence, 0.7);
   assert.equal(filtered.segments.length, 0);
