@@ -1,8 +1,5 @@
 name: Podwaffle
-version: "6.1.0"
-=======
-version: "6.0.2"
->>>>>>> 8b07d0aca04d607c8ee45f31329213242efb8c05
+version: "6.0.3"
 slug: podwaffle
 description: Self-hosted, synchronised podcast listening
 url: https://github.com/Invertee/Podwaffle
