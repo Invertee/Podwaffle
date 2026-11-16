@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.5.0 — Explain podcast feed refresh failures
+
+- Log feed checks, HTTP status, redirect hosts, nested DNS/connection errors, timeouts and Omny fallback attempts at the normal log level. Keep credentials and private feed URL paths and queries out of diagnostics.
+- Report parsed episode counts and newest publication dates, newly saved episodes, unchanged publisher responses, and scheduled retry times after failures. Log the scheduler state at startup so retained backoff delays are visible.
+- Bump the server package to 0.8.0 and the Home Assistant app to 6.5.0.
+
 ## 6.4.0 — Recover Omny podcast feed updates
 
 - Retry failed www.omnycontent.com RSS requests using omnycontent.com, preserving the feed path, query and existing subscription identity. Applies to automatic refreshes, manual refreshes and new subscriptions.

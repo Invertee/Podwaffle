@@ -13,6 +13,14 @@ join_code: "a-long-private-code"
 
 All durable state is stored below `/data`. Removing a configured profile disables it without deleting its state; adding the same name later enables it again.
 
+## Podcast feed refresh diagnostics
+
+At the default `info` log level, the app log shows the podcast name and requested host for feed checks. Failed requests include HTTP status or underlying DNS/connection error codes; Omny fallback attempts and redirect response hosts are also reported. Feed credentials, private paths and URL queries are omitted.
+
+Successful checks show the number of episodes in the feed and newest publication date. A separate saved-refresh entry reports `newEpisodes`; HTTP 304 means the publisher reports no changes. This distinguishes a reachable but stale feed from a download or saving problem.
+
+After repeated failures, automatic checks back off up to 24 hours. The failure log shows `nextRetryAt`, and the startup log shows the next scheduled check. After correcting Pi-hole, DNS or connectivity, use the podcast’s manual refresh to retry immediately rather than waiting for that deadline.
+
 ## Optional Firebase wake-up
 
 Firebase Cloud Messaging can nudge a sleeping Android client when profile state

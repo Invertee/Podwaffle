@@ -1,4 +1,5 @@
 import express from "express";
+import { logFeedRefresh } from "../podcasts/feed-diagnostics.js";
 import {
   commandSchema,
   episodeProgressSchema,
@@ -110,7 +111,16 @@ export function createCatalogRouter(
   router.post("/subscriptions", async (request, response, next) => {
     try {
       const command = subscribeSchema.parse(request.body);
-      const downloaded = await downloadFeed(command.feedUrl);
+      const downloaded = await downloadFeed(
+        command.feedUrl,
+        {},
+        {
+          source: "subscribe",
+          ...(command.title === undefined
+            ? {}
+            : { podcastTitle: command.title }),
+        },
+      );
       const profileId = request.auth!.profile.id;
       const applied = sync.command(
         profileId,
@@ -268,7 +278,11 @@ export function createCatalogRouter(
         const headers: Record<string, string> = {};
         if (row.etag) headers["if-none-match"] = row.etag;
         if (row.last_modified) headers["if-modified-since"] = row.last_modified;
-        const downloaded = await downloadFeed(podcast.feedUrl, headers);
+        const downloaded = await downloadFeed(podcast.feedUrl, headers, {
+          source: "manual",
+          podcastId,
+          podcastTitle: podcast.title,
+        });
         const profileId = request.auth!.profile.id;
         const applied = sync.command(
           profileId,
@@ -288,6 +302,8 @@ export function createCatalogRouter(
             };
           },
         );
+        if (!applied.replayed)
+          logFeedRefresh("manual", applied.result, downloaded.status);
         response.json({
           ...applied.result,
           revision: resultRevision(
