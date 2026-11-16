@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.6.0 — Retry podcast feeds from the web interface
+
+- Add a Refresh feed button to each podcast in the web interface. It asks the server to check the publisher immediately, bypassing scheduled retry delays, and reports added episodes or a refresh failure. Reload the saved episode list after the check.
+- Bump the web package to 0.2.0 and the Home Assistant app to 6.6.0.
+
 ## 6.5.0 — Explain podcast feed refresh failures
 
 - Log feed checks, HTTP status, redirect hosts, nested DNS/connection errors, timeouts and Omny fallback attempts at the normal log level. Keep credentials and private feed URL paths and queries out of diagnostics.

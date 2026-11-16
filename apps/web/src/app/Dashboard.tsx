@@ -14,6 +14,7 @@ import { useSyncStore } from "../stores/sync";
 import { player } from "../player/local-player";
 import { PlayerBar } from "../player/PlayerBar";
 import { Icon, type IconName } from "./Icon";
+import { PodcastFeedRefresh } from "./PodcastFeedRefresh";
 import {
   EpisodeAnalysisButton,
   PodcastDownloadOptionsButton,
@@ -498,6 +499,7 @@ export function Dashboard({ session }: { session: Session }) {
                 {selected.description ? (
                   <p>{stripHtml(selected.description)}</p>
                 ) : null}
+                <PodcastFeedRefresh key={selected.id} podcastId={selected.id} />
               </div>
             </div>
             <EpisodeList

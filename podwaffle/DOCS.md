@@ -19,7 +19,7 @@ At the default `info` log level, the app log shows the podcast name and requeste
 
 Successful checks show the number of episodes in the feed and newest publication date. A separate saved-refresh entry reports `newEpisodes`; HTTP 304 means the publisher reports no changes. This distinguishes a reachable but stale feed from a download or saving problem.
 
-After repeated failures, automatic checks back off up to 24 hours. The failure log shows `nextRetryAt`, and the startup log shows the next scheduled check. After correcting Pi-hole, DNS or connectivity, use the podcast’s manual refresh to retry immediately rather than waiting for that deadline.
+After repeated failures, automatic checks back off up to 24 hours. The failure log shows `nextRetryAt`, and the startup log shows the next scheduled check. After correcting Pi-hole, DNS or connectivity, open the podcast in the web interface and choose **Refresh feed** to retry immediately rather than waiting for that deadline. Android pull-to-refresh reloads data already stored on the server; it does not trigger this publisher check.
 
 ## Optional Firebase wake-up
 

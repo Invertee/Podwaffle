@@ -146,6 +146,14 @@ export const api = {
         }),
       },
     ),
+  refreshPodcast: (podcastId: string) =>
+    request<{ discoveredEpisodeIds: string[] }>(
+      `/podcasts/${podcastId}/refresh`,
+      {
+        method: "POST",
+        body: JSON.stringify({ commandId: crypto.randomUUID() }),
+      },
+    ),
   episodes: (podcastId: string) =>
     request<{ episodes: Episode[] }>(`/podcasts/${podcastId}/episodes`).then(
       (result) => result.episodes,
