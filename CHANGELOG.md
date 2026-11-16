@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.4.0 — Recover Omny podcast feed updates
+
+- Retry failed www.omnycontent.com RSS requests using omnycontent.com, preserving the feed path, query and existing subscription identity. Applies to automatic refreshes, manual refreshes and new subscriptions.
+- Bound each feed request to 30 seconds so a stalled connection can recover or report a failure.
+- Bump the server package to 0.7.0 and the Home Assistant app to 6.4.0.
+
 ## 6.1.0 — Meaningful speech excerpts and shared detection controls
 
 - Group word timings into meaningful excerpts before Jev classification, preventing pauses and sound changes from producing hundreds of one-word requests. Defaults aim for 10–30 seconds and at least eight words before a natural cut, with short tails joined where possible and unsampled gaps preserved.

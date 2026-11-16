@@ -7,9 +7,11 @@ import type {
   QueueItem,
   Subscription,
 } from "@podwaffle/contracts";
-import { parseRss, type ParsedFeed } from "./rss.js";
+import type { downloadFeed } from "./feed-download.js";
 import { analysedMedia } from "../analysis/media.js";
 import { enqueueDiscoveredAnalysis } from "../analysis/service.js";
+
+export { downloadFeed } from "./feed-download.js";
 
 interface PodcastRow {
   id: string;
@@ -154,39 +156,6 @@ export async function searchApple(
       },
     ];
   });
-}
-
-export async function downloadFeed(
-  feedUrl: string,
-  headers: Record<string, string> = {},
-): Promise<{
-  status: "updated" | "not-modified";
-  feed?: ParsedFeed;
-  etag: string | null;
-  lastModified: string | null;
-}> {
-  const response = await fetch(feedUrl, {
-    headers: {
-      accept: "application/rss+xml, application/xml, text/xml",
-      ...headers,
-    },
-    redirect: "follow",
-  });
-  if (response.status === 304)
-    return {
-      status: "not-modified",
-      etag: response.headers.get("etag"),
-      lastModified: response.headers.get("last-modified"),
-    };
-  if (!response.ok) throw new Error(`Feed refresh failed (${response.status})`);
-  const xml = await response.text();
-  if (xml.length > 20 * 1024 * 1024) throw new Error("RSS feed is too large");
-  return {
-    status: "updated",
-    feed: parseRss(xml),
-    etag: response.headers.get("etag"),
-    lastModified: response.headers.get("last-modified"),
-  };
 }
 
 export function upsertPodcastAndEpisodes(
